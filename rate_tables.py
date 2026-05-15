@@ -1,26 +1,10 @@
-"""
-HAL Rate Tables — 2025 Carrier Premiums
-========================================
-Source data:
-  Morgan Price  : EU Rates 2025.xlsx
-  April         : LT 2025 ROW RATES.xlsx (All Ind sheet, EUR)
-  IMG Europe    : GPMI Master Rates 01-Apr-25, Zone A (Greece)
+# ── HAL Carrier Rate Tables — 2025 actual rates ──────────────────────────────
+# Sources: Morgan Price EU 2025, April LT 2025, IMG Europe GPMI Apr-2025
+# All EUR, Area 1 (Europe excl USA/Singapore/HK) for Greece-based clients
+# Morgan Price: no excess deducted (rates include standard deductible)
+# April: no voluntary excess
+# IMG Zone A (Greece): EUR 150 base excess
 
-To update rates annually:
-  1. Drop new carrier xlsx into /rates/
-  2. Run scripts/extract_rates.py
-  3. Paste updated dicts below
-  4. Push to GitHub — Streamlit Cloud picks up automatically
-
-Areas:
-  area1 = Europe / Worldwide excl. USA
-  area2 = Worldwide incl. USA
-
-All premiums in EUR.
-"""
-
-# ── Morgan Price 2025 ────────────────────────────────────────────────────
-# Plans: standard | standard_plus | comprehensive | premium | elite
 MORGAN_PRICE_2025 = {
   "area1": {
     "Child": {
@@ -196,8 +180,6 @@ MORGAN_PRICE_2025 = {
   }
 }
 
-# ── April International 2025 ─────────────────────────────────────────────
-# Plans: international | intl_plus | intl_plus_nxs | executive | exec_nxs | exec_plus | exec_plus_nxs
 APRIL_2025 = {
   "area1": {
     "Child": {
@@ -457,9 +439,6 @@ APRIL_2025 = {
   }
 }
 
-# ── IMG Europe 2025, Zone A (Greece) ────────────────────────────────────
-# Plans: platinum | gold | silver | bronze_plus | bronze
-# Keys are individual ages (str) due to JSON serialisation
 IMG_EUROPE_2025 = {
   "0": {
     "platinum": 1902,
@@ -1030,71 +1009,129 @@ IMG_EUROPE_2025 = {
   }
 }
 
-# ── Curated plan list for HAL quote comparisons ──────────────────────────
-# (carrier, plan_key, display_name, coverage_type, notes)
-RATE_PLANS = [('morgan_price', 'standard', 'Morgan Price Standard', 'international', 'standard deductible, outpatient 80%'), ('morgan_price', 'standard_plus', 'Morgan Price Standard Plus', 'international', 'outpatient 80%, enhanced limits'), ('morgan_price', 'comprehensive', 'Morgan Price Comprehensive', 'international', 'full outpatient, dental, optical'), ('april', 'international', 'April International', 'international', 'no voluntary excess, WW excl USA'), ('april', 'intl_plus', "April Int'l Plus", 'international', 'enhanced outpatient, no excess'), ('april', 'executive', 'April Executive', 'international', 'full cover, maternity option'), ('img', 'silver', 'IMG Silver', 'international', 'EUR 150 excess, Europe Area 1'), ('img', 'gold', 'IMG Gold', 'international', 'EUR 150 excess, comprehensive'), ('img', 'platinum', 'IMG Platinum', 'international', 'EUR 150 excess, premium cover')]
-
-
-# ── Age-band helpers ─────────────────────────────────────────────────────
+# ── Age band lookup helpers ───────────────────────────────────────────────────
 
 def _mp_band(age: int) -> str:
-    """Morgan Price uses 5-year age bands."""
-    if age < 20:  return "Child"
-    if age < 25:  return "20-24"
-    if age < 30:  return "25-29"
-    if age < 35:  return "30-34"
-    if age < 40:  return "35-39"
-    if age < 45:  return "40-44"
-    if age < 50:  return "45-49"
-    if age < 55:  return "50-54"
-    if age < 60:  return "55-59"
-    if age < 65:  return "60-64"
-    if age < 70:  return "65-69"
+    if age < 20:   return "Child"
+    if age < 25:   return "20-24"
+    if age < 30:   return "25-29"
+    if age < 35:   return "30-34"
+    if age < 40:   return "35-39"
+    if age < 45:   return "40-44"
+    if age < 50:   return "45-49"
+    if age < 55:   return "50-54"
+    if age < 60:   return "55-59"
+    if age < 65:   return "60-64"
+    if age < 70:   return "65-69"
     return "70-74"
 
-
 def _apr_band(age: int) -> str:
-    """April uses slightly different age bands."""
-    if age < 18:  return "Child"
-    if age < 26:  return "18-25"
-    if age < 30:  return "26-29"
-    if age < 35:  return "30-34"
-    if age < 40:  return "35-39"
-    if age < 45:  return "40-44"
-    if age < 50:  return "45-49"
-    if age < 55:  return "50-54"
-    if age < 60:  return "55-59"
-    if age < 65:  return "60-64"
-    if age < 70:  return "65-69"
-    if age < 75:  return "70-74"
-    if age < 80:  return "75-79"
+    if age < 18:   return "Child"
+    if age < 26:   return "18-25"
+    if age < 30:   return "26-29"
+    if age < 35:   return "30-34"
+    if age < 40:   return "35-39"
+    if age < 45:   return "40-44"
+    if age < 50:   return "45-49"
+    if age < 55:   return "50-54"
+    if age < 60:   return "55-59"
+    if age < 65:   return "60-64"
+    if age < 70:   return "65-69"
+    if age < 75:   return "70-74"
+    if age < 80:   return "75-79"
     return "80+"
 
-
-def lookup_premium(carrier: str, plan: str, age: int, area: str = "area1"):
+def lookup_premium(carrier: str, plan: str, age: int, area: str = "area1") -> int | None:
+    """Return annual EUR premium or None if not found.
+    carrier: 'morgan_price' | 'april' | 'img'
+    plan: see RATE_PLANS below
+    area: 'area1' (Europe/WW excl USA) | 'area2' (WW incl USA)
     """
-    Return annual EUR premium or None.
-
-    Args:
-        carrier : "morgan_price" | "april" | "img"
-        plan    : plan key (see RATE_PLANS)
-        age     : client age (integer)
-        area    : "area1" (Europe / WW excl USA) | "area2" (WW incl USA)
-    """
-    try:
-        a = int(age)
-    except (TypeError, ValueError):
-        a = 45
-
     if carrier == "morgan_price":
-        return MORGAN_PRICE_2025.get(area, {}).get(_mp_band(a), {}).get(plan)
-
+        band = _mp_band(age)
+        return MORGAN_PRICE_2025.get(area, {}).get(band, {}).get(plan)
     elif carrier == "april":
-        return APRIL_2025.get(area, {}).get(_apr_band(a), {}).get(plan)
-
+        band = _apr_band(age)
+        return APRIL_2025.get(area, {}).get(band, {}).get(plan)
     elif carrier == "img":
-        # IMG uses per-age keys (stored as strings from JSON)
-        key = str(min(a, 80))
-        return IMG_EUROPE_2025.get(key, {}).get(plan)
-
+        # IMG has per-age rates; cap at 80 (keys may be str due to JSON)
+        a = min(age, 80)
+        return IMG_EUROPE_2025.get(a, IMG_EUROPE_2025.get(str(a), {})).get(plan)
     return None
+
+# Curated plan list for HAL quote comparisons
+RATE_PLANS = [
+    # (carrier, plan_key, display_name, coverage_level, deductible_note)
+    ("morgan_price", "standard",       "Morgan Price Standard",       "international", "standard deductible, outpatient 80%"),
+    ("morgan_price", "standard_plus",  "Morgan Price Standard Plus",  "international", "outpatient 80%, enhanced limits"),
+    ("morgan_price", "comprehensive",  "Morgan Price Comprehensive",  "international", "full outpatient, dental, optical"),
+    ("april",        "international",  "April International",         "international", "no voluntary excess, WW excl USA"),
+    ("april",        "intl_plus",      "April Int\'l Plus",           "international", "enhanced outpatient, no excess"),
+    ("april",        "executive",      "April Executive",             "international", "full cover, maternity option"),
+    ("img",          "silver",         "IMG Silver",                  "international", "EUR 150 excess, Europe Area 1"),
+    ("img",          "gold",           "IMG Gold",                    "international", "EUR 150 excess, comprehensive"),
+    ("img",          "platinum",       "IMG Platinum",                "international", "EUR 150 excess, premium cover"),
+]
+
+# ── Carrier brochure metadata ─────────────────────────────────────────────────
+CARRIER_BROCHURES = {
+    "morgan_price": {
+        "name":         "Morgan Price (Europe) ApS",
+        "logo_code":    "MP",
+        "brochure_url": "brochures/morgan_price_evolution_health_eu.pdf",
+        "external_url": "https://morgan-price.eu",
+        "claim_phone":  "+44 3300 581 668",
+        "claim_email":  "euroclaims@morgan-price.eu",
+        "highlights": [
+            "Plans: Standard · Standard Plus · Comprehensive · Premium · Elite",
+            "Overall limits: EUR 500K to EUR 2M",
+            "Full inpatient + cancer cover on all plans",
+            "MRI/CT/PET from Standard Plus upward",
+            "Evacuation and repatriation: all plans",
+            "25% co-insurance if not pre-authorised",
+            "Claims: +44 3300 581 668 (select Opt 3)",
+        ],
+    },
+    "april": {
+        "name":         "April International",
+        "logo_code":    "APR",
+        "brochure_url": "brochures/april_international_benefit_schedule_2026.pdf",
+        "external_url": "https://april-international.com",
+        "claim_phone":  "See policy certificate",
+        "claim_email":  "See policy certificate",
+        "highlights": [
+            "Plans: International · Int\'l Plus · Executive · Executive Plus",
+            "Aggregate limit: EUR 1.5M per certificate period",
+            "Full inpatient + cancer on all plans",
+            "Outpatient (incl. GP fees) from International Plus",
+            "Maternity from International Plus (18-month wait)",
+            "Routine dental from International Plus (6-month wait)",
+            "Telehealth (Teladoc) + Crisis24 security included",
+            "Nil excess option on outpatient for add\'l premium",
+            "2026-2027 benefit schedule",
+        ],
+    },
+    "img": {
+        "name":         "IMG Global Prima Medical Insurance",
+        "logo_code":    "IMG",
+        "brochure_url": "brochures/img_gpmi_brochure.pdf",
+        "external_url": "https://www.imglobal.com/intl",
+        "claim_phone":  "+44 1903 817970",
+        "claim_email":  "See MyIMG member portal",
+        "highlights": [
+            "Plans: Bronze · Bronze Plus · Silver · Gold · Platinum",
+            "Overall limits: EUR 1M to EUR 5M",
+            "Telemedicine from Bronze Plus",
+            "Psychiatric inpatient from Bronze Plus (15-45 days/year)",
+            "Chronic condition routine care from Silver",
+            "HIV/AIDS coverage from Gold",
+            "IVF from Platinum (50% co-insurance, 3 cycles lifetime)",
+            "EUR 150 base deductible for Greece (Zone A)",
+            "MyIMG portal for claims and pre-authorisation",
+            "No age limit. Lifetime renewal guaranteed",
+        ],
+    },
+}
+
+def get_brochure_info(carrier: str) -> dict:
+    return CARRIER_BROCHURES.get(carrier, {})
