@@ -1304,14 +1304,41 @@ def _render_quote_cards_html(quote_json_str: str) -> str:
                    f'</div>')
         else:
             # "View details" button — expands extra info + brochure link
-            from rate_tables import get_brochure_info as _gbi
-            _broc = _gbi(carrier if isinstance(carrier, str) else "")
+            # Inline brochure map — no import needed
+            _BROC_MAP = {
+                "morgan_price": {"brochure_url":"brochures/morgan_price.pdf",
+                                 "external_url":"https://morgan-price.eu",
+                                 "claim_phone":"+44 3300 581 668",
+                                 "highlights":["Plans: Standard · Standard Plus · Comprehensive · Premium · Elite",
+                                               "Overall limits: EUR 500K to EUR 2M",
+                                               "Full inpatient + cancer on all plans",
+                                               "MRI/CT/PET from Standard Plus",
+                                               "25% co-insurance if not pre-authorised",
+                                               "Claims: +44 3300 581 668 option 3"]},
+                "april":        {"brochure_url":"brochures/april.pdf",
+                                 "external_url":"https://april-international.com",
+                                 "claim_phone":"See policy certificate",
+                                 "highlights":["Plans: International · Int\'l Plus · Executive · Executive Plus",
+                                               "Aggregate limit: EUR 1.5M per period",
+                                               "Outpatient (incl. GP fees) from International Plus",
+                                               "Maternity from Int\'l Plus (18-month wait)",
+                                               "Telehealth (Teladoc) + Crisis24 included",
+                                               "2026-2027 benefit schedule"]},
+                "img":          {"brochure_url":"brochures/img_gpmi.pdf",
+                                 "external_url":"https://www.imglobal.com/intl",
+                                 "claim_phone":"+44 1903 817970",
+                                 "highlights":["Plans: Bronze · Bronze Plus · Silver · Gold · Platinum",
+                                               "Overall limits: EUR 1M to EUR 5M",
+                                               "Telemedicine from Bronze Plus",
+                                               "Chronic condition care from Silver",
+                                               "EUR 150 base deductible (Greece Zone A)",
+                                               "No age limit. Lifetime renewal guaranteed"]},
+            }
             _carrier_key = carrier if isinstance(carrier, str) else ""
-            # Map plan carrier name back to key if needed
             for _ck in ["morgan_price","april","img"]:
-                if _ck.replace("_"," ") in str(name).lower() or _ck in str(name).lower():
+                if _ck in str(name).lower().replace(" ","_") or _ck.replace("_"," ") in str(name).lower():
                     _carrier_key = _ck; break
-            _broc = get_brochure_info(_carrier_key)
+            _broc = _BROC_MAP.get(_carrier_key, {})
             _broc_url   = _broc.get("brochure_url","")
             _ext_url    = _broc.get("external_url","#")
             _claim_ph   = _broc.get("claim_phone","")
@@ -1824,27 +1851,43 @@ section[data-testid="stMain"] { background: #050A14 !important; }
                                    placeholder="client@example.com", label_visibility="collapsed")
         with ec2:
             if st.button("Send quote", type="primary", use_container_width=True, key="hal_send"):
-                gs = st.secrets.get("GMAIL_SENDER","")
-                gp = st.secrets.get("GMAIL_APP_PASSWORD","").replace(" ","")
-                if gs and gp:
+                # Try multiple key name variations (Streamlit secrets are case-sensitive)
+                def _get_secret(*keys, default=""):
+                    for k in keys:
+                        try:
+                            v = st.secrets.get(k, "")
+                            if v: return str(v).strip()
+                        except Exception:
+                            pass
+                    return default
+
+                gs = _get_secret("GMAIL_SENDER", "gmail_sender", "GmailSender")
+                gp = _get_secret("GMAIL_APP_PASSWORD", "gmail_app_password", "GmailAppPassword").replace(" ","")
+
+                # Show debug info if missing
+                if not gs or not gp:
+                    try:
+                        _available_keys = list(st.secrets.keys()) if hasattr(st.secrets, "keys") else []
+                    except Exception:
+                        _available_keys = []
+                    st.error(
+                        f"Gmail secrets not found. Keys available in secrets: `{_available_keys}`\n\n"
+                        f"GMAIL_SENDER found: `{bool(gs)}` · GMAIL_APP_PASSWORD found: `{bool(gp)}`\n\n"
+                        "**Fix:** In Streamlit Cloud → Settings → Secrets, make sure you have EXACTLY:\n"
+                        "```toml\n"
+                        "GMAIL_SENDER = \"info@chiinsurancebrokers.com\"\n"
+                        "GMAIL_APP_PASSWORD = \"your 16 char app password\"\n"
+                        "```\n"
+                        "Then click **Reboot app** from the ⋮ menu for secrets to reload."
+                    )
+                else:
                     with st.spinner("Sending…"):
                         ok = _send_quote_email(cemail, st.session_state.quote_client_name or "Client",
                                                st.session_state.quote_result, gs, gp)
-                    if ok: st.success(f"✅ Sent to {cemail}")
-                    else:  st.error("Email failed — check GMAIL_SENDER + GMAIL_APP_PASSWORD in secrets.")
-                else:
-                    missing = []
-                    if not gs: missing.append("GMAIL_SENDER")
-                    if not gp: missing.append("GMAIL_APP_PASSWORD")
-                    st.warning(
-                        f"Missing secrets: **{' and '.join(missing)}**\n\n"
-                        "Go to your app on Streamlit Cloud → ⋮ menu → **Settings → Secrets** and add:\n\n"
-                        "```toml\n"
-                        "GMAIL_SENDER       = \"info@chiinsurancebrokers.com\"\n"
-                        "GMAIL_APP_PASSWORD = \"xxxx xxxx xxxx xxxx\"\n"
-                        "```\n\n"
-                        "Get an App Password at: myaccount.google.com → Security → 2-Step Verification → App passwords"
-                    )
+                    if ok:
+                        st.success(f"✅ Quote sent to {cemail}")
+                    else:
+                        st.error("SMTP failed. Check: 1) App Password is correct 2-Step Verification enabled 2) Gmail account allows less secure apps or App Passwords.")
 
         nc1, nc2 = st.columns(2)
         with nc1:
