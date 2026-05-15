@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Pantelis Kourbelas | Ashlar Insurance
+HAL — Heuristically Assitant | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -722,191 +722,88 @@ _TTS_PLAY_HTML = """
 # ── HAL Avatar Face ───────────────────────────────────────────────────────────
 # Canvas-rendered humanoid face. Pass state via window.HAL_AVATAR_STATE:
 #   'idle' | 'listening' | 'thinking' | 'speaking'
-_HAL_AVATAR_HTML = """
+_HAL_ORB_HTML = """
 <style>
-  body{{margin:0;background:#000}}
-  #av{{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0 6px;background:#000;border-radius:12px}}
-  #lbl{{font-size:9px;letter-spacing:2px;color:#C9A96E55;font-family:monospace;text-transform:uppercase}}
+  body{margin:0;background:#000}
+  #w{display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 0;background:#000;border-radius:12px}
+  #st{font-size:11px;font-family:monospace;letter-spacing:2px;text-transform:uppercase;min-height:16px;transition:color .5s}
 </style>
-<div id="av">
-  <canvas id="fc" width="240" height="290"></canvas>
-  <div id="lbl">HAL · {state_label}</div>
+<div id="w">
+  <canvas id="o" width="220" height="220"></canvas>
+  <div id="st">HAL_STATE_LABEL</div>
 </div>
 <script>
-(function(){{
-  const cv=document.getElementById('fc'), cx=cv.getContext('2d');
-  const W=cv.width, H=cv.height, mx=W/2, my=H/2-8;
-  let state='{init_state}', t=0;
-  let blinkClock=0, nextBlink=3+Math.random()*2, blinkAmt=0;
-  let scanY=0, scanDir=1, mouthWave=0, thinkAngle=0;
-  const particles=Array.from({{length:22}},()=>({{
-    angle:Math.random()*Math.PI*2,
-    r:110+Math.random()*14,
-    speed:(Math.random()-.5)*0.009,
-    size:Math.random()*1.6+.4,
-    alpha:Math.random()*0.45+0.08
-  }}));
-
-  window.addEventListener('message',e=>{{
-    if(e.data&&e.data.hal_state) state=e.data.hal_state;
-  }});
-  if(window.HAL_AVATAR_STATE) state=window.HAL_AVATAR_STATE;
-
-  function ac(a){{return state==='listening'?`rgba(93,202,165,${{a}})`:state==='thinking'?`rgba(100,170,255,${{a}})`:`rgba(201,169,110,${{a}})`}}
-
-  function draw(){{
+(function(){
+  const cv=document.getElementById('o'),cx=cv.getContext('2d');
+  const W=cv.width,H=cv.height,mx=W/2,my=H/2;
+  let state='HAL_INIT_STATE',t=0;
+  let h1=35,h2=20,h3=45,th1=35,th2=20,th3=45;
+  const COLS={
+    idle:[[35,85,65],[20,90,55],[45,80,60]],
+    listening:[[170,90,60],[150,85,55],[190,80,65]],
+    thinking:[[240,85,60],[220,90,55],[260,80,65]],
+    speaking:[[320,85,60],[20,90,60],[170,85,65]]
+  };
+  const SC={idle:'#C9A96E55',listening:'#5DCAA5',thinking:'#85B7EB',speaking:'#C9A96E'};
+  function applyState(s){
+    state=s;
+    const c=COLS[s]||COLS.idle;
+    th1=c[0][0];th2=c[1][0];th3=c[2][0];
+    const el=document.getElementById('st');
+    if(el){el.style.color=SC[s]||'#888';}
+  }
+  window.addEventListener('message',e=>{if(e.data&&e.data.hal_state)applyState(e.data.hal_state);});
+  applyState(state);
+  function lerp(a,b,f){return a+(b-a)*f;}
+  function hsl(h,s,l,a){return 'hsla('+h+','+s+'%,'+l+'%,'+(a==null?1:a)+')';}
+  function frame(){
     cx.clearRect(0,0,W,H);
-    const br=Math.sin(t*.38)*.011;
-    cx.save(); cx.translate(mx,my); cx.scale(1+br,1+br);
-
-    // halo
-    const h=cx.createRadialGradient(0,0,75,0,0,130);
-    h.addColorStop(0,ac(state==='speaking'?.15+Math.abs(Math.sin(t*6))*.1:.09));
-    h.addColorStop(1,'rgba(0,0,0,0)');
-    cx.fillStyle=h; cx.beginPath(); cx.arc(0,0,130,0,Math.PI*2); cx.fill();
-
-    // neck
-    cx.save(); cx.translate(0,110);
-    const ng=cx.createLinearGradient(-16,0,16,0);
-    ng.addColorStop(0,'#0A0806'); ng.addColorStop(.35,'#1C1610'); ng.addColorStop(.65,'#1C1610'); ng.addColorStop(1,'#0A0806');
-    cx.fillStyle=ng; cx.beginPath(); cx.moveTo(-15,0); cx.lineTo(-18,46); cx.lineTo(18,46); cx.lineTo(15,0); cx.closePath(); cx.fill();
-    cx.strokeStyle=ac(.12); cx.lineWidth=.4;
-    [-6,0,6].forEach(x=>{{cx.beginPath();cx.moveTo(x,3);cx.lineTo(x,42);cx.stroke()}});
-    cx.restore();
-
-    // shoulders
-    cx.save(); cx.translate(0,112);
-    cx.fillStyle='#0D0B08'; cx.strokeStyle=ac(.2); cx.lineWidth=.6;
-    cx.beginPath(); cx.moveTo(-18,44); cx.bezierCurveTo(-55,48,-80,38,-90,34); cx.lineTo(-98,50); cx.bezierCurveTo(-72,56,-44,52,-18,52); cx.closePath(); cx.fill(); cx.stroke();
-    cx.beginPath(); cx.moveTo(18,44); cx.bezierCurveTo(55,48,80,38,90,34); cx.lineTo(98,50); cx.bezierCurveTo(72,56,44,52,18,52); cx.closePath(); cx.fill(); cx.stroke();
-    cx.restore();
-
-    // face oval
-    cx.save(); cx.scale(1,1.11);
-    const fg=cx.createRadialGradient(-10,-15,15,0,0,96);
-    fg.addColorStop(0,'#1E1A14'); fg.addColorStop(.6,'#141008'); fg.addColorStop(1,'#0A0806');
-    cx.fillStyle=fg; cx.beginPath(); cx.arc(0,0,96,0,Math.PI*2); cx.fill();
-    cx.strokeStyle=ac(.28); cx.lineWidth=.8; cx.stroke();
-    cx.restore();
-
-    // brow
-    cx.strokeStyle=ac(.1); cx.lineWidth=1.2;
-    cx.beginPath(); cx.moveTo(-46,-38); cx.bezierCurveTo(-32,-46,-16,-48,0,-47); cx.bezierCurveTo(16,-48,32,-46,46,-38); cx.stroke();
-
-    // EYES
-    [[-30,0],[30,0]].forEach(([ex],idx)=>{{
-      const eg=state==='thinking'?.88+Math.sin(t*3+idx)*.1:state==='listening'?.82+Math.sin(t*2)*.1:state==='speaking'?.78+Math.sin(t*5+idx)*.14:.72+Math.sin(t*.8+idx)*.05;
-      const bs=blinkAmt>0?Math.max(.05,1-blinkAmt*6):1;
-      cx.save(); cx.translate(ex,-13); cx.scale(1,bs);
-      cx.fillStyle='rgba(0,0,0,.7)'; cx.beginPath(); cx.ellipse(0,0,17,10,0,0,Math.PI*2); cx.fill();
-      [20,15,10].forEach((r,i)=>{{
-        const g2=cx.createRadialGradient(0,0,0,0,0,r);
-        g2.addColorStop(0,ac(eg*(.75-i*.18))); g2.addColorStop(1,'rgba(0,0,0,0)');
-        cx.fillStyle=g2; cx.beginPath(); cx.arc(0,0,r,0,Math.PI*2); cx.fill();
-      }});
-      cx.fillStyle=ac(eg); cx.beginPath(); cx.arc(0,0,7,0,Math.PI*2); cx.fill();
-      cx.fillStyle='#050302'; cx.beginPath(); cx.arc(0,0,3.5,0,Math.PI*2); cx.fill();
-      cx.fillStyle='rgba(255,255,255,.5)'; cx.beginPath(); cx.arc(-1.5,-1.5,1.5,0,Math.PI*2); cx.fill();
-      cx.strokeStyle=ac(.32); cx.lineWidth=.7;
-      cx.beginPath(); cx.moveTo(-17,0); cx.bezierCurveTo(-9,-10,9,-10,17,0); cx.stroke();
-      cx.beginPath(); cx.moveTo(-17,0); cx.bezierCurveTo(-9,8,9,8,17,0); cx.stroke();
-      cx.restore();
-    }});
-
-    // think dot
-    if(state==='thinking'){{ thinkAngle+=.05; const tx=Math.cos(thinkAngle)*22,ty=Math.sin(thinkAngle*.7)*9-13; cx.fillStyle=`rgba(100,170,255,${{.55+Math.sin(t*8)*.3}})`; cx.beginPath(); cx.arc(tx,ty,1.5,0,Math.PI*2); cx.fill(); }}
-
-    // nose
-    cx.strokeStyle=ac(.09); cx.lineWidth=.6;
-    cx.beginPath(); cx.moveTo(-4,8); cx.bezierCurveTo(-6,22,-7,32,-10,38); cx.stroke();
-    cx.beginPath(); cx.moveTo(4,8); cx.bezierCurveTo(6,22,7,32,10,38); cx.stroke();
-    cx.beginPath(); cx.moveTo(-10,38); cx.bezierCurveTo(-6,43,6,43,10,38); cx.stroke();
-
-    // cheeks
-    cx.strokeStyle=ac(.06); cx.lineWidth=.5;
-    cx.beginPath(); cx.moveTo(-58,8); cx.bezierCurveTo(-48,22,-36,34,-22,41); cx.stroke();
-    cx.beginPath(); cx.moveTo(58,8); cx.bezierCurveTo(48,22,36,34,22,41); cx.stroke();
-
-    // MOUTH
-    const mY=62, mW=34;
-    cx.save(); cx.translate(0,mY);
-    if(state==='speaking'){{
-      mouthWave+=.18;
-      const op=Math.abs(Math.sin(mouthWave))*7+1.5;
-      cx.strokeStyle=ac(.7); cx.lineWidth=1;
-      cx.beginPath();
-      for(let i=0;i<=mW*2;i++){{ const x=-mW+i,w=Math.sin(i*.14+mouthWave)*2; i===0?cx.moveTo(x,-op+w):cx.lineTo(x,-op+w); }}
-      cx.stroke();
-      cx.beginPath();
-      for(let i=0;i<=mW*2;i++){{ const x=-mW+i,w=Math.sin(i*.14+mouthWave+Math.PI)*2; i===0?cx.moveTo(x,op+w):cx.lineTo(x,op+w); }}
-      cx.stroke();
-      cx.fillStyle='rgba(5,3,2,.85)'; cx.beginPath(); cx.ellipse(0,0,mW,op+2,0,0,Math.PI*2); cx.fill();
-    }} else if(state==='listening'){{
-      cx.strokeStyle=`rgba(93,202,165,${{.45+Math.sin(t*3)*.2}})`; cx.lineWidth=1.2;
-      cx.beginPath();
-      for(let i=0;i<=mW*2;i++){{ const x=-mW+i,w=Math.sin(i*.1+t*4)*2.2*Math.sin(t*1.4); i===0?cx.moveTo(x,w):cx.lineTo(x,w); }}
-      cx.stroke();
-    }} else {{
-      const rc=Math.sin(t*.28)*.7;
-      cx.strokeStyle=ac(.32); cx.lineWidth=.9;
-      cx.beginPath(); cx.moveTo(-mW,rc); cx.bezierCurveTo(-mW*.5,rc+2.5,mW*.5,rc+2.5,mW,rc); cx.stroke();
-      cx.fillStyle=ac(.38); cx.beginPath(); cx.arc(-mW,rc,1.2,0,Math.PI*2); cx.fill();
-      cx.beginPath(); cx.arc(mW,rc,1.2,0,Math.PI*2); cx.fill();
-    }}
-    cx.restore();
-
-    // jaw
-    cx.strokeStyle=ac(.1); cx.lineWidth=.5;
-    cx.beginPath(); cx.moveTo(-30,80); cx.bezierCurveTo(-14,96,14,96,30,80); cx.stroke();
-
-    // scan line
-    if(state==='thinking'){{
-      scanY+=scanDir*1.4; if(scanY>90||scanY<-90) scanDir*=-1;
-      cx.save(); cx.beginPath(); cx.arc(0,0,96,0,Math.PI*2); cx.clip();
-      const sg=cx.createLinearGradient(0,scanY-5,0,scanY+5);
-      sg.addColorStop(0,'rgba(100,170,255,0)'); sg.addColorStop(.5,'rgba(100,170,255,.16)'); sg.addColorStop(1,'rgba(100,170,255,0)');
-      cx.fillStyle=sg; cx.fillRect(-100,scanY-5,200,10); cx.restore();
-    }}
-
-    // particles
-    particles.forEach(p=>{{
-      p.angle+=p.speed;
-      const px=Math.cos(p.angle)*p.r, py=Math.sin(p.angle)*p.r*.82;
-      if(Math.sqrt(px*px+py*py)>90){{
-        cx.fillStyle=ac(p.alpha*(state==='speaking'?1.4:1));
-        cx.beginPath(); cx.arc(px,py,p.size,0,Math.PI*2); cx.fill();
-      }}
-    }});
-
-    // circuit accents
-    cx.strokeStyle=ac(.05+Math.sin(t*.6)*.015); cx.lineWidth=.35;
-    cx.beginPath(); cx.moveTo(-40,-60); cx.lineTo(-40,-52); cx.lineTo(-28,-52); cx.stroke();
-    cx.beginPath(); cx.moveTo(40,-60); cx.lineTo(40,-52); cx.lineTo(28,-52); cx.stroke();
-    cx.beginPath(); cx.moveTo(0,-74); cx.lineTo(0,-62); cx.stroke();
-
-    cx.restore();
-
-    // status ring
-    const rp=state==='speaking'?Math.abs(Math.sin(t*6)):state==='listening'?.38+Math.sin(t*2)*.18:state==='thinking'?.38+Math.sin(t*4)*.25:.22+Math.sin(t)*.08;
-    cx.strokeStyle=ac(rp); cx.lineWidth=1.5;
-    cx.setLineDash(state==='thinking'?[5,3]:[]);
-    cx.beginPath(); cx.arc(mx,H-16,8,0,Math.PI*2); cx.stroke();
-    cx.setLineDash([]);
-    cx.fillStyle=ac(.12); cx.beginPath(); cx.arc(mx,H-16,8,0,Math.PI*2); cx.fill();
-  }}
-
-  function loop(){{
-    t+=.016;
-    blinkClock+=.016;
-    if(blinkClock>=nextBlink&&blinkAmt===0) blinkAmt=.01;
-    if(blinkAmt>0){{ blinkAmt+=.1; if(blinkAmt>=1){{blinkAmt=0;blinkClock=0;nextBlink=2+Math.random()*4;}} }}
-    draw();
-    requestAnimationFrame(loop);
-  }}
-  loop();
-}})();
+    h1=lerp(h1,th1,.03);h2=lerp(h2,th2,.025);h3=lerp(h3,th3,.02);
+    const R=88;
+    const p=state==='speaking'?.08*Math.sin(t*6):state==='listening'?.05*Math.sin(t*4):state==='thinking'?.04*Math.sin(t*3):.02*Math.sin(t*.8);
+    const r=R*(1+p);
+    const ga=state==='speaking'?.3+.15*Math.abs(Math.sin(t*5)):.12;
+    const glow=cx.createRadialGradient(mx,my,r*.6,mx,my,r*1.8);
+    glow.addColorStop(0,hsl(h1,85,60,ga));
+    glow.addColorStop(1,'rgba(0,0,0,0)');
+    cx.fillStyle=glow;cx.beginPath();cx.arc(mx,my,r*1.8,0,Math.PI*2);cx.fill();
+    const base=cx.createRadialGradient(mx-r*.25,my-r*.3,r*.05,mx,my,r);
+    base.addColorStop(0,hsl(h1,90,88));
+    base.addColorStop(.3,hsl(h2,85,65));
+    base.addColorStop(.6,hsl(h3,80,45));
+    base.addColorStop(1,hsl(h1,70,20));
+    cx.fillStyle=base;cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
+    const bx=mx+Math.sin(t*.7)*r*.3,by=my+Math.cos(t*.5)*r*.25;
+    const b1=cx.createRadialGradient(bx,by,0,bx,by,r*.55);
+    b1.addColorStop(0,hsl(h2,90,70,.7));b1.addColorStop(1,'rgba(0,0,0,0)');
+    cx.globalCompositeOperation='screen';cx.fillStyle=b1;
+    cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
+    const bx2=mx-Math.cos(t*.9)*r*.35,by2=my-Math.sin(t*.6)*r*.3;
+    const b2=cx.createRadialGradient(bx2,by2,0,bx2,by2,r*.5);
+    b2.addColorStop(0,hsl(h3+30,85,65,.6));b2.addColorStop(1,'rgba(0,0,0,0)');
+    cx.fillStyle=b2;cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
+    cx.globalCompositeOperation='source-over';
+    const sp=cx.createRadialGradient(mx-r*.32,my-r*.38,0,mx-r*.2,my-r*.25,r*.45);
+    sp.addColorStop(0,'rgba(255,255,255,0.55)');
+    sp.addColorStop(.5,'rgba(255,255,255,0.12)');
+    sp.addColorStop(1,'rgba(255,255,255,0)');
+    cx.fillStyle=sp;cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
+    cx.globalCompositeOperation='destination-in';
+    cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
+    cx.globalCompositeOperation='source-over';
+    if(state==='listening'){
+      cx.strokeStyle=hsl(170,90,65,.45+.3*Math.sin(t*4));
+      cx.lineWidth=2;cx.setLineDash([6,4]);
+      cx.beginPath();cx.arc(mx,my,r+10+Math.sin(t*5)*4,0,Math.PI*2);cx.stroke();
+      cx.setLineDash([]);
+    }
+    t+=.016;requestAnimationFrame(frame);
+  }
+  frame();
+})();
 </script>
 """
+
 
 
 def _elevenlabs_stt(audio_bytes: bytes, api_key: str, language: str = "el") -> str:
@@ -1202,91 +1099,174 @@ def _get_quote_question(step: int, lang: str) -> str:
 
 
 def _generate_quote_comparison(quote_data: dict, api_key: str, lang: str) -> str:
-    """
-    Calculate real premiums from carrier rate tables, then ask Claude
-    to build a structured comparison with actual EUR figures.
-    """
     import anthropic
-    import re
     from rate_tables import lookup_premium, RATE_PLANS
 
-    lang_instruction = "Respond in Greek (use € symbol)." if lang == "el" else "Respond in English."
-
-    # ── Extract client age from answer ─────────────────────────────────
-    age_raw = quote_data.get("client_age", "")
-    age_match = re.search(r'\b(\d{1,2})\b', str(age_raw))
+    age_raw    = quote_data.get("client_age", "45")
+    age_match  = re.search(r"\b(\d{1,2})\b", str(age_raw))
     client_age = int(age_match.group(1)) if age_match else 45
+    location   = quote_data.get("location", "").lower()
+    area       = "area2" if any(w in location for w in ["usa","america","\u03b1\u03bc\u03b5\u03c1"]) else "area1"
+    lang_instr = "Respond ONLY in Greek inside the JSON strings." if lang == "el" else "Respond ONLY in English inside the JSON strings."
 
-    # ── Determine area from coverage type + location ───────────────────
-    coverage = quote_data.get("coverage_type", "").lower()
-    location = quote_data.get("location", "").lower()
-    area = "area2" if any(w in location for w in ["usa", "america", "αμερ"]) else "area1"
-
-    # ── Calculate real premiums for all plans ──────────────────────────
     plan_rows = []
     for carrier, plan_key, name, ctype, notes in RATE_PLANS:
-        premium = lookup_premium(carrier, plan_key, client_age, area)
-        if premium:
-            plan_rows.append({
-                "name": name,
-                "carrier": carrier,
-                "plan": plan_key,
-                "type": ctype,
-                "annual_eur": premium,
-                "monthly_eur": round(premium / 12),
-                "notes": notes,
-            })
-
-    # Sort by annual premium
+        prem = lookup_premium(carrier, plan_key, client_age, area)
+        if prem:
+            plan_rows.append({"name": name, "carrier_code": carrier.upper()[:3],
+                              "annual_eur": prem, "monthly_eur": round(prem / 12),
+                              "notes": notes, "carrier": name.split()[0]})
     plan_rows.sort(key=lambda x: x["annual_eur"])
 
-    # Build premium table string for Claude
-    premium_table = "\n".join(
-        f"- {p['name']}: €{p['annual_eur']:,}/year (€{p['monthly_eur']}/month) — {p['notes']}"
-        for p in plan_rows
+    premium_list = "\n".join(
+        f"- {p['name']}: EUR {p['annual_eur']:,}/year ({p['notes']})" for p in plan_rows)
+    profile = "\n".join(f"- {k.replace('_',' ').title()}: {v}" for k, v in quote_data.items())
+
+    prompt = (
+        "You are HAL, insurance specialist for Ashlar Insurance.\n\n"
+        f"CLIENT PROFILE:\n{profile}\nAge extracted: {client_age}\n\n"
+        f"CALCULATED 2025 PREMIUMS (use these exact figures):\n{premium_list}\n\n"
+        "Return ONLY valid JSON with this exact structure:\n"
+        "{"
+        '"recommendation": "1-2 sentence spoken recommendation naming the best plan with exact EUR price",'
+        '"client_name": "extracted first name only",'
+        '"plans": ['
+        '{"name":"","carrier":"","carrier_code":"","annual_eur":0,"monthly_eur":0,'
+        '"coverage":"","annual_limit":"","deductible":"","inpatient":"",'
+        '"outpatient":"","dental":"","direct_billing":"","suitability":8,"recommended":false}'
+        '],'
+        '"considerations": ["","",""],'
+        '"next_step": ""'
+        "}\n\n"
+        "Pick the 3 most suitable plans. Mark best as recommended:true.\n"
+        f"{lang_instr}"
     )
-
-    profile = "\n".join(
-        f"- {k.replace('_', ' ').title()}: {v}"
-        for k, v in quote_data.items()
-    )
-
-    prompt = f"""You are HAL, insurance quote specialist for Ashlar Insurance, Athens.
-
-CLIENT PROFILE:
-{profile}
-Client age extracted: {client_age} years old
-Coverage area: {area} (Europe excl. USA)
-
-ACTUAL 2025 PREMIUM CALCULATIONS (real carrier rates — use these exact figures):
-{premium_table}
-
-Based on the client profile and these real premiums, provide:
-
-**RECOMMENDATION**
-1-2 sentences naming the best plan with its exact annual and monthly premium in EUR.
-
-**TOP 3 PLANS**
-Pick the 3 most suitable plans from the list above.
-For each: Plan name | Annual EUR | Monthly EUR | Why suitable | Score /10
-
-**KEY CONSIDERATIONS**
-2-3 bullet points specific to this client (age {client_age}, their priorities, health history mentioned).
-
-**NEXT STEP**
-One clear action (e.g., "Send Morgan Price Standard proposal and application form").
-
-Rules: Use ONLY the premiums from the list above — do not estimate or modify them.
-{lang_instruction} Be specific. No filler."""
 
     client_ai = anthropic.Anthropic(api_key=api_key)
-    response = client_ai.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=900,
-        messages=[{"role": "user", "content": prompt}],
-        timeout=45,
-    )
-    return response.content[0].text
+    resp = client_ai.messages.create(
+        model="claude-sonnet-4-20250514", max_tokens=1200,
+        messages=[{"role": "user", "content": prompt}], timeout=45)
+    raw = resp.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+    return raw
+
+
+def _render_quote_cards_html(quote_json_str: str) -> str:
+    try:
+        q = json.loads(quote_json_str)
+    except Exception:
+        return f"<pre style=\'color:red\'>{quote_json_str}</pre>"
+
+    plans          = q.get("plans", [])
+    considerations = q.get("considerations", [])
+    next_step      = q.get("next_step", "")
+
+    def row(label, val, dim=False):
+        color = "#888780" if dim else "inherit"
+        return (f'<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px">'
+                f'<span style="color:#888780">{label}</span>'
+                f'<span style="font-weight:500;color:{color}">{val}</span></div>')
+
+    def plan_card(p):
+        rec    = p.get("recommended", False)
+        border = "border:2px solid #185FA5" if rec else "border:0.5px solid #E0DDD8"
+        badge  = ('<div style="position:absolute;top:-11px;left:50%;transform:translateX(-50%);'
+                  'background:#185FA5;color:#fff;font-size:11px;font-weight:500;padding:2px 12px;'
+                  'border-radius:20px;white-space:nowrap">HAL recommends</div>') if rec else ""
+        pc     = "#185FA5" if rec else "inherit"
+        bstyle = "background:#185FA5;color:#fff;border:none" if rec else "background:transparent;border:0.5px solid #C5BFB5"
+        btxt   = "Select this plan" if rec else "View details"
+        cc     = p.get("carrier_code", "??")
+        lbg    = "#185FA510" if rec else "#F1EFE8"
+        lc     = "#185FA5" if rec else "#888780"
+        ann    = p.get("annual_eur", 0)
+        mo     = p.get("monthly_eur", 0)
+        return (
+            f'<div style="position:relative;background:#fff;{border};border-radius:12px;padding:16px;'
+            f'flex:1;min-width:180px;max-width:260px">{badge}'
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+            f'<div style="width:36px;height:36px;border-radius:8px;background:{lbg};display:flex;'
+            f'align-items:center;justify-content:center;font-size:10px;font-weight:600;color:{lc};flex-shrink:0">{cc}</div>'
+            f'<div><div style="font-size:14px;font-weight:500">{p.get("name","")}</div>'
+            f'<div style="font-size:12px;color:#888780">{p.get("carrier","")}</div></div></div>'
+            f'<div style="font-size:26px;font-weight:500;color:{pc};line-height:1">'
+            f'&#8364;{ann:,} <span style="font-size:13px;font-weight:400;color:#888780">/year</span></div>'
+            f'<div style="font-size:12px;color:#888780;margin-bottom:12px">&#8364;{mo}/month</div>'
+            f'<hr style="border:none;border-top:0.5px solid #E0DDD8;margin:12px 0">'
+            + row("Coverage", p.get("coverage",""))
+            + row("Annual limit", p.get("annual_limit",""))
+            + row("Deductible", p.get("deductible",""))
+            + row("Inpatient", p.get("inpatient",""))
+            + row("Outpatient", p.get("outpatient",""))
+            + row("Dental", p.get("dental",""), dim="Not" in p.get("dental",""))
+            + row("Direct billing", p.get("direct_billing",""))
+            + f'<button style="width:100%;margin-top:12px;padding:8px;border-radius:8px;{bstyle};'
+              f'font-size:13px;cursor:pointer">{btxt}</button></div>'
+        )
+
+    cards   = "".join(plan_card(p) for p in plans)
+    cons_li = "".join(f'<li style="margin:4px 0">{c}</li>' for c in considerations)
+    cons_bl = (f'<div style="background:#F8F6F2;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">'
+               f'<b>Key considerations</b><ul style="margin:8px 0 0;padding-left:20px;color:#5F5E5A">{cons_li}</ul></div>') if considerations else ""
+    ns_bl   = f'<div style="font-size:13px;color:#5F5E5A;padding:8px 0"><b>Next step:</b> {next_step}</div>' if next_step else ""
+    disc    = ('<div style="font-size:11px;color:#A89880;margin-top:10px;padding-top:8px;border-top:0.5px solid #E0DDD8">'
+               'Premiums from 2025 carrier rate tables &middot; Indicative &middot; Subject to underwriting &middot; Valid 30 days</div>')
+    return f'<div style="font-family:-apple-system,sans-serif;padding:4px 0"><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">{cards}</div>{cons_bl}{ns_bl}{disc}</div>'
+
+
+def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
+                      sender_email: str, app_password: str) -> bool:
+    try:
+        q     = json.loads(quote_json_str)
+        plans = q.get("plans", [])
+        rec   = next((p for p in plans if p.get("recommended")), plans[0] if plans else {})
+
+        rows = ""
+        for p in plans:
+            badge = " &#11088; HAL recommends" if p.get("recommended") else ""
+            pcolor = "#185FA5" if p.get("recommended") else "#2C1810"
+            rows += (f'<tr><td style="padding:10px 12px;border-bottom:1px solid #F0ECE5">'
+                     f'<b style="font-size:14px">{p.get("name","")}</b>{badge}<br>'
+                     f'<span style="color:#888;font-size:12px">{p.get("carrier","")} &middot; {p.get("coverage","")} &middot; {p.get("annual_limit","")} limit</span></td>'
+                     f'<td style="padding:10px 12px;border-bottom:1px solid #F0ECE5;text-align:right;white-space:nowrap">'
+                     f'<b style="font-size:16px;color:{pcolor}">&#8364;{p.get("annual_eur",0):,}</b>'
+                     f'<span style="color:#888;font-size:12px">/yr</span><br>'
+                     f'<span style="color:#888;font-size:12px">&#8364;{p.get("monthly_eur",0)}/mo</span></td></tr>')
+
+        cons_li = "".join(f'<li style="margin:4px 0">{c}</li>' for c in q.get("considerations",[]))
+        cons_bl = f'<div style="margin-top:20px;background:#FBF8F4;border-radius:8px;padding:14px 16px"><b style="font-size:13px">Key considerations</b><ul style="margin:8px 0 0;padding-left:18px;color:#5F5E5A;font-size:13px">{cons_li}</ul></div>' if cons_li else ""
+        ns_bl   = f'<p style="margin-top:16px;font-size:13px;color:#5F5E5A"><b>Next step:</b> {q.get("next_step","")}</p>' if q.get("next_step") else ""
+
+        html = (
+            f'<!DOCTYPE html><html><body style="margin:0;padding:0;font-family:-apple-system,Helvetica,sans-serif;background:#F8F6F2">'
+            f'<div style="max-width:560px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #E8E0D5">'
+            f'<div style="background:#1C1410;padding:28px 32px">'
+            f'<div style="font-size:24px;font-weight:700;letter-spacing:3px;color:#C9A96E">HAL</div>'
+            f'<div style="font-size:11px;color:#7A6A5A;letter-spacing:2px;text-transform:uppercase;margin-top:2px">Ashlar Insurance &middot; Quote</div>'
+            f'</div><div style="padding:28px 32px">'
+            f'<h2 style="font-size:20px;font-weight:500;color:#2C1810;margin:0 0 6px">Your quote is ready, {client_name}.</h2>'
+            f'<p style="color:#7A6A5A;font-size:14px;margin:0 0 24px">{q.get("recommendation","")}</p>'
+            f'<table style="width:100%;border-collapse:collapse;border:1px solid #E8E0D5;border-radius:8px;overflow:hidden">{rows}</table>'
+            f'{cons_bl}{ns_bl}'
+            f'</div><div style="padding:16px 32px;border-top:1px solid #F0ECE5">'
+            f'<p style="font-size:11px;color:#A89880;margin:0">This quote is indicative and does not constitute a binding offer. Final premiums subject to underwriting. Valid 30 days. &copy; 2026 Ashlar Insurance.</p>'
+            f'</div></div></body></html>'
+        )
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Your Ashlar Insurance Quote — {rec.get('name','')}"
+        msg["From"]    = f"HAL - Ashlar Insurance <{sender_email}>"
+        msg["To"]      = to_email
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
+            srv.login(sender_email, app_password)
+            srv.sendmail(sender_email, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"Email error: {e}")
+        return False
 
 
 
@@ -1429,21 +1409,59 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
                         text=f"Question {min(step+1, total)} of {total} — "
                              f"{QUOTE_QUESTIONS[min(step, total-1)][0].replace('_',' ').title()}")
 
-    # ── Quote result card ──────────────────────────────────────────────────
+    # ── Quote result — Stellar-style plan cards + email ───────────────────
     if st.session_state.quote_result:
-        with st.expander("📊 Quote Comparison — click to expand", expanded=True):
-            st.markdown(st.session_state.quote_result)
-            rc1, rc2 = st.columns(2)
-            with rc1:
-                st.download_button("📥 Download quote", st.session_state.quote_result,
-                                   file_name="hal_quote.txt", use_container_width=True)
-            with rc2:
-                if st.button("🔄 New quote", use_container_width=True, key="new_quote_btn"):
-                    st.session_state.quote_mode   = False
-                    st.session_state.quote_result = None
-                    st.session_state.quote_data   = {}
-                    st.session_state.quote_step   = 0
-                    st.rerun()
+        st.markdown("### Quote comparison")
+        cards_html = _render_quote_cards_html(st.session_state.quote_result)
+        import streamlit.components.v1 as _comp
+        _comp.html(cards_html, height=520, scrolling=True)
+
+        # Email delivery
+        st.markdown("**Send quote to client by email**")
+        ec1, ec2 = st.columns([3, 1])
+        with ec1:
+            client_email = st.text_input(
+                "Client email", key="quote_email_input",
+                label_visibility="collapsed",
+                placeholder="client@example.com",
+            )
+        with ec2:
+            send_email_btn = st.button("Send quote", type="primary",
+                                       use_container_width=True, key="send_quote_email")
+
+        if send_email_btn and client_email:
+            gmail_sender   = st.secrets.get("GMAIL_SENDER", "")
+            gmail_password = st.secrets.get("GMAIL_APP_PASSWORD", "")
+            client_name    = st.session_state.get("quote_client_name", "Client")
+            if gmail_sender and gmail_password:
+                with st.spinner("Sending quote email…"):
+                    ok = _send_quote_email(
+                        to_email      = client_email,
+                        client_name   = client_name,
+                        quote_json_str= st.session_state.quote_result,
+                        sender_email  = gmail_sender,
+                        app_password  = gmail_password,
+                    )
+                if ok:
+                    st.success(f"Quote emailed to {client_email}")
+                else:
+                    st.error("Email failed — check GMAIL_SENDER and GMAIL_APP_PASSWORD in secrets.")
+            else:
+                st.warning("Add GMAIL_SENDER and GMAIL_APP_PASSWORD to Streamlit secrets to enable email.")
+
+        # Controls
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            st.download_button("📥 Download quote (JSON)", st.session_state.quote_result,
+                               file_name="hal_quote.json", use_container_width=True)
+        with rc2:
+            if st.button("🔄 New quote", use_container_width=True, key="new_quote_btn"):
+                st.session_state.quote_mode   = False
+                st.session_state.quote_result = None
+                st.session_state.quote_data   = {}
+                st.session_state.quote_step   = 0
+                st.session_state.quote_client_name = ""
+                st.rerun()
 
     st.divider()
 
@@ -1547,9 +1565,15 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
                     result = _generate_quote_comparison(st.session_state.quote_data, api_key, el_lang)
                     st.session_state.quote_result = result
                     st.session_state.quote_mode   = False
-                    lines_r = result.split("\n")
-                    spoken  = next((l.replace("**RECOMMENDATION**", "").replace("**", "").strip()
-                                    for l in lines_r if l.strip() and "RECOMMENDATION" in l.upper()), "")
+                    # Extract spoken recommendation from JSON
+                    import json as _json
+                    try:
+                        _q = _json.loads(result)
+                        spoken = _q.get("recommendation", "")
+                        st.session_state.quote_client_name = _q.get("client_name", "")
+                    except Exception:
+                        spoken = " ".join(result.split()[:40])
+                        st.session_state.quote_client_name = ""
                     if not spoken:
                         spoken = " ".join(result.split()[:40])
                     st.session_state.voice_history.append({"role": "assistant", "content": spoken})
