@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Pantelis Kourbelas | Ashlar Insurance
+Chris Iatropoulos | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -1176,154 +1176,163 @@ def _render_avatar(state: str = "idle"):
 
 
 def render_voice_chat():
-    """HAL Voice — speak to HAL and hear responses back."""
+    """HAL Voice — properly wired with streamlit-mic-recorder."""
     import anthropic
     import json
     import base64
     import streamlit.components.v1 as components
 
+    try:
+        from streamlit_mic_recorder import mic_recorder
+        MIC_OK = True
+    except ImportError:
+        MIC_OK = False
+
     is_private = st.session_state.mode == "private"
     mode_label = "Private · Lodge & Personal" if is_private else "Business · Ashlar Insurance"
     st.markdown(f"## 🎙️ HAL Voice — {mode_label}")
-    st.caption("Speak to HAL · HAL speaks back · Supports Greek & English")
+    st.caption("Speak to HAL · HAL speaks back · Greek & English")
 
     api_key = get_api_key() or st.session_state.get("api_key_input", "")
 
-    # ── Settings ──────────────────────────────────────────────────────────
-    with st.expander("⚙️ Voice settings", expanded=False):
+    # ── ElevenLabs key ────────────────────────────────────────────────────
+    el_key   = st.secrets.get("ELEVENLABS_API_KEY", "")
+    el_voice = "onwK4e9ZLuTAKqWW03F9"  # Daniel — multilingual
+    el_lang  = "el"
+    lang_code = "el-GR"
+
+    with st.expander("⚙️ Voice settings", expanded=not bool(el_key)):
+        if not el_key:
+            el_key = st.text_input(
+                "ElevenLabs API key", type="password", key="el_key_input",
+                help="Add ELEVENLABS_API_KEY to Streamlit secrets (Settings → Secrets).",
+            )
+            st.caption("Needs: Text to Speech ✅  Speech to Text ✅  in your ElevenLabs API key settings")
+        else:
+            st.success("✅ ElevenLabs key loaded from secrets")
+
         col1, col2 = st.columns(2)
         with col1:
-            stt_mode = st.radio(
-                "Speech-to-text",
-                ["🔊 ElevenLabs Scribe (recommended)", "🌐 Browser (free, Chrome only)"],
-                index=0,
-                help="ElevenLabs Scribe is accurate, multilingual, Greek-native. Browser Web Speech is free but Chrome-only and less accurate.",
+            el_voice = st.text_input(
+                "Voice ID", value="onwK4e9ZLuTAKqWW03F9",
+                help="Default: Daniel (multilingual, Greek-capable). Find more at elevenlabs.io/voice-lab",
+                key="el_voice_id",
             )
         with col2:
-            lang = st.selectbox(
-                "Language",
-                ["el (Greek)", "en (English)", "auto (auto-detect)"],
-                index=0,
-            )
+            lang_sel = st.selectbox("Language", ["el — Greek", "en — English", "auto"], index=0, key="voice_lang")
+            el_lang   = lang_sel.split("—")[0].strip()
+            lang_code = "el-GR" if el_lang == "el" else ("en-US" if el_lang == "en" else "el-GR")
 
-        use_el_stt = "ElevenLabs" in stt_mode
-        lang_code  = "el-GR" if lang.startswith("el") else ("en-US" if lang.startswith("en") else "el-GR")
-        el_lang    = lang.split()[0]  # "el", "en", or "auto"
+    use_el = bool(el_key)
 
-        # One key for both STT and TTS
-        el_key = st.secrets.get("ELEVENLABS_API_KEY", "") or st.text_input(
-            "ElevenLabs API key", type="password", key="el_key_input",
-            help="Used for both Speech-to-Text (Scribe) and Text-to-Speech. Add ELEVENLABS_API_KEY to Streamlit secrets.",
-        )
-        el_voice = st.text_input(
-            "ElevenLabs voice ID",
-            value="onwK4e9ZLuTAKqWW03F9",
-            help="Default: Daniel (multilingual, Greek-capable). Find more at elevenlabs.io/voice-lab",
-        )
-        if not el_key:
-            st.warning("Add ELEVENLABS_API_KEY to Streamlit secrets for full voice mode.")
-
-    use_elevenlabs = bool(el_key)
-    use_el_stt     = use_el_stt and use_elevenlabs
-    stt_mode_js    = "elevenlabs" if use_el_stt else "webspeech"
-
-    # System prompt (reuses the same logic as HAL chat)
-    system_business = """You are HAL — the AI assistant for Pantelis Kourbelas, Ashlar Insurance, Athens.
-You are in VOICE mode. Keep responses concise (2-4 sentences max per turn) — they will be spoken aloud.
+    # ── System prompts ─────────────────────────────────────────────────────
+    system_business = """You are HAL — the AI voice assistant for Pantelis Kourbelas, Ashlar Insurance, Athens.
+VOICE MODE: Keep replies to 2-4 sentences only — they will be spoken aloud.
 Specialise in international health insurance: Groupama, Generali, Ethniki, Morgan Price, NOW Health, Bupa Global.
-Respond in the language spoken to you. Be direct and conversational — no bullet lists, no markdown."""
+Respond in the language spoken to you. Conversational tone — no bullet points, no markdown."""
 
     system_private = """You are HAL — private voice assistant for Pantelis Kourbelas.
-You are in VOICE mode. Keep responses concise (2-4 sentences max) — they will be spoken aloud.
+VOICE MODE: Keep replies to 2-4 sentences only — they will be spoken aloud.
 Lodge: Στ∴ ΑΚΡΟΠΟΛΙΣ 84. Personal: finance, health, gym.
-Respond in Greek unless spoken to in English. Conversational tone — no bullet points, no markdown."""
+Respond in Greek unless spoken to in English. Conversational — no bullet points."""
 
     system = system_private if is_private else system_business
 
-    # Session state
-    if "voice_history" not in st.session_state:
-        st.session_state.voice_history = []
-    if "voice_pending_audio" not in st.session_state:
-        st.session_state.voice_pending_audio = None
-    if "voice_last_reply" not in st.session_state:
-        st.session_state.voice_last_reply = ""
-    if "avatar_state" not in st.session_state:
-        st.session_state.avatar_state = "idle"
+    # ── Session state ──────────────────────────────────────────────────────
+    for _k, _v in [("voice_history", []), ("voice_last_reply", ""), ("avatar_state", "idle")]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
 
     # ── Layout: avatar left, conversation right ────────────────────────────
-    col_av, col_chat = st.columns([1, 2], gap="medium")
+    col_av, col_main = st.columns([1, 2], gap="medium")
 
     with col_av:
         _render_avatar(st.session_state.avatar_state)
 
-    with col_chat:
-        # ── Conversation display ───────────────────────────────────────────
-        if st.session_state.voice_history:
-            for msg in st.session_state.voice_history[-10:]:
-                icon = "user" if msg["role"] == "user" else "assistant"
-                st.chat_message(icon).write(msg["content"])
-        else:
-            st.info("🎙️ Click the mic button below, speak your message, then click **Send to HAL**.")
+    with col_main:
+        chat_box = st.container(height=260)
+        with chat_box:
+            if not st.session_state.voice_history:
+                st.info("🎙️ Use the mic below — HAL will respond in voice.")
+            else:
+                for msg in st.session_state.voice_history[-12:]:
+                    st.chat_message("user" if msg["role"] == "user" else "assistant").write(msg["content"])
 
-    # ── Voice recorder component ───────────────────────────────────────────
-    component_html = f"""
-<script>
-  window.HAL_LANG = '{lang_code}';
-  window.HAL_STT_MODE = '{stt_mode_js}';
-</script>
-""" + _VOICE_COMPONENT_HTML
+    st.divider()
 
-    components.html(component_html, height=220, scrolling=False)
-
-    st.markdown("---")
-
-    # ── Manual text fallback (always available) ────────────────────────────
-    col_input, col_send = st.columns([5, 1])
-    with col_input:
-        typed = st.text_input(
-            "Or type your message",
-            key="voice_typed_input",
-            label_visibility="collapsed",
-            placeholder="Type here if mic isn't working…",
-        )
-    with col_send:
-        send_typed = st.button("Send", type="primary", use_container_width=True, key="voice_send_typed")
-
-    # ── Audio file upload (ElevenLabs STT path) ────────────────────────────
-    if use_el_stt:
-        with st.expander("📁 Upload audio file instead", expanded=False):
-            audio_file = st.file_uploader(
-                "Upload WAV / MP3 / WEBM / M4A",
-                type=["wav", "mp3", "webm", "m4a", "ogg"],
-                key="voice_audio_upload",
-            )
-            if audio_file and st.button("Transcribe & Send", key="transcribe_upload"):
-                with st.spinner("Transcribing with ElevenLabs Scribe…"):
-                    transcript = _elevenlabs_stt(audio_file.read(), el_key, el_lang)
-                if not transcript.startswith("[ElevenLabs STT error"):
-                    st.session_state.voice_history.append({"role": "user", "content": transcript})
-                    st.session_state.voice_pending_audio = None
-                    st.session_state["_voice_trigger"] = transcript
-                else:
-                    st.error(transcript)
-
-    # ── Process text input ────────────────────────────────────────────────
+    # ── Mic recorder (proper Streamlit component — returns bytes to Python) ──
     user_text = None
-    if send_typed and typed.strip():
-        user_text = typed.strip()
-    elif st.session_state.get("_voice_trigger"):
-        user_text = st.session_state.pop("_voice_trigger")
 
+    if MIC_OK:
+        st.markdown("**🎙️ Record your message**")
+        audio = mic_recorder(
+            start_prompt="🔴 Click to speak",
+            stop_prompt="⏹️ Click to stop",
+            just_once=True,
+            use_container_width=True,
+            key="hal_mic",
+        )
+        if audio and audio.get("bytes"):
+            if use_el:
+                with st.spinner("Transcribing with ElevenLabs Scribe…"):
+                    transcript = _elevenlabs_stt(audio["bytes"], el_key, el_lang)
+                if transcript and not transcript.startswith("[ElevenLabs STT error"):
+                    st.info(f"Heard: *{transcript}*")
+                    user_text = transcript
+                else:
+                    st.error(f"Transcription failed: {transcript}")
+                    st.caption("Check that Speech to Text → Access is enabled in your ElevenLabs API key.")
+            else:
+                st.warning("Add ELEVENLABS_API_KEY to Streamlit secrets to transcribe. Type below instead.")
+    else:
+        st.warning(
+            "Install `streamlit-mic-recorder` to enable the mic button. "
+            "Add it to requirements.txt and redeploy."
+        )
+
+    # ── Text / type fallback (always available) ────────────────────────────
+    col_t, col_s = st.columns([5, 1])
+    with col_t:
+        typed = st.text_input(
+            "type", label_visibility="collapsed",
+            placeholder="Or type your message here…",
+            key="voice_type_input",
+        )
+    with col_s:
+        if st.button("Send", type="primary", use_container_width=True, key="voice_send_btn"):
+            if typed.strip():
+                user_text = typed.strip()
+
+    # ── Audio file upload fallback ─────────────────────────────────────────
+    with st.expander("📁 Upload audio file instead", expanded=False):
+        af = st.file_uploader(
+            "WAV / MP3 / WEBM / M4A / OGG",
+            type=["wav", "mp3", "webm", "m4a", "ogg"],
+            key="voice_audio_upload",
+        )
+        if af and st.button("Transcribe & Send", key="transcribe_file_btn"):
+            if use_el:
+                with st.spinner("Transcribing with ElevenLabs Scribe…"):
+                    t2 = _elevenlabs_stt(af.read(), el_key, el_lang)
+                if t2 and not t2.startswith("[ElevenLabs STT error"):
+                    st.info(f"Heard: *{t2}*")
+                    user_text = t2
+                else:
+                    st.error(t2)
+            else:
+                st.warning("Add ELEVENLABS_API_KEY first.")
+
+    # ── Process → Claude → TTS ─────────────────────────────────────────────
     if user_text and api_key:
         st.session_state.voice_history.append({"role": "user", "content": user_text})
         st.session_state.avatar_state = "thinking"
 
         with st.spinner("HAL is thinking…"):
             try:
-                client = anthropic.Anthropic(api_key=api_key)
-                messages = [{"role": m["role"], "content": m["content"]}
-                            for m in st.session_state.voice_history]
-                response = client.messages.create(
+                client_ai = anthropic.Anthropic(api_key=api_key)
+                messages  = [{"role": m["role"], "content": m["content"]}
+                             for m in st.session_state.voice_history]
+                response  = client_ai.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=400,
                     system=system,
@@ -1335,17 +1344,17 @@ Respond in Greek unless spoken to in English. Conversational tone — no bullet 
                 st.session_state.avatar_state = "speaking"
 
                 # ── TTS ────────────────────────────────────────────────────
-                if use_elevenlabs and el_key:
+                if use_el:
                     audio_bytes = _elevenlabs_tts(reply, el_key, el_voice)
                     if audio_bytes:
                         b64 = base64.b64encode(audio_bytes).decode()
                         components.html(
-                            f'<audio autoplay style="display:none" onended="window.parent.postMessage({{type:\'hal_ready\'}},\'*\')">'
+                            f'<audio autoplay style="display:none">'
                             f'<source src="data:audio/mpeg;base64,{b64}" type="audio/mpeg"></audio>',
                             height=0,
                         )
                     else:
-                        st.warning("ElevenLabs TTS failed — falling back to browser synthesis.")
+                        st.warning("ElevenLabs TTS failed — using browser synthesis.")
                         components.html(
                             _TTS_PLAY_HTML.format(
                                 text_json=json.dumps(reply),
@@ -1371,26 +1380,25 @@ Respond in Greek unless spoken to in English. Conversational tone — no bullet 
     elif user_text and not api_key:
         st.error("No Claude API key — add Claude_API_Key to Streamlit secrets.")
 
-    # After speaking, revert avatar to idle on next render
     if st.session_state.avatar_state == "speaking" and not user_text:
         st.session_state.avatar_state = "idle"
 
-    # ── Download last reply ────────────────────────────────────────────────
+    # ── Controls ──────────────────────────────────────────────────────────
     if st.session_state.voice_last_reply:
         st.divider()
-        col_a, col_b = st.columns(2)
-        with col_a:
+        c1, c2 = st.columns(2)
+        with c1:
             st.download_button(
                 "📥 Download last reply",
                 st.session_state.voice_last_reply,
                 file_name="hal_reply.txt",
                 use_container_width=True,
             )
-        with col_b:
+        with c2:
             if st.button("🗑 Clear conversation", use_container_width=True, key="clear_voice"):
-                st.session_state.voice_history = []
+                st.session_state.voice_history    = []
                 st.session_state.voice_last_reply = ""
-                st.session_state.avatar_state = "idle"
+                st.session_state.avatar_state     = "idle"
                 st.rerun()
 
 
