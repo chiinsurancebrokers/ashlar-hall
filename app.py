@@ -481,6 +481,79 @@ def render_private_home():
                         st.rerun()
 
 
+def _extract_pdf_text(file_bytes: bytes, filename: str) -> str:
+    """Extract text from a PDF using pypdf / PyPDF2 (whichever is installed)."""
+    import io
+    try:
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            from PyPDF2 import PdfReader
+        reader = PdfReader(io.BytesIO(file_bytes))
+        pages = []
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text() or ""
+            if text.strip():
+                pages.append(f"[Page {i+1}]\n{text.strip()}")
+        return "\n\n".join(pages) if pages else "[No readable text found in PDF]"
+    except Exception as e:
+        return f"[PDF extraction failed for {filename}: {e}]"
+
+
+def _build_api_content(user_text: str, uploaded_files) -> tuple[list, list[str]]:
+    """
+    Convert user text + uploaded files into a Claude API content list.
+    Returns (api_content_list, attachment_names).
+    """
+    import base64
+    api_content = []
+    attachment_names = []
+
+    for uf in (uploaded_files or []):
+        attachment_names.append(uf.name)
+        file_bytes = uf.read()
+        mime = uf.type or ""
+
+        if mime == "application/pdf" or uf.name.lower().endswith(".pdf"):
+            pdf_text = _extract_pdf_text(file_bytes, uf.name)
+            size_kb = round(len(file_bytes) / 1024, 1)
+            api_content.append({
+                "type": "text",
+                "text": (
+                    f"<document filename='{uf.name}' size='{size_kb} KB'>\n"
+                    f"{pdf_text}\n"
+                    f"</document>"
+                ),
+            })
+
+        elif mime.startswith("image/") and mime in (
+            "image/jpeg", "image/png", "image/gif", "image/webp"
+        ):
+            b64 = base64.standard_b64encode(file_bytes).decode("utf-8")
+            api_content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": mime, "data": b64},
+            })
+
+        elif mime in ("text/plain", "text/csv") or uf.name.lower().endswith((".txt", ".csv")):
+            text = file_bytes.decode("utf-8", errors="replace")
+            api_content.append({
+                "type": "text",
+                "text": f"<document filename='{uf.name}'>\n{text}\n</document>",
+            })
+
+        else:
+            # Unsupported — note it so user knows
+            api_content.append({
+                "type": "text",
+                "text": f"[Attached file '{uf.name}' — type '{mime}' not directly readable; please describe what you need from it.]",
+            })
+
+    # User message always last so it reads naturally
+    api_content.append({"type": "text", "text": user_text})
+    return api_content, attachment_names
+
+
 def render_hal_chat():
     import anthropic
 
@@ -498,6 +571,7 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Tech stack: Python, Streamlit, Netlify, Claude API, ReportLab, python-pptx, Firebase, Google Sheets.
 - Brand: Ashlar Insurance (ashlar-assurance.com). Pet brand: petshealth.gr.
 
+When documents are provided, analyse them thoroughly before responding.
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send."""
 
     system_prompt_private = """You are HAL — the private AI assistant for Pantelis Kourbelas. In this private mode you have access to lodge and personal context.
@@ -506,28 +580,75 @@ LODGE: You assist as secretary for Στ∴ ΑΚΡΟΠΟΛΙΣ υπ' αρ. 84 (Gr
 
 PERSONAL: Financial adviser, nurse, gym coach. Help with savings plans, retirement modelling, workout programmes, health monitoring.
 
+When documents are provided, analyse them thoroughly before responding.
 Never mix lodge content with business sessions. Respond in Greek unless asked otherwise."""
 
     system = system_prompt_private if is_private else system_prompt_business
-
     api_key = get_api_key() or st.session_state.get("api_key_input", "")
 
-    # Chat history display
-    chat_container = st.container()
-    with chat_container:
-        if not st.session_state.chat_history:
-            st.info("HAL is ready. Ask anything about insurance, clients, quotes, documents, or use quick actions below.")
-        else:
-            for msg in st.session_state.chat_history:
-                if msg["role"] == "user":
-                    st.chat_message("user").write(msg["content"])
-                else:
-                    st.chat_message("assistant").write(msg["content"])
+    # ── Upload key counter — incremented after send to reset the uploader ──
+    if "upload_key_counter" not in st.session_state:
+        st.session_state.upload_key_counter = 0
 
-    # Quick actions
+    # ── Document upload panel ──────────────────────────────────────────────
+    st.markdown("""
+    <style>
+    .upload-hint { 
+        font-size: 12px; color: #7A6A5A; 
+        margin: -8px 0 8px; padding: 6px 10px;
+        background: #FBF8F4; border-radius: 6px; 
+        border-left: 3px solid #C9A96E;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    with st.expander(
+        "📎 Attach documents to next message",
+        expanded=st.session_state.get("upload_panel_open", False)
+    ):
+        st.markdown(
+            '<div class="upload-hint">'
+            'Supported: <b>PDF</b> (text extracted), <b>images</b> (PNG/JPG/WEBP — analysed visually), '
+            '<b>TXT / CSV</b>. Files attach to your <em>next</em> message only.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        uploaded_files = st.file_uploader(
+            "Drop files here or click to browse",
+            type=["pdf", "png", "jpg", "jpeg", "gif", "webp", "txt", "csv"],
+            accept_multiple_files=True,
+            key=f"hal_upload_{st.session_state.upload_key_counter}",
+            label_visibility="collapsed",
+        )
+        if uploaded_files:
+            for uf in uploaded_files:
+                size_str = f"{round(uf.size/1024, 1)} KB" if uf.size < 1024*1024 else f"{round(uf.size/1024/1024, 1)} MB"
+                icon = "🖼️" if (uf.type or "").startswith("image/") else "📄"
+                st.caption(f"{icon} **{uf.name}** · {size_str} · ready to attach")
+        else:
+            uploaded_files = []
+
+    st.markdown("")
+
+    # ── Chat history display ───────────────────────────────────────────────
+    if not st.session_state.chat_history:
+        st.info("HAL is ready. Type a message below — or attach documents above and ask HAL to analyse them.")
+    else:
+        for msg in st.session_state.chat_history:
+            if msg["role"] == "user":
+                with st.chat_message("user"):
+                    st.write(msg.get("display", msg.get("content", "")))
+                    for att in msg.get("attachments", []):
+                        icon = "🖼️" if any(
+                            att.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp")
+                        ) else "📄"
+                        st.caption(f"{icon} {att}")
+            else:
+                st.chat_message("assistant").write(msg["content"])
+
+    # ── Quick actions (only when chat is empty) ────────────────────────────
     if not st.session_state.chat_history:
         st.markdown("**Quick actions:**")
-        quick = []
         if is_private:
             quick = [
                 "Draft a circular to the lodge brothers in Greek Tektonic style",
@@ -549,45 +670,84 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
         for i, q in enumerate(quick):
             with cols[i % 2]:
                 if st.button(q, key=f"quick_{i}", use_container_width=True):
-                    st.session_state.chat_history.append({"role": "user", "content": q})
+                    st.session_state.chat_history.append({
+                        "role": "user",
+                        "content": q,
+                        "display": q,
+                        "attachments": [],
+                    })
                     st.rerun()
 
-    # Input
-    user_input = st.chat_input("Message HAL...")
+    # ── Chat input ─────────────────────────────────────────────────────────
+    user_input = st.chat_input("Message HAL... (attach documents above to include them)")
     if user_input:
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        # Build API content blocks (text + any uploaded files)
+        api_content, attachment_names = _build_api_content(user_input, uploaded_files)
+
+        # History entry — display text separate from api_content
+        history_entry = {
+            "role": "user",
+            "display": user_input,
+            "content": user_input,          # plain text fallback
+            "attachments": attachment_names,
+        }
+        if attachment_names:
+            history_entry["api_content"] = api_content  # rich content for API
+
+        st.session_state.chat_history.append(history_entry)
+
+        # Reset uploader for next message
+        if attachment_names:
+            st.session_state.upload_key_counter += 1
+            st.session_state.upload_panel_open = False
 
         if not api_key:
             st.session_state.chat_history.append({
                 "role": "assistant",
-                "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."
+                "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets.",
             })
         else:
             with st.spinner("HAL is thinking..."):
                 try:
                     client = anthropic.Anthropic(api_key=api_key)
-                    messages = [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state.chat_history
-                    ]
+
+                    # Build messages — use api_content when present, else plain string
+                    messages = []
+                    for m in st.session_state.chat_history:
+                        if m["role"] == "user":
+                            messages.append({
+                                "role": "user",
+                                "content": m.get("api_content") or m.get("content", ""),
+                            })
+                        else:
+                            messages.append({
+                                "role": "assistant",
+                                "content": m["content"],
+                            })
+
+                    # Use more tokens when documents are attached
+                    max_tok = 4000 if attachment_names else 2000
+
                     response = client.messages.create(
                         model="claude-sonnet-4-20250514",
-                        max_tokens=2000,
+                        max_tokens=max_tok,
                         system=system,
-                        messages=messages
+                        messages=messages,
                     )
                     reply = response.content[0].text
                     st.session_state.chat_history.append({"role": "assistant", "content": reply})
                 except Exception as e:
                     st.session_state.chat_history.append({
                         "role": "assistant",
-                        "content": f"⚠️ Error: {str(e)}"
+                        "content": f"⚠️ Error: {str(e)}",
                     })
         st.rerun()
 
+    # ── Clear button ───────────────────────────────────────────────────────
     if st.session_state.chat_history:
         if st.button("🗑 Clear conversation", key="clear_chat"):
             st.session_state.chat_history = []
+            st.session_state.upload_key_counter += 1   # reset uploader too
             st.rerun()
 
 
