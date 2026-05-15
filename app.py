@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Pantelis Kourbelas | Ashlar Insurance
+HAL | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
