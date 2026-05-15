@@ -1478,14 +1478,14 @@ def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
 
 
 def _render_avatar(state: str = "idle"):
-    """Render HAL orb. Uses iframe via components.html for reliable canvas rendering."""
+    """Render HAL orb via components.html (iframe with fixed height)."""
     import streamlit.components.v1 as _cv1
     labels = {"idle": "standby", "listening": "listening...",
               "thinking": "thinking...", "speaking": "speaking..."}
     html = (_HAL_ORB_HTML
             .replace("HAL_INIT_STATE",  state)
             .replace("HAL_STATE_LABEL", labels.get(state, "standby")))
-    st.iframe(html, height=310, scrolling=False)
+    _cv1.html(html, height=310, scrolling=False)
 
 
 
