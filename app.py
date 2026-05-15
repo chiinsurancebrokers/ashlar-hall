@@ -1244,63 +1244,85 @@ def _render_quote_cards_html(quote_json_str: str) -> str:
     try:
         q = json.loads(quote_json_str)
     except Exception:
-        return f"<pre style=\'color:red\'>{quote_json_str}</pre>"
+        return f"<pre style='color:#c00'>{quote_json_str[:500]}</pre>"
 
     plans          = q.get("plans", [])
     considerations = q.get("considerations", [])
     next_step      = q.get("next_step", "")
 
-    def row(label, val, dim=False):
-        color = "#888780" if dim else "inherit"
-        return (f'<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px">'
-                f'<span style="color:#888780">{label}</span>'
-                f'<span style="font-weight:500;color:{color}">{val}</span></div>')
+    def tag(label, val):
+        dim = any(w in str(val) for w in ["Not","Δεν","Όχι","No"])
+        val_color = "#aaa" if dim else "#1a1a1a"
+        return (f'<div style="display:grid;grid-template-columns:110px 1fr;gap:4px;'
+                f'padding:6px 0;border-bottom:1px solid #f0ede8;font-size:13px;align-items:start">'
+                f'<span style="color:#888;font-size:12px;padding-top:1px">{label}</span>'
+                f'<span style="color:{val_color};font-weight:500;line-height:1.4">{val}</span></div>')
 
-    def plan_card(p):
-        rec    = p.get("recommended", False)
-        border = "border:2px solid #185FA5" if rec else "border:0.5px solid #E0DDD8"
-        badge  = ('<div style="position:absolute;top:-11px;left:50%;transform:translateX(-50%);'
-                  'background:#185FA5;color:#fff;font-size:11px;font-weight:500;padding:2px 12px;'
-                  'border-radius:20px;white-space:nowrap">HAL recommends</div>') if rec else ""
-        pc     = "#185FA5" if rec else "inherit"
-        bstyle = "background:#185FA5;color:#fff;border:none" if rec else "background:transparent;border:0.5px solid #C5BFB5"
-        btxt   = "Select this plan" if rec else "View details"
-        cc     = p.get("carrier_code", "??")
-        lbg    = "#185FA510" if rec else "#F1EFE8"
-        lc     = "#185FA5" if rec else "#888780"
-        ann    = p.get("annual_eur", 0)
-        mo     = p.get("monthly_eur", 0)
+    def card(p):
+        rec     = p.get("recommended", False)
+        ann     = p.get("annual_eur", 0)
+        mo      = p.get("monthly_eur", 0)
+        cc      = p.get("carrier_code","??")[:5]
+        name    = p.get("name","")
+        carrier = p.get("carrier","")
+        rec_badge = ('<div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);'
+                     'background:#1a6fd4;color:#fff;font-size:11px;font-weight:600;padding:3px 14px;'
+                     'border-radius:20px;white-space:nowrap;box-shadow:0 2px 8px #1a6fd433">'
+                     '★ HAL recommends</div>') if rec else ""
+        card_border = "border:2px solid #1a6fd4;box-shadow:0 4px 16px #1a6fd422" if rec else "border:1px solid #e5e2dc"
+        price_color = "#1a6fd4" if rec else "#1a1a1a"
+        btn_style   = ("background:#1a6fd4;color:#fff;border:none;cursor:pointer;font-weight:600"
+                       if rec else "background:#f5f3f0;color:#444;border:1px solid #ddd;cursor:pointer")
+        btn_label   = "Select this plan" if rec else "View details"
+        lbg = "#e8f0fb" if rec else "#f5f3f0"
+        lc  = "#1a6fd4" if rec else "#666"
+
+        rows = (tag("Coverage",       p.get("coverage",""))
+              + tag("Annual limit",   p.get("annual_limit",""))
+              + tag("Deductible",     p.get("deductible",""))
+              + tag("Inpatient",      p.get("inpatient",""))
+              + tag("Outpatient",     p.get("outpatient",""))
+              + tag("Dental",        p.get("dental",""))
+              + tag("Direct billing", p.get("direct_billing","")))
+
         return (
-            f'<div style="position:relative;background:#fff;{border};border-radius:12px;padding:16px;'
-            f'flex:1;min-width:180px;max-width:260px">{badge}'
-            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
-            f'<div style="width:36px;height:36px;border-radius:8px;background:{lbg};display:flex;'
-            f'align-items:center;justify-content:center;font-size:10px;font-weight:600;color:{lc};flex-shrink:0">{cc}</div>'
-            f'<div><div style="font-size:14px;font-weight:500">{p.get("name","")}</div>'
-            f'<div style="font-size:12px;color:#888780">{p.get("carrier","")}</div></div></div>'
-            f'<div style="font-size:26px;font-weight:500;color:{pc};line-height:1">'
-            f'&#8364;{ann:,} <span style="font-size:13px;font-weight:400;color:#888780">/year</span></div>'
-            f'<div style="font-size:12px;color:#888780;margin-bottom:12px">&#8364;{mo}/month</div>'
-            f'<hr style="border:none;border-top:0.5px solid #E0DDD8;margin:12px 0">'
-            + row("Coverage", p.get("coverage",""))
-            + row("Annual limit", p.get("annual_limit",""))
-            + row("Deductible", p.get("deductible",""))
-            + row("Inpatient", p.get("inpatient",""))
-            + row("Outpatient", p.get("outpatient",""))
-            + row("Dental", p.get("dental",""), dim="Not" in p.get("dental",""))
-            + row("Direct billing", p.get("direct_billing",""))
-            + f'<button style="width:100%;margin-top:12px;padding:8px;border-radius:8px;{bstyle};'
-              f'font-size:13px;cursor:pointer">{btxt}</button></div>'
+            f'<div style="position:relative;background:#fff;{card_border};border-radius:14px;'
+            f'padding:20px;flex:1;min-width:220px;max-width:320px;font-family:-apple-system,sans-serif">{rec_badge}'
+            # Header
+            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'
+            f'<div style="width:40px;height:40px;border-radius:10px;background:{lbg};color:{lc};'
+            f'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">{cc}</div>'
+            f'<div>'
+            f'<div style="font-size:15px;font-weight:600;color:#1a1a1a;line-height:1.2">{name}</div>'
+            f'<div style="font-size:12px;color:#888;margin-top:2px">{carrier}</div>'
+            f'</div></div>'
+            # Price
+            f'<div style="margin-bottom:4px">'
+            f'<span style="font-size:30px;font-weight:700;color:{price_color}">&#8364;{ann:,}</span>'
+            f'<span style="font-size:14px;color:#888;margin-left:4px">/year</span>'
+            f'</div>'
+            f'<div style="font-size:13px;color:#888;margin-bottom:14px">&#8364;{mo}/month</div>'
+            # Benefit rows
+            + rows
+            # Button
+            + f'<button style="width:100%;margin-top:14px;padding:10px;border-radius:8px;'
+              f'{btn_style};font-size:14px">{btn_label}</button>'
+            f'</div>'
         )
 
-    cards   = "".join(plan_card(p) for p in plans)
-    cons_li = "".join(f'<li style="margin:4px 0">{c}</li>' for c in considerations)
-    cons_bl = (f'<div style="background:#F8F6F2;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">'
-               f'<b>Key considerations</b><ul style="margin:8px 0 0;padding-left:20px;color:#5F5E5A">{cons_li}</ul></div>') if considerations else ""
-    ns_bl   = f'<div style="font-size:13px;color:#5F5E5A;padding:8px 0"><b>Next step:</b> {next_step}</div>' if next_step else ""
-    disc    = ('<div style="font-size:11px;color:#A89880;margin-top:10px;padding-top:8px;border-top:0.5px solid #E0DDD8">'
-               'Premiums from 2025 carrier rate tables &middot; Indicative &middot; Subject to underwriting &middot; Valid 30 days</div>')
-    return f'<div style="font-family:-apple-system,sans-serif;padding:4px 0"><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">{cards}</div>{cons_bl}{ns_bl}{disc}</div>'
+    cards_html = "".join(card(p) for p in plans)
+    cons_li    = "".join(f'<li style="margin:5px 0;color:#444;font-size:13px">{c}</li>' for c in considerations)
+    cons_block = (f'<div style="background:#f8f6f2;border-radius:10px;padding:14px 18px;margin:16px 0">'
+                  f'<div style="font-weight:600;margin-bottom:8px;font-size:14px">Key considerations</div>'
+                  f'<ul style="margin:0;padding-left:18px">{cons_li}</ul></div>') if considerations else ""
+    ns_block   = (f'<div style="font-size:13px;color:#555;padding:6px 0">'
+                  f'<b>Next step:</b> {next_step}</div>') if next_step else ""
+    disc       = ('<div style="font-size:11px;color:#aaa;margin-top:12px;padding-top:10px;border-top:1px solid #eee">'
+                  'Premiums from 2025 carrier rate tables &middot; Indicative — subject to underwriting &middot; Valid 30 days</div>')
+    return (f'<div style="font-family:-apple-system,sans-serif;padding:8px 0">'
+            f'<div style="display:flex;gap:16px;flex-wrap:wrap">{cards_html}</div>'
+            f'{cons_block}{ns_block}{disc}</div>')
+
 
 
 def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
@@ -1348,6 +1370,7 @@ def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
         msg["To"]      = to_email
         msg.attach(MIMEText(html, "html"))
 
+        app_password = app_password.replace(" ", "")  # strip spaces from app password
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
             srv.login(sender_email, app_password)
             srv.sendmail(sender_email, to_email, msg.as_string())
@@ -1484,20 +1507,11 @@ section[data-testid="stMain"] { background: #050A14 !important; }
 
     # ── Play pending TTS (Web Audio API — bypasses browser autoplay block) ─
     if st.session_state.voice_tts_pending:
-        _b64 = base64.b64encode(st.session_state.voice_tts_pending).decode()
+        _audio_bytes = st.session_state.voice_tts_pending
         st.session_state.voice_tts_pending = None
-        st.session_state._is_speaking = True   # block mic during playback
-        st.html(f"""<script>
-(function(){{try{{
-  var s=atob('{_b64}'),a=new Uint8Array(s.length);
-  for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);
-  var c=new(window.AudioContext||window.webkitAudioContext)();
-  c.decodeAudioData(a.buffer,function(b){{
-    var n=c.createBufferSource();n.buffer=b;n.connect(c.destination);n.start(0);
-  }});
-}}catch(e){{console.warn('HAL audio:',e);}}}}
-)();
-</script>""")
+        st.session_state._is_speaking = True
+        # st.audio with autoplay=True — works in main Streamlit frame after user interaction
+        st.audio(_audio_bytes, format="audio/mp3", autoplay=True)
 
     # ── Orb + status text ─────────────────────────────────────────────────
     st.markdown('<div class="hal-orb-wrap">', unsafe_allow_html=True)
@@ -1754,6 +1768,7 @@ section[data-testid="stMain"] { background: #050A14 !important; }
         with ec2:
             if st.button("Send quote", type="primary", use_container_width=True, key="hal_send"):
                 gs = st.secrets.get("GMAIL_SENDER",""); gp = st.secrets.get("GMAIL_APP_PASSWORD","")
+                gp = gp.replace(" ", "")  # Gmail app passwords contain spaces — strip them
                 if gs and gp:
                     with st.spinner("Sending…"):
                         ok = _send_quote_email(cemail, st.session_state.quote_client_name or "Client",
