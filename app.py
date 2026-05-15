@@ -724,12 +724,12 @@ _TTS_PLAY_HTML = """
 #   'idle' | 'listening' | 'thinking' | 'speaking'
 _HAL_ORB_HTML = """
 <style>
-  body{margin:0;background:#000}
-  #w{display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 0;background:#000;border-radius:12px}
+  html,body{margin:0;padding:0;background:transparent!important}
+  #w{display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0;background:transparent}
   #st{font-size:11px;font-family:monospace;letter-spacing:2px;text-transform:uppercase;min-height:16px;transition:color .5s}
 </style>
 <div id="w">
-  <canvas id="o" width="220" height="220"></canvas>
+  <canvas id="o" width="220" height="220" style="display:block"></canvas>
   <div id="st">HAL_STATE_LABEL</div>
 </div>
 <script>
@@ -1279,7 +1279,7 @@ def _render_avatar(state: str = "idle"):
     html = (_HAL_ORB_HTML
             .replace("HAL_INIT_STATE",  state)
             .replace("HAL_STATE_LABEL", labels.get(state, "standby")))
-    components.html(html, height=268, scrolling=False)
+    components.html(html, height=280, scrolling=False)
 
 
 def render_voice_chat():
@@ -1408,36 +1408,9 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
 
     st.divider()
 
-    # ── Quote Mode controls ────────────────────────────────────────────────
-    qcol1, qcol2 = st.columns([1, 3])
-    with qcol1:
-        if not st.session_state.quote_mode:
-            if st.button("🏥 Start Quote", type="primary", use_container_width=True,
-                         help="HAL asks 6 questions then generates a plan comparison"):
-                st.session_state.quote_mode   = True
-                st.session_state.quote_step   = 0
-                st.session_state.quote_data   = {}
-                st.session_state.quote_result = None
-                first_q = _get_quote_question(0, el_lang)
-                intro   = ("Ξεκινάμε τη σύγκριση ασφαλιστικών προγραμμάτων. " if el_lang == "el"
-                           else "Starting the quote interview. ") + first_q
-                st.session_state.voice_history.append({"role": "assistant", "content": intro})
-                if use_el:
-                    st.session_state.voice_tts_pending = _elevenlabs_tts(intro, el_key, el_voice)
-                st.rerun()
-        else:
-            if st.button("✖ Cancel Quote", use_container_width=True):
-                st.session_state.quote_mode = False
-                st.session_state.quote_step = 0
-                st.session_state.quote_data = {}
-                st.rerun()
-    with qcol2:
-        if st.session_state.quote_mode and not st.session_state.quote_result:
-            step  = st.session_state.quote_step
-            total = len(QUOTE_QUESTIONS)
-            st.progress(min(step / total, 1.0),
-                        text=f"Question {min(step+1, total)} of {total} — "
-                             f"{QUOTE_QUESTIONS[min(step, total-1)][0].replace('_',' ').title()}")
+    # ── Quote in progress indicator (no button needed — auto-triggered) ─────
+    if st.session_state.quote_mode and not st.session_state.quote_result:
+        st.caption("⏳ Collecting details for your quote…")
 
     # ── Quote result — Stellar-style plan cards + email ───────────────────
     if st.session_state.quote_result:
@@ -1566,59 +1539,75 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
             st.session_state._voice_processing = False
             st.rerun()
 
-    # ── AUTO-TRIGGER: detect quote intent → extract context → skip interview ─
-    _QUOTE_KW = [
-        "quot", "premium", "price", "cost", "how much", "plan", "compare",
-        "rates", "show me", "give me", "what are",
-        "τιμ", "ασφάλιστρ", "προσφορ", "πόσο", "πλάν", "σύγκριν",
-        "τιμολόγ", "κόστ", "δείξε", "δωσε",
+    # ── QUOTE CONTEXT EXTRACTOR ─────────────────────────────────────────────
+    def _extract_ctx(text: str) -> dict:
+        import re
+        ctx = {}
+        tl  = text.lower()
+        nm = re.search(r"(?:my name is|i am|call me|i'm)\s+([A-Za-z]+)", tl)
+        if nm: ctx["client_name"] = nm.group(1).title()
+        am = re.search(r"\b(\d{2})\s*(?:year|yr|\u03b5\u03c4|\u03c7\u03c1\u03bf\u03bd)", tl)
+        if am:
+            ctx["client_age"] = am.group(1)
+        else:
+            written = [
+                ("πενήντα δύο","52"),
+                ("πενήντα τριών","53"),
+                ("πενήντα τέσσερα","54"),
+                ("πενήντα πέντε","55"),
+                ("πενήντα","50"),
+                ("σαράντα πέντε","45"),
+                ("σαράντα","40"),
+                ("εξήντα πέντε","65"),
+                ("εξήντα","60"),
+                ("fifty-two","52"),("fifty two","52"),("forty-five","45"),
+                ("sixty","60"),("fifty","50"),("forty","40"),("thirty-five","35"),
+            ]
+            for word, num in written:
+                if word in tl:
+                    ctx["client_age"] = num
+                    break
+            if "client_age" not in ctx:
+                am2 = re.search(r"\b([2-7][0-9])\b", tl)
+                if am2: ctx["client_age"] = am2.group(1)
+        if any(w in tl for w in ["ελλάδ","αθήν","greece","athens","greek"]): ctx["location"] = "Greece"
+        elif any(w in tl for w in ["κύπρ","cyprus"]): ctx["location"] = "Cyprus"
+        elif any(w in tl for w in ["uk ","united kingdom"]): ctx["location"] = "UK"
+        covs = []
+        if any(w in tl for w in ["inpatient","νοσοκομ","νοσηλ","hospital"]): covs.append("inpatient")
+        if any(w in tl for w in ["outpatient","εξωτερ"]): covs.append("outpatient")
+        if any(w in tl for w in ["international","διεθν","worldwide","global"]): covs.append("international")
+        if covs: ctx["coverage_type"] = " + ".join(covs)
+        if any(w in tl for w in ["europe","ευρώπ","ευρωπ"]): ctx.setdefault("priorities", "Europe coverage")
+        return ctx
+
+    _QUOTE_WANT = [
+        "προσφορ","ασφάλιστρ",
+        "τιμολόγ","σύγκριν",
+        "πόσο","δείξε","φέρε",
+        "επιλογ","πλάν",
+        "quot","premium","price","cost","show","give","compare","plan","option",
     ]
+    # ── AUTO-TRIGGER: detect quote intent in ANY message ─────────────────
+    _QUOTE_KW = _QUOTE_WANT
     if (user_text
         and not st.session_state.quote_mode
         and not st.session_state.quote_result
         and not st.session_state.get("_voice_processing")
         and any(kw in user_text.lower() for kw in _QUOTE_KW)
-        and st.session_state.voice_history
     ):
-        import re as _re
-        # ── Extract everything we already know from conversation history ──
         _hist = " ".join(m["content"] for m in st.session_state.voice_history) + " " + user_text
-        _histl = _hist.lower()
-        _known = {}
-
-        # Name
-        _nm = _re.search(r"(?:my name is|i am|call me)\s+([A-Za-z]+)", _histl)
-        if _nm: _known["client_name"] = _nm.group(1).title()
-
-        # Age — look for patterns like "52 years old", "fifty-two", "age 52"
-        _am = _re.search(r"(\d{2})\s*(?:years?\s*old|yr)", _histl)
-        if _am: _known["client_age"] = _am.group(1)
-
-        # Location
-        if any(w in _histl for w in ["greece", "ελλάδ", "athens", "αθήν", "greek", "thessal"]):
-            _known["location"] = "Greece"
-
-        # Coverage type
-        _cov = []
-        if any(w in _histl for w in ["inpatient", "hospital", "νοσοκομ", "εισαγωγ"]): _cov.append("inpatient")
-        if any(w in _histl for w in ["outpatient", "εξωτερ", "εξωτ"]): _cov.append("outpatient")
-        if any(w in _histl for w in ["international", "διεθν", "worldwide"]): _cov.append("international")
-        if _cov: _known["coverage_type"] = " + ".join(_cov) if _cov else "international"
-
-        # Priorities / budget hints
-        if any(w in _histl for w in ["budget", "cheap", "afford", "προϋπολογ", "φθην"]): _known["budget"] = "budget-conscious"
+        _known = _extract_ctx(_hist)
+        _can_generate = ("client_age" in _known and "location" in _known and "coverage_type" in _known)
 
         st.session_state.voice_history.append({"role": "user", "content": user_text})
 
-        # ── If we have age + location + coverage → generate immediately ────
-        _can_generate = ("client_age" in _known and "location" in _known and "coverage_type" in _known)
         if _can_generate:
-            # Fill any missing optional fields with defaults
             _known.setdefault("client_name", "Client")
-            _known.setdefault("priorities", "inpatient coverage")
-            _known.setdefault("budget", "not specified")
-            _ack = ("Τέλεια! Έχω ήδη τα στοιχεία σου. Υπολογίζω τα πραγματικά ασφάλιστρα για το 2025..." if el_lang == "el"
-                    else f"Perfect, I have everything I need. Calculating your actual 2025 premiums now...")
+            _known.setdefault("priorities", _known.get("coverage_type","inpatient"))
+            _known.setdefault("budget", "flexible")
+            _ack = ("Υπολογίζω τις πραγματικές τιμές 2025 για εσάς... " if el_lang == "el"
+                    else "Calculating your actual 2025 premiums now...")
             st.session_state.voice_history.append({"role": "assistant", "content": _ack})
             st.session_state.avatar_state = "thinking"
             if use_el:
@@ -1630,83 +1619,85 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
             st.session_state.quote_mode   = False
             import json as _jj
             try:
-                _spoken = _jj.loads(_result).get("recommendation", "")
-                st.session_state.quote_client_name = _jj.loads(_result).get("client_name", "")
+                _q2 = _jj.loads(_result)
+                _spoken = _q2.get("recommendation", "")
+                st.session_state.quote_client_name = _q2.get("client_name", "")
             except Exception:
                 _spoken = _result[:200]
-            st.session_state.voice_history.append({"role": "assistant", "content": _spoken})
-            st.session_state.avatar_state = "speaking"
-            if use_el and _spoken:
-                st.session_state.voice_tts_pending = _elevenlabs_tts(_spoken, el_key, el_voice)
+            if _spoken:
+                st.session_state.voice_history.append({"role": "assistant", "content": _spoken})
+                st.session_state.avatar_state = "speaking"
+                if use_el:
+                    st.session_state.voice_tts_pending = _elevenlabs_tts(_spoken, el_key, el_voice)
             st.rerun()
-
         else:
-            # ── Not enough context → start interview from first missing field ─
-            _answered = set(_known.keys())
-            _next_idx = next((i for i, q in enumerate(QUOTE_QUESTIONS) if q[0] not in _answered), 0)
-            _next_q   = _get_quote_question(_next_idx, el_lang)
-            _intro    = ("Αναζητώ τα καλύτερα πλάνα για εσάς. " if el_lang == "el"
-                         else "Let me find the best plans for you. ") + _next_q
-            st.session_state.quote_mode  = True
-            st.session_state.quote_step  = _next_idx
-            st.session_state.quote_data  = _known
+            # Missing fields — ask ONE natural question for what's needed
+            _miss = []
+            if "client_age" not in _known: _miss.append("age" if el_lang=="en" else "\u03b7\u03bb\u03b9\u03ba\u03af\u03b1")
+            if "location" not in _known:   _miss.append("location" if el_lang=="en" else "\u03c4\u03cc\u03c0\u03bf \u03b4\u03b9\u03b1\u03bc\u03bf\u03bd\u03ae\u03c2")
+            if "coverage_type" not in _known: _miss.append("coverage type" if el_lang=="en" else "\u03c4\u03cd\u03c0\u03bf \u03ba\u03ac\u03bb\u03c5\u03c8\u03b7\u03c2")
+            _ask = (f"\u03a3\u03b1\u03c2 \u03b2\u03c1\u03af\u03c3\u03ba\u03c9 \u03c4\u03b9\u03c2 \u03ba\u03b1\u03bb\u03cd\u03c4\u03b5\u03c1\u03b5\u03c2 \u03b5\u03c0\u03b9\u03bb\u03bf\u03b3\u03ad\u03c2. \u03a7\u03c1\u03b5\u03b9\u03ac\u03b6\u03bf\u03bc\u03b1\u03b9 \u03bc\u03cc\u03bd\u03bf: {', '.join(_miss)}."
+                    if el_lang == "el" else
+                    f"Let me find the best plans. I just need: {', '.join(_miss)}.")
+            st.session_state.quote_mode   = True
+            st.session_state.quote_step   = 0
+            st.session_state.quote_data   = _known
             st.session_state.quote_result = None
-            st.session_state.voice_history.append({"role": "assistant", "content": _intro})
+            st.session_state.voice_history.append({"role": "assistant", "content": _ask})
             st.session_state.avatar_state = "speaking"
             if use_el:
-                st.session_state.voice_tts_pending = _elevenlabs_tts(_intro, el_key, el_voice)
+                st.session_state.voice_tts_pending = _elevenlabs_tts(_ask, el_key, el_voice)
             st.rerun()
 
-    # ── QUOTE MODE: answer → next question or generate comparison ──────────
-    if user_text and st.session_state.quote_mode and not st.session_state.quote_result:
-        step  = st.session_state.quote_step
-        total = len(QUOTE_QUESTIONS)
-        field = QUOTE_QUESTIONS[step][0]
-        st.session_state.quote_data[field] = user_text
+    # ── QUOTE MODE: collect missing fields ────────────────────────────────
+    elif user_text and st.session_state.quote_mode and not st.session_state.quote_result:
+        _hist2 = " ".join(m["content"] for m in st.session_state.voice_history) + " " + user_text
+        _known2 = _extract_ctx(_hist2)
+        st.session_state.quote_data.update(_known2)
         st.session_state.voice_history.append({"role": "user", "content": user_text})
-        st.session_state.quote_step = step + 1
-
-        if step + 1 < total:
-            next_q = _get_quote_question(step + 1, el_lang)
-            ack    = ("Εντάξει. " if el_lang == "el" else "Got it. ") + next_q
-            st.session_state.voice_history.append({"role": "assistant", "content": ack})
-            st.session_state.avatar_state = "speaking"
-            if use_el:
-                st.session_state.voice_tts_pending = _elevenlabs_tts(ack, el_key, el_voice)
-        else:
-            closing = ("Τέλεια, έχω όλες τις πληροφορίες. Ετοιμάζω τη σύγκριση…"
-                       if el_lang == "el" else
-                       "Perfect, I have everything I need. Preparing the comparison…")
-            st.session_state.voice_history.append({"role": "assistant", "content": closing})
+        _d = st.session_state.quote_data
+        if "client_age" in _d and "location" in _d and "coverage_type" in _d:
+            _d.setdefault("client_name","Client"); _d.setdefault("priorities",_d.get("coverage_type","")); _d.setdefault("budget","flexible")
+            _closing = ("Υπολογίζω τα ασφάλιστρα 2025 για εσάς..." if el_lang == "el"
+                        else "Calculating actual 2025 premiums...")
+            st.session_state.voice_history.append({"role": "assistant", "content": _closing})
             st.session_state.avatar_state = "thinking"
             if use_el:
-                st.session_state.voice_tts_pending = _elevenlabs_tts(closing, el_key, el_voice)
+                st.session_state.voice_tts_pending = _elevenlabs_tts(_closing, el_key, el_voice)
             with st.spinner("HAL is building your quote comparison…"):
                 try:
                     result = _generate_quote_comparison(st.session_state.quote_data, api_key, el_lang)
                     st.session_state.quote_result = result
                     st.session_state.quote_mode   = False
-                    # Extract spoken recommendation from JSON
-                    import json as _json
+                    import json as _json2
                     try:
-                        _q = _json.loads(result)
-                        spoken = _q.get("recommendation", "")
-                        st.session_state.quote_client_name = _q.get("client_name", "")
+                        _qr = _json2.loads(result)
+                        spoken = _qr.get("recommendation","")
+                        st.session_state.quote_client_name = _qr.get("client_name","")
                     except Exception:
-                        spoken = " ".join(result.split()[:40])
-                        st.session_state.quote_client_name = ""
-                    if not spoken:
-                        spoken = " ".join(result.split()[:40])
-                    st.session_state.voice_history.append({"role": "assistant", "content": spoken})
-                    st.session_state.avatar_state = "speaking"
-                    if use_el:
-                        st.session_state.voice_tts_pending = _elevenlabs_tts(spoken, el_key, el_voice)
+                        spoken = result[:200]
+                    if spoken:
+                        st.session_state.voice_history.append({"role":"assistant","content":spoken})
+                        st.session_state.avatar_state = "speaking"
+                        if use_el:
+                            st.session_state.voice_tts_pending = _elevenlabs_tts(spoken, el_key, el_voice)
                 except Exception as e:
-                    st.error(f"Quote generation error: {e}")
+                    st.error(f"Quote error: {e}")
                     st.session_state.avatar_state = "idle"
+        else:
+            _still = []
+            if "client_age" not in _d:      _still.append("age" if el_lang=="en" else "\u03b7\u03bb\u03b9\u03ba\u03af\u03b1")
+            if "location" not in _d:        _still.append("location" if el_lang=="en" else "\u03c4\u03cc\u03c0\u03bf")
+            if "coverage_type" not in _d:   _still.append("coverage type" if el_lang=="en" else "\u03c4\u03cd\u03c0\u03bf \u03ba\u03ac\u03bb\u03c5\u03c8\u03b7\u03c2")
+            _ask2 = (f"\u03a7\u03c1\u03b5\u03b9\u03ac\u03b6\u03bf\u03bc\u03b1\u03b9 \u03b1\u03ba\u03cc\u03bc\u03b1: {', '.join(_still)}."
+                     if el_lang == "el" else f"Still need: {', '.join(_still)}.")
+            st.session_state.voice_history.append({"role": "assistant", "content": _ask2})
+            st.session_state.avatar_state = "speaking"
+            if use_el:
+                st.session_state.voice_tts_pending = _elevenlabs_tts(_ask2, el_key, el_voice)
         st.rerun()
 
-    # ── NORMAL MODE: process → Claude → TTS ───────────────────────────────
+        # ── NORMAL MODE: process → Claude → TTS ───────────────────────────────
     elif user_text and api_key and not st.session_state.get("_voice_processing") and not st.session_state.quote_mode:
         st.session_state._voice_processing = True
         st.session_state.voice_history.append({"role": "user", "content": user_text})
@@ -1728,6 +1719,34 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
                 st.session_state.voice_last_reply  = reply
                 st.session_state.avatar_state      = "speaking"
                 st.session_state._voice_processing = False
+                # ── Silent quote check after every normal reply ────────────────
+                if not st.session_state.quote_result:
+                    _full_hist = " ".join(m["content"] for m in st.session_state.voice_history)
+                    _ctx_check = _extract_ctx(_full_hist)
+                    _quote_wanted = any(kw in _full_hist.lower() for kw in _QUOTE_WANT)
+                    if (_quote_wanted
+                            and "client_age" in _ctx_check
+                            and "location"   in _ctx_check
+                            and "coverage_type" in _ctx_check):
+                        _ctx_check.setdefault("client_name","Client")
+                        _ctx_check.setdefault("priorities",_ctx_check.get("coverage_type",""))
+                        _ctx_check.setdefault("budget","flexible")
+                        with st.spinner("Calculating 2025 premiums…"):
+                            _qr2 = _generate_quote_comparison(_ctx_check, api_key, el_lang)
+                        st.session_state.quote_result = _qr2
+                        st.session_state.quote_data   = _ctx_check
+                        import json as _jj2
+                        try:
+                            _qrj = _jj2.loads(_qr2)
+                            _sp2 = _qrj.get("recommendation","")
+                            st.session_state.quote_client_name = _qrj.get("client_name","")
+                        except Exception:
+                            _sp2 = ""
+                        if _sp2:
+                            st.session_state.voice_history.append({"role":"assistant","content":_sp2})
+                            st.session_state.avatar_state = "speaking"
+                            if use_el:
+                                st.session_state.voice_tts_pending = _elevenlabs_tts(_sp2, el_key, el_voice)
                 if use_el:
                     tts_bytes = _elevenlabs_tts(reply, el_key, el_voice)
                     if tts_bytes:
