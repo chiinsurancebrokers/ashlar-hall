@@ -1282,13 +1282,11 @@ def _render_avatar(state: str = "idle"):
     components.html(html, height=280, scrolling=False)
 
 
-def render_voice_chat():
-    """HAL Voice — properly wired with streamlit-mic-recorder + quote interview."""
-    import anthropic
-    import json
-    import base64
-    import streamlit.components.v1 as components
 
+def render_voice_chat():
+    """HAL Voice — Stellar-style UI. Clean state machine, no loops."""
+    import anthropic, base64, json, re
+    import streamlit.components.v1 as components
     try:
         from streamlit_mic_recorder import mic_recorder
         MIC_OK = True
@@ -1296,496 +1294,379 @@ def render_voice_chat():
         MIC_OK = False
 
     is_private = st.session_state.mode == "private"
-    mode_label = "Private · Lodge & Personal" if is_private else "Business · Ashlar Insurance"
-    st.markdown(f"## 🎙️ HAL Voice — {mode_label}")
-    st.caption("Speak to HAL · HAL speaks back · Greek & English")
+    api_key    = get_api_key() or st.session_state.get("api_key_input", "")
+    el_key     = st.secrets.get("ELEVENLABS_API_KEY", "")
+    openai_key = st.secrets.get("OPENAI_API_KEY", "")
 
-    api_key = get_api_key() or st.session_state.get("api_key_input", "")
+    # ── Stellar-style dark full-page CSS ───────────────────────────────────
+    st.markdown("""
+<style>
+[data-testid="stAppViewContainer"] { background: #050A14 !important; }
+[data-testid="stAppViewBlockContainer"] { background: transparent !important; }
+[data-testid="block-container"] { background: transparent !important; }
+section[data-testid="stMain"] { background: #050A14 !important; }
+.hal-orb-wrap { display:flex; flex-direction:column; align-items:center;
+    justify-content:center; padding:32px 0 16px; }
+.hal-status { font-size:13px; letter-spacing:2px; text-transform:uppercase;
+    color:#5DCAA5; font-family:monospace; min-height:20px; text-align:center; }
+.hal-transcript { max-width:680px; margin:0 auto; font-size:15px;
+    color:#D0C8BE; text-align:center; padding:8px 16px; min-height:40px; line-height:1.6; }
+.hal-cards-wrap { max-width:900px; margin:0 auto; padding:16px; }
+.stChatMessage { background: #0D1520 !important; border-radius:12px;
+    margin-bottom:8px; border:1px solid #1E2D44; }
+/* dark inputs */
+.stTextInput > div > div { background:#0D1520 !important; border-color:#1E2D44 !important; color:#D0C8BE !important; }
+.stExpander { background:#0D1520 !important; border:1px solid #1E2D44 !important; border-radius:10px; }
+.stExpander summary { color:#A89880 !important; }
+/* hide streamlit decoration */
+#MainMenu, footer, header { visibility:hidden; }
+</style>
+""", unsafe_allow_html=True)
 
-    # ── ElevenLabs key & settings ──────────────────────────────────────────
-    el_key   = st.secrets.get("ELEVENLABS_API_KEY", "")
-    el_voice = "f5HLTX707KIM4SzJYzSz"  # Kyriakos default
-    el_lang  = "el"
-    lang_code = "el-GR"
-
-    with st.expander("⚙️ Voice settings", expanded=not bool(el_key)):
-        if not el_key:
-            el_key = st.text_input(
-                "ElevenLabs API key", type="password", key="el_key_input",
-                help="Add ELEVENLABS_API_KEY to Streamlit secrets.",
-            )
-            st.caption("Needs: Text to Speech ✅  Speech to Text ✅")
-        else:
-            st.success("✅ ElevenLabs key loaded")
-
-        scol1, scol2 = st.columns(2)
-        with scol1:
-            VOICE_OPTIONS = {
-                "Kyriakos — Greek, soft & calm": "f5HLTX707KIM4SzJYzSz",
-                "Brad — English, welcoming & casual": "6z1Ks05MOtac6wYNh9PJ",
-                "Daniel — multilingual": "onwK4e9ZLuTAKqWW03F9",
-                "Custom voice ID…": "custom",
-            }
-            voice_sel = st.selectbox("HAL voice", list(VOICE_OPTIONS.keys()), index=0,
-                key="el_voice_sel",
-                help="Kyriakos = native Greek. Brad = natural English. Daniel = multilingual.")
-            if VOICE_OPTIONS[voice_sel] == "custom":
-                el_voice = st.text_input("Enter voice ID", value="", key="el_voice_custom")
-            else:
-                el_voice = VOICE_OPTIONS[voice_sel]
-                st.caption(f"ID: `{el_voice}`")
-        with scol2:
-            stt_options = []
-            openai_key  = st.secrets.get("OPENAI_API_KEY", "")
-            if el_key:  stt_options.append("ElevenLabs Scribe")
-            if openai_key: stt_options.append("OpenAI Whisper")
-            if not stt_options: stt_options = ["ElevenLabs Scribe"]
-            stt_choice = st.radio("STT engine", stt_options, key="stt_engine")
-            if not openai_key and len(stt_options) == 1:
-                openai_key = st.text_input("OpenAI key (Whisper)", type="password", key="openai_key_input")
-            lang_sel  = st.selectbox("Language", ["el — Greek", "en — English", "auto"], index=0, key="voice_lang")
+    # ── Settings expander ─────────────────────────────────────────────────
+    with st.expander("⚙️ Voice settings", expanded=False):
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            lang_sel  = st.selectbox("Language", ["el — Greek", "en — English"], index=0, key="hal_lang")
             el_lang   = lang_sel.split("—")[0].strip()
-            lang_code = "el-GR" if el_lang == "el" else ("en-US" if el_lang == "en" else "el-GR")
-
+            voice_map = {
+                "Kyriakos (Greek, calm)":   "f5HLTX707KIM4SzJYzSz",
+                "Brad (English, warm)":     "6z1Ks05MOtac6wYNh9PJ",
+                "Daniel (Multilingual)":    "onwK4e9ZLuTAKqWW03F9",
+            }
+            el_voice = voice_map.get(
+                st.selectbox("Voice", list(voice_map), key="hal_voice"), list(voice_map.values())[0])
+        with sc2:
+            if not el_key:
+                el_key = st.text_input("ElevenLabs API key", type="password", key="el_key_in")
+            else:
+                st.success("✅ ElevenLabs loaded")
+            if not openai_key:
+                openai_key = st.text_input("OpenAI key (Whisper fallback)", type="password", key="oai_key_in")
+    
     use_el      = bool(el_key)
-    use_whisper = (stt_choice == "OpenAI Whisper") and bool(openai_key)
+    use_whisper = bool(openai_key)
 
     # ── System prompts ─────────────────────────────────────────────────────
-    system_business = """You are HAL — the AI voice assistant for Alex, Ashlar Insurance, Athens.
-VOICE MODE: Keep replies to 2-4 sentences only — they will be spoken aloud.
-You specialise in international health insurance: Morgan Price, April International, IMG Europe, NOW Health, Bupa Global, Generali.
-CRITICAL: When a client asks for quotes, prices, premiums, plans, or comparisons — DO NOT refer them to a human. Say: "Let me start a short quote interview — I have the actual 2025 carrier rates." Then stop. The system will launch the interview automatically.
-Do NOT mention Alex, do NOT say you will arrange contact, do NOT ask them to call anyone. You ARE the quote system.
-Respond in the language spoken to you. Conversational — no bullet points, no markdown."""
-    system_private = """You are HAL — private voice assistant for Alex.
-VOICE MODE: Keep replies to 2-4 sentences only — they will be spoken aloud.
-Lodge: Στ∴ ΑΚΡΟΠΟΛΙΣ 84. Personal: finance, health, gym.
-Respond in Greek unless spoken to in English. Conversational — no bullet points."""
-    system = system_private if is_private else system_business
+    sys_biz = (
+        "You are HAL — AI voice assistant for Ashlar Insurance, Athens. "
+        "VOICE: 2-3 sentences max. No bullets. No markdown. "
+        "Specialise in: Morgan Price, April International, IMG Europe, NOW Health, Bupa Global. "
+        "When a client gives you their age, location, and coverage type, confirm what you understood "
+        "and say you are calculating their 2025 premiums. Do not ask any further questions — "
+        "the system will generate the actual rates automatically. "
+        "If you still need information, ask for ONE piece only. "
+        "Respond in the language the client speaks."
+    )
+    sys_priv = (
+        "You are HAL — private voice assistant. "
+        "VOICE: 2-3 sentences max. No bullets. "
+        "Lodge: Στ∴ ΑΚΡΟΠΟΛΙΣ 84. Personal: finance, health, gym. "
+        "Respond in Greek unless spoken to in English."
+    )
+    system = sys_priv if is_private else sys_biz
 
-    # ── Session state ──────────────────────────────────────────────────────
-    for _k, _v in [
-        ("voice_history", []), ("voice_last_reply", ""), ("avatar_state", "idle"),
-        ("voice_tts_pending", None), ("_last_audio_id", ""), ("_voice_processing", False),
-        ("quote_mode", False), ("quote_step", 0), ("quote_data", {}), ("quote_result", None),
-    ]:
-        if _k not in st.session_state:
-            st.session_state[_k] = _v
+    # ── Session state (clean set) ─────────────────────────────────────────
+    _DEFAULTS = {
+        "voice_history":     [],
+        "voice_tts_pending": None,
+        "_last_audio_id":    "",
+        "avatar_state":      "idle",
+        "hal_last_text":     "",   # last thing HAL said (for display)
+        "quote_result":      None,
+        "quote_ctx":         {},
+        "quote_client_name": "",
+        "_quote_triggered":  False, # ONE-SHOT guard — prevents re-generation
+    }
+    for k, v in _DEFAULTS.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-    # ── Play TTS audio stored from previous render ─────────────────────────
-    if st.session_state.get("voice_tts_pending"):
-        import base64 as _b64, streamlit.components.v1 as _comp
-        _audio_b64 = _b64.b64encode(st.session_state.voice_tts_pending).decode()
+    # ── Play pending TTS (Web Audio API — bypasses browser autoplay block) ─
+    if st.session_state.voice_tts_pending:
+        _b64 = base64.b64encode(st.session_state.voice_tts_pending).decode()
         st.session_state.voice_tts_pending = None
-        # Web Audio API — bypasses browser autoplay restrictions on <audio> elements
-        _comp.html(f"""<script>
-(function(){{
-  try {{
-    var s=atob('{_audio_b64}');
-    var a=new Uint8Array(s.length);
-    for(var i=0;i<s.length;i++) a[i]=s.charCodeAt(i);
-    var ctx=new(window.AudioContext||window.webkitAudioContext)();
-    ctx.decodeAudioData(a.buffer,function(buf){{
-      var src=ctx.createBufferSource();
-      src.buffer=buf;src.connect(ctx.destination);src.start(0);
-    }});
-  }} catch(e){{ console.warn('HAL audio error:',e); }}
-}})();
+        components.html(f"""<script>
+(function(){{try{{
+  var s=atob('{_b64}'),a=new Uint8Array(s.length);
+  for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);
+  var c=new(window.AudioContext||window.webkitAudioContext)();
+  c.decodeAudioData(a.buffer,function(b){{
+    var n=c.createBufferSource();n.buffer=b;n.connect(c.destination);n.start(0);
+  }});
+}}catch(e){{console.warn('HAL audio:',e);}}}}
+)();
 </script>""", height=0, scrolling=False)
 
-    # ── Layout: avatar left, conversation right ────────────────────────────
-    col_av, col_main = st.columns([1, 2], gap="medium")
-    with col_av:
-        _render_avatar(st.session_state.avatar_state)
-    with col_main:
-        chat_box = st.container(height=260)
-        with chat_box:
-            if not st.session_state.voice_history:
-                st.info("🎙️ Use the mic below — or start a guided quote interview.")
-            else:
-                for msg in st.session_state.voice_history[-12:]:
-                    st.chat_message("user" if msg["role"] == "user" else "assistant").write(msg["content"])
-
-    st.divider()
-
-    # ── Quote in progress indicator (no button needed — auto-triggered) ─────
-    if st.session_state.quote_mode and not st.session_state.quote_result:
-        st.caption("⏳ Collecting details for your quote…")
-
-    # ── Quote result — Stellar-style plan cards + email ───────────────────
-    if st.session_state.quote_result:
-        st.markdown("### Quote comparison")
-        cards_html = _render_quote_cards_html(st.session_state.quote_result)
-        import streamlit.components.v1 as _comp
-        _comp.html(cards_html, height=520, scrolling=True)
-
-        # Email delivery
-        st.markdown("**Send quote to client by email**")
-        ec1, ec2 = st.columns([3, 1])
-        with ec1:
-            client_email = st.text_input(
-                "Client email", key="quote_email_input",
-                label_visibility="collapsed",
-                placeholder="client@example.com",
-            )
-        with ec2:
-            send_email_btn = st.button("Send quote", type="primary",
-                                       use_container_width=True, key="send_quote_email")
-
-        if send_email_btn and client_email:
-            gmail_sender   = st.secrets.get("GMAIL_SENDER", "")
-            gmail_password = st.secrets.get("GMAIL_APP_PASSWORD", "")
-            client_name    = st.session_state.get("quote_client_name", "Client")
-            if gmail_sender and gmail_password:
-                with st.spinner("Sending quote email…"):
-                    ok = _send_quote_email(
-                        to_email      = client_email,
-                        client_name   = client_name,
-                        quote_json_str= st.session_state.quote_result,
-                        sender_email  = gmail_sender,
-                        app_password  = gmail_password,
-                    )
-                if ok:
-                    st.success(f"Quote emailed to {client_email}")
-                else:
-                    st.error("Email failed — check GMAIL_SENDER and GMAIL_APP_PASSWORD in secrets.")
-            else:
-                st.warning("Add GMAIL_SENDER and GMAIL_APP_PASSWORD to Streamlit secrets to enable email.")
-
-        # Controls
-        rc1, rc2 = st.columns(2)
-        with rc1:
-            st.download_button("📥 Download quote (JSON)", st.session_state.quote_result,
-                               file_name="hal_quote.json", use_container_width=True)
-        with rc2:
-            if st.button("🔄 New quote", use_container_width=True, key="new_quote_btn"):
-                st.session_state.quote_mode   = False
-                st.session_state.quote_result = None
-                st.session_state.quote_data   = {}
-                st.session_state.quote_step   = 0
-                st.session_state.quote_client_name = ""
-                st.rerun()
-
-    st.divider()
+    # ── Orb + status text ─────────────────────────────────────────────────
+    st.markdown('<div class="hal-orb-wrap">', unsafe_allow_html=True)
+    _render_avatar(st.session_state.avatar_state)
+    st.markdown(f'<div class="hal-transcript">{st.session_state.hal_last_text}</div>',
+                unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # ── Mic recorder ──────────────────────────────────────────────────────
-    user_text = None
-
+    user_text = ""
     if MIC_OK:
         st.markdown("**🎙️ Record your message**")
-        audio = mic_recorder(
-            start_prompt="🔴 Click to speak",
-            stop_prompt="⏹️ Click to stop",
-            just_once=True,
-            use_container_width=True,
-            key="hal_mic",
-        )
-        if audio and audio.get("bytes"):
-            audio_id = str(audio.get("id", id(audio["bytes"])))
-            if audio_id != st.session_state.get("_last_audio_id", ""):
+        rec = mic_recorder(start_prompt="● Click to speak", stop_prompt="■ Stop recording",
+                           key="hal_mic", use_container_width=True)
+        if rec and rec.get("bytes"):
+            audio_id = rec.get("id", "")
+            if audio_id != st.session_state._last_audio_id:
                 st.session_state._last_audio_id = audio_id
-                if use_whisper:
-                    with st.spinner("Transcribing with Whisper…"):
-                        transcript = _whisper_transcribe(audio["bytes"], openai_key, el_lang)
-                    if transcript and not transcript.startswith("[Whisper error"):
-                        st.info(f"Heard: *{transcript}*")
-                        user_text = transcript
-                    else:
-                        st.error(f"Whisper failed: {transcript}")
-                elif use_el:
-                    with st.spinner("Transcribing with ElevenLabs Scribe…"):
-                        transcript = _elevenlabs_stt(audio["bytes"], el_key, el_lang)
-                    if transcript and not transcript.startswith("[ElevenLabs STT error"):
-                        st.info(f"Heard: *{transcript}*")
-                        user_text = transcript
-                    else:
-                        st.error(transcript)
-                        st.caption("Check that Speech to Text → Access is enabled in your ElevenLabs API key.")
-                else:
-                    st.warning("Add ELEVENLABS_API_KEY or OPENAI_API_KEY to Streamlit secrets.")
+                raw_bytes = rec["bytes"]
+                # STT
+                with st.spinner("Transcribing…"):
+                    if use_el:
+                        user_text = _elevenlabs_stt(raw_bytes, el_key,
+                            "el" if el_lang == "el" else "en")
+                    elif use_whisper:
+                        user_text = _whisper_transcribe(raw_bytes, openai_key,
+                            "el" if el_lang == "el" else "en")
+                    user_text = (user_text or "").strip()
     else:
-        st.warning("Install `streamlit-mic-recorder` to enable the mic button.")
+        user_text = st.chat_input("Type your message…") or ""
 
-    # ── Text fallback ──────────────────────────────────────────────────────
-    col_t, col_s = st.columns([5, 1])
-    with col_t:
-        typed = st.text_input("type", label_visibility="collapsed",
-                              placeholder="Or type your message here…", key="voice_type_input")
-    with col_s:
-        if st.button("Send", type="primary", use_container_width=True, key="voice_send_btn"):
-            if typed.strip():
-                user_text = typed.strip()
-
-    # ── Audio file upload ──────────────────────────────────────────────────
-    with st.expander("📁 Upload audio file instead", expanded=False):
-        af = st.file_uploader("WAV / MP3 / WEBM / M4A / OGG",
-                              type=["wav", "mp3", "webm", "m4a", "ogg"], key="voice_audio_upload")
-        if af and st.button("Transcribe & Send", key="transcribe_file_btn"):
-            if use_el:
-                with st.spinner("Transcribing with ElevenLabs Scribe…"):
-                    t2 = _elevenlabs_stt(af.read(), el_key, el_lang)
-                if t2 and not t2.startswith("[ElevenLabs STT error"):
-                    st.info(f"Heard: *{t2}*")
-                    user_text = t2
-                else:
-                    st.error(t2)
-            else:
-                st.warning("Add ELEVENLABS_API_KEY first.")
-
-    # ── Reset button ───────────────────────────────────────────────────────
-    if st.session_state.get("avatar_state") in ("thinking", "speaking"):
-        if st.button("🔄 Reset HAL", key="voice_reset", help="Click if HAL appears frozen"):
-            st.session_state.avatar_state     = "idle"
-            st.session_state._voice_processing = False
+    # ── Reset button ──────────────────────────────────────────────────────
+    rcol1, rcol2 = st.columns([3, 1])
+    with rcol2:
+        if st.button("🔄 Reset HAL", key="hal_reset", use_container_width=True):
+            for k in ["voice_history","hal_last_text","quote_result","quote_ctx",
+                      "quote_client_name","_quote_triggered","avatar_state"]:
+                st.session_state[k] = _DEFAULTS.get(k, None) if k != "avatar_state" else "idle"
             st.rerun()
 
-    # ── QUOTE CONTEXT EXTRACTOR ─────────────────────────────────────────────
-    def _extract_ctx(text: str) -> dict:
-        import re
+    # ─────────────────────────────────────────────────────────────────────
+    # ── CONTEXT EXTRACTOR (pure function, no state side-effects) ─────────
+    # ─────────────────────────────────────────────────────────────────────
+    def extract_ctx(text: str) -> dict:
+        """Pull age, location, coverage_type from any conversation text."""
         ctx = {}
         tl  = text.lower()
+        # Name
         nm = re.search(r"(?:my name is|i am|call me|i'm)\s+([A-Za-z]+)", tl)
         if nm: ctx["client_name"] = nm.group(1).title()
-        am = re.search(r"\b(\d{2})\s*(?:year|yr|\u03b5\u03c4|\u03c7\u03c1\u03bf\u03bd)", tl)
+        # Age — digits
+        am = re.search(r"\b(\d{2})\s*(?:year|yr|\u03b5\u03c4)", tl)
         if am:
             ctx["client_age"] = am.group(1)
         else:
-            written = [
-                ("πενήντα δύο","52"),
-                ("πενήντα τριών","53"),
-                ("πενήντα τέσσερα","54"),
-                ("πενήντα πέντε","55"),
-                ("πενήντα","50"),
-                ("σαράντα πέντε","45"),
-                ("σαράντα","40"),
-                ("εξήντα πέντε","65"),
-                ("εξήντα","60"),
+            # Written numbers
+            for word, num in [
+                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1 \u03b4\u03cd\u03bf","52"),
+                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1 \u03c4\u03c1\u03b9\u03ce\u03bd","53"),
+                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1 \u03c4\u03ad\u03c3\u03c3\u03b5\u03c1\u03b1","54"),
+                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1 \u03c0\u03ad\u03bd\u03c4\u03b5","55"),
+                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1","50"),
+                ("\u03c3\u03b1\u03c1\u03ac\u03bd\u03c4\u03b1 \u03c0\u03ad\u03bd\u03c4\u03b5","45"),
+                ("\u03c3\u03b1\u03c1\u03ac\u03bd\u03c4\u03b1","40"),
+                ("\u03b5\u03be\u03ae\u03bd\u03c4\u03b1 \u03c0\u03ad\u03bd\u03c4\u03b5","65"),
+                ("\u03b5\u03be\u03ae\u03bd\u03c4\u03b1","60"),
+                ("\u03c4\u03c1\u03b9\u03ac\u03bd\u03c4\u03b1 \u03c0\u03ad\u03bd\u03c4\u03b5","35"),
+                ("\u03c4\u03c1\u03b9\u03ac\u03bd\u03c4\u03b1","30"),
                 ("fifty-two","52"),("fifty two","52"),("forty-five","45"),
                 ("sixty","60"),("fifty","50"),("forty","40"),("thirty-five","35"),
-            ]
-            for word, num in written:
+            ]:
                 if word in tl:
                     ctx["client_age"] = num
                     break
             if "client_age" not in ctx:
                 am2 = re.search(r"\b([2-7][0-9])\b", tl)
                 if am2: ctx["client_age"] = am2.group(1)
-        if any(w in tl for w in ["ελλάδ","αθήν","greece","athens","greek"]): ctx["location"] = "Greece"
-        elif any(w in tl for w in ["κύπρ","cyprus"]): ctx["location"] = "Cyprus"
+        # Location
+        if any(w in tl for w in ["\u03b5\u03bb\u03bb\u03ac\u03b4","\u03b1\u03b8\u03ae\u03bd","greece","athens","greek","\u03b5\u03bb\u03bb\u03b7\u03bd"]):
+            ctx["location"] = "Greece"
+        elif any(w in tl for w in ["\u03ba\u03cd\u03c0\u03c1","cyprus"]): ctx["location"] = "Cyprus"
         elif any(w in tl for w in ["uk ","united kingdom"]): ctx["location"] = "UK"
+        # Coverage
         covs = []
-        if any(w in tl for w in ["inpatient","νοσοκομ","νοσηλ","hospital"]): covs.append("inpatient")
-        if any(w in tl for w in ["outpatient","εξωτερ"]): covs.append("outpatient")
-        if any(w in tl for w in ["international","διεθν","worldwide","global"]): covs.append("international")
+        if any(w in tl for w in ["inpatient","\u03bd\u03bf\u03c3\u03bf\u03ba\u03bf\u03bc","\u03bd\u03bf\u03c3\u03b7\u03bb","hospital","\u03bd\u03bf\u03c3\u03bf\u03ba\u03bf\u03bc\u03b5\u03af\u03bf"]):
+            covs.append("inpatient")
+        if any(w in tl for w in ["outpatient","\u03b5\u03be\u03c9\u03c4\u03b5\u03c1"]): covs.append("outpatient")
+        if any(w in tl for w in ["international","\u03b4\u03b9\u03b5\u03b8\u03bd","worldwide","global"]): covs.append("international")
         if covs: ctx["coverage_type"] = " + ".join(covs)
-        if any(w in tl for w in ["europe","ευρώπ","ευρωπ"]): ctx.setdefault("priorities", "Europe coverage")
+        if any(w in tl for w in ["europe","\u03b5\u03c5\u03c1\u03ce\u03c0"]): ctx.setdefault("priorities","Europe coverage")
         return ctx
 
-    _QUOTE_WANT = [
-        "προσφορ","ασφάλιστρ",
-        "τιμολόγ","σύγκριν",
-        "πόσο","δείξε","φέρε",
-        "επιλογ","πλάν",
-        "quot","premium","price","cost","show","give","compare","plan","option",
+    QUOTE_TRIGGERS = [
+        "\u03c0\u03c1\u03bf\u03c3\u03c6\u03bf\u03c1","\u03b1\u03c3\u03c6\u03ac\u03bb\u03b9\u03c3\u03c4\u03c1",
+        "\u03c4\u03b9\u03bc\u03bf\u03bb\u03cc\u03b3","\u03c3\u03cd\u03b3\u03ba\u03c1\u03b9\u03bd",
+        "\u03c0\u03cc\u03c3\u03bf","\u03b4\u03b5\u03af\u03be\u03b5","\u03c6\u03ad\u03c1\u03b5",
+        "\u03b5\u03c0\u03b9\u03bb\u03bf\u03b3","\u03c0\u03bb\u03ac\u03bd","\u03b5\u03c0\u03b9\u03bb\u03bf\u03b3\u03ad\u03c2",
+        "quot","premium","price","cost","show me","give me","compare","plan","option",
     ]
-    # ── AUTO-TRIGGER: detect quote intent in ANY message ─────────────────
-    _QUOTE_KW = _QUOTE_WANT
-    if (user_text
-        and not st.session_state.quote_mode
-        and not st.session_state.quote_result
-        and not st.session_state.get("_voice_processing")
-        and any(kw in user_text.lower() for kw in _QUOTE_KW)
-    ):
-        _hist = " ".join(m["content"] for m in st.session_state.voice_history) + " " + user_text
-        _known = _extract_ctx(_hist)
-        _can_generate = ("client_age" in _known and "location" in _known and "coverage_type" in _known)
 
-        st.session_state.voice_history.append({"role": "user", "content": user_text})
+    def wants_quote(text: str) -> bool:
+        tl = text.lower()
+        return any(kw in tl for kw in QUOTE_TRIGGERS)
 
-        if _can_generate:
-            _known.setdefault("client_name", "Client")
-            _known.setdefault("priorities", _known.get("coverage_type","inpatient"))
-            _known.setdefault("budget", "flexible")
-            _ack = ("Υπολογίζω τις πραγματικές τιμές 2025 για εσάς... " if el_lang == "el"
-                    else "Calculating your actual 2025 premiums now...")
-            st.session_state.voice_history.append({"role": "assistant", "content": _ack})
-            st.session_state.avatar_state = "thinking"
-            if use_el:
-                st.session_state.voice_tts_pending = _elevenlabs_tts(_ack, el_key, el_voice)
-            with st.spinner("Calculating premiums from 2025 carrier rates…"):
-                _result = _generate_quote_comparison(_known, api_key, el_lang)
-            st.session_state.quote_result = _result
-            st.session_state.quote_data   = _known
-            st.session_state.quote_mode   = False
-            import json as _jj
-            try:
-                _q2 = _jj.loads(_result)
-                _spoken = _q2.get("recommendation", "")
-                st.session_state.quote_client_name = _q2.get("client_name", "")
-            except Exception:
-                _spoken = _result[:200]
-            if _spoken:
-                st.session_state.voice_history.append({"role": "assistant", "content": _spoken})
-                st.session_state.avatar_state = "speaking"
-                if use_el:
-                    st.session_state.voice_tts_pending = _elevenlabs_tts(_spoken, el_key, el_voice)
-            st.rerun()
-        else:
-            # Missing fields — ask ONE natural question for what's needed
-            _miss = []
-            if "client_age" not in _known: _miss.append("age" if el_lang=="en" else "\u03b7\u03bb\u03b9\u03ba\u03af\u03b1")
-            if "location" not in _known:   _miss.append("location" if el_lang=="en" else "\u03c4\u03cc\u03c0\u03bf \u03b4\u03b9\u03b1\u03bc\u03bf\u03bd\u03ae\u03c2")
-            if "coverage_type" not in _known: _miss.append("coverage type" if el_lang=="en" else "\u03c4\u03cd\u03c0\u03bf \u03ba\u03ac\u03bb\u03c5\u03c8\u03b7\u03c2")
-            _ask = (f"\u03a3\u03b1\u03c2 \u03b2\u03c1\u03af\u03c3\u03ba\u03c9 \u03c4\u03b9\u03c2 \u03ba\u03b1\u03bb\u03cd\u03c4\u03b5\u03c1\u03b5\u03c2 \u03b5\u03c0\u03b9\u03bb\u03bf\u03b3\u03ad\u03c2. \u03a7\u03c1\u03b5\u03b9\u03ac\u03b6\u03bf\u03bc\u03b1\u03b9 \u03bc\u03cc\u03bd\u03bf: {', '.join(_miss)}."
-                    if el_lang == "el" else
-                    f"Let me find the best plans. I just need: {', '.join(_miss)}.")
-            st.session_state.quote_mode   = True
-            st.session_state.quote_step   = 0
-            st.session_state.quote_data   = _known
-            st.session_state.quote_result = None
-            st.session_state.voice_history.append({"role": "assistant", "content": _ask})
-            st.session_state.avatar_state = "speaking"
-            if use_el:
-                st.session_state.voice_tts_pending = _elevenlabs_tts(_ask, el_key, el_voice)
-            st.rerun()
+    def can_generate(ctx: dict) -> bool:
+        return ("client_age" in ctx and "location" in ctx and "coverage_type" in ctx)
 
-    # ── QUOTE MODE: collect missing fields ────────────────────────────────
-    elif user_text and st.session_state.quote_mode and not st.session_state.quote_result:
-        _hist2 = " ".join(m["content"] for m in st.session_state.voice_history) + " " + user_text
-        _known2 = _extract_ctx(_hist2)
-        st.session_state.quote_data.update(_known2)
-        st.session_state.voice_history.append({"role": "user", "content": user_text})
-        _d = st.session_state.quote_data
-        if "client_age" in _d and "location" in _d and "coverage_type" in _d:
-            _d.setdefault("client_name","Client"); _d.setdefault("priorities",_d.get("coverage_type","")); _d.setdefault("budget","flexible")
-            _closing = ("Υπολογίζω τα ασφάλιστρα 2025 για εσάς..." if el_lang == "el"
-                        else "Calculating actual 2025 premiums...")
-            st.session_state.voice_history.append({"role": "assistant", "content": _closing})
-            st.session_state.avatar_state = "thinking"
-            if use_el:
-                st.session_state.voice_tts_pending = _elevenlabs_tts(_closing, el_key, el_voice)
-            with st.spinner("HAL is building your quote comparison…"):
-                try:
-                    result = _generate_quote_comparison(st.session_state.quote_data, api_key, el_lang)
-                    st.session_state.quote_result = result
-                    st.session_state.quote_mode   = False
-                    import json as _json2
-                    try:
-                        _qr = _json2.loads(result)
-                        spoken = _qr.get("recommendation","")
-                        st.session_state.quote_client_name = _qr.get("client_name","")
-                    except Exception:
-                        spoken = result[:200]
-                    if spoken:
-                        st.session_state.voice_history.append({"role":"assistant","content":spoken})
-                        st.session_state.avatar_state = "speaking"
-                        if use_el:
-                            st.session_state.voice_tts_pending = _elevenlabs_tts(spoken, el_key, el_voice)
-                except Exception as e:
-                    st.error(f"Quote error: {e}")
-                    st.session_state.avatar_state = "idle"
-        else:
-            _still = []
-            if "client_age" not in _d:      _still.append("age" if el_lang=="en" else "\u03b7\u03bb\u03b9\u03ba\u03af\u03b1")
-            if "location" not in _d:        _still.append("location" if el_lang=="en" else "\u03c4\u03cc\u03c0\u03bf")
-            if "coverage_type" not in _d:   _still.append("coverage type" if el_lang=="en" else "\u03c4\u03cd\u03c0\u03bf \u03ba\u03ac\u03bb\u03c5\u03c8\u03b7\u03c2")
-            _ask2 = (f"\u03a7\u03c1\u03b5\u03b9\u03ac\u03b6\u03bf\u03bc\u03b1\u03b9 \u03b1\u03ba\u03cc\u03bc\u03b1: {', '.join(_still)}."
-                     if el_lang == "el" else f"Still need: {', '.join(_still)}.")
-            st.session_state.voice_history.append({"role": "assistant", "content": _ask2})
-            st.session_state.avatar_state = "speaking"
-            if use_el:
-                st.session_state.voice_tts_pending = _elevenlabs_tts(_ask2, el_key, el_voice)
-        st.rerun()
-
-        # ── NORMAL MODE: process → Claude → TTS ───────────────────────────────
-    elif user_text and api_key and not st.session_state.get("_voice_processing") and not st.session_state.quote_mode:
-        st.session_state._voice_processing = True
+    # ─────────────────────────────────────────────────────────────────────
+    # ── PROCESS USER INPUT ────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
+    if user_text and api_key:
         st.session_state.voice_history.append({"role": "user", "content": user_text})
         st.session_state.avatar_state = "thinking"
-        with st.spinner("HAL is thinking…"):
+
+        # Full conversation text for context extraction
+        full_text = " ".join(m["content"] for m in st.session_state.voice_history)
+        ctx       = extract_ctx(full_text)
+        st.session_state.quote_ctx.update(ctx)
+        ctx       = st.session_state.quote_ctx
+
+        quote_wanted = wants_quote(full_text)
+        ready        = can_generate(ctx)
+        already_done = st.session_state._quote_triggered
+
+        # ── PATH A: Generate quote (once only) ───────────────────────────
+        if quote_wanted and ready and not already_done and not st.session_state.quote_result:
+            st.session_state._quote_triggered = True   # ONE-SHOT GUARD
+            ctx.setdefault("client_name", "Client")
+            ctx.setdefault("priorities",  ctx.get("coverage_type", "inpatient"))
+            ctx.setdefault("budget",      "flexible")
+
+            ack = ("Υπολογίζω τα πραγματικά ασφάλιστρα 2025 για εσάς..."
+                   if el_lang == "el" else "Calculating your actual 2025 premiums...")
+            st.session_state.voice_history.append({"role": "assistant", "content": ack})
+            st.session_state.hal_last_text  = ack
+            st.session_state.avatar_state   = "thinking"
+
+            if use_el:
+                _tts = _elevenlabs_tts(ack, el_key, el_voice)
+                if _tts: st.session_state.voice_tts_pending = _tts
+
+            with st.spinner("Calculating 2025 premiums from carrier rate tables…"):
+                try:
+                    result = _generate_quote_comparison(ctx, api_key, el_lang)
+                    st.session_state.quote_result = result
+                    try:
+                        qj = json.loads(result)
+                        spoken = qj.get("recommendation","")
+                        st.session_state.quote_client_name = qj.get("client_name","")
+                    except Exception:
+                        spoken = ""
+                    if spoken:
+                        st.session_state.voice_history.append({"role":"assistant","content":spoken})
+                        st.session_state.hal_last_text = spoken
+                        st.session_state.avatar_state  = "speaking"
+                        if use_el:
+                            _tts2 = _elevenlabs_tts(spoken, el_key, el_voice)
+                            if _tts2: st.session_state.voice_tts_pending = _tts2
+                except Exception as e:
+                    st.session_state.quote_result     = None
+                    st.session_state._quote_triggered = False  # Allow retry
+                    err_msg = f"Quote generation failed: {e}"
+                    st.session_state.voice_history.append({"role":"assistant","content":err_msg})
+                    st.session_state.hal_last_text = err_msg
+                    st.error(err_msg)
+
+        # ── PATH B: Normal Claude reply ───────────────────────────────────
+        else:
             try:
                 client_ai = anthropic.Anthropic(api_key=api_key)
-                messages  = [{"role": m["role"], "content": m["content"]}
+                messages  = [{"role":m["role"],"content":m["content"]}
                              for m in st.session_state.voice_history[-10:]]
-                response  = client_ai.messages.create(
+                resp  = client_ai.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=400,
+                    max_tokens=300,
                     system=system,
                     messages=messages,
                     timeout=30,
                 )
-                reply = response.content[0].text
-                st.session_state.voice_history.append({"role": "assistant", "content": reply})
-                st.session_state.voice_last_reply  = reply
-                st.session_state.avatar_state      = "speaking"
-                st.session_state._voice_processing = False
-                # ── Silent quote check after every normal reply ────────────────
-                if not st.session_state.quote_result:
-                    _full_hist = " ".join(m["content"] for m in st.session_state.voice_history)
-                    _ctx_check = _extract_ctx(_full_hist)
-                    _quote_wanted = any(kw in _full_hist.lower() for kw in _QUOTE_WANT)
-                    if (_quote_wanted
-                            and "client_age" in _ctx_check
-                            and "location"   in _ctx_check
-                            and "coverage_type" in _ctx_check):
-                        _ctx_check.setdefault("client_name","Client")
-                        _ctx_check.setdefault("priorities",_ctx_check.get("coverage_type",""))
-                        _ctx_check.setdefault("budget","flexible")
-                        with st.spinner("Calculating 2025 premiums…"):
-                            _qr2 = _generate_quote_comparison(_ctx_check, api_key, el_lang)
-                        st.session_state.quote_result = _qr2
-                        st.session_state.quote_data   = _ctx_check
-                        import json as _jj2
-                        try:
-                            _qrj = _jj2.loads(_qr2)
-                            _sp2 = _qrj.get("recommendation","")
-                            st.session_state.quote_client_name = _qrj.get("client_name","")
-                        except Exception:
-                            _sp2 = ""
-                        if _sp2:
-                            st.session_state.voice_history.append({"role":"assistant","content":_sp2})
-                            st.session_state.avatar_state = "speaking"
-                            if use_el:
-                                st.session_state.voice_tts_pending = _elevenlabs_tts(_sp2, el_key, el_voice)
+                reply = resp.content[0].text.strip()
+                st.session_state.voice_history.append({"role":"assistant","content":reply})
+                st.session_state.hal_last_text = reply
+                st.session_state.avatar_state  = "speaking"
                 if use_el:
-                    tts_bytes = _elevenlabs_tts(reply, el_key, el_voice)
-                    if tts_bytes:
-                        st.session_state.voice_tts_pending = tts_bytes
-                    else:
-                        components.html(_TTS_PLAY_HTML.format(
-                            text_json=json.dumps(reply), lang_json=json.dumps(lang_code)), height=0)
-                else:
-                    components.html(_TTS_PLAY_HTML.format(
-                        text_json=json.dumps(reply), lang_json=json.dumps(lang_code)), height=0)
-            except Exception as e:
-                st.session_state.avatar_state      = "idle"
-                st.session_state._voice_processing = False
-                st.error(f"HAL error: {e}")
+                    _tts3 = _elevenlabs_tts(reply, el_key, el_voice)
+                    if _tts3: st.session_state.voice_tts_pending = _tts3
+
+                # ── Silent post-reply quote check ─────────────────────────
+                # Extract again now that reply is in history
+                full2 = " ".join(m["content"] for m in st.session_state.voice_history)
+                ctx2  = extract_ctx(full2)
+                st.session_state.quote_ctx.update(ctx2)
+                ctx2  = st.session_state.quote_ctx
+
+                if (wants_quote(full2) and can_generate(ctx2)
+                        and not st.session_state._quote_triggered
+                        and not st.session_state.quote_result):
+                    st.session_state._quote_triggered = True
+                    ctx2.setdefault("client_name","Client")
+                    ctx2.setdefault("priorities", ctx2.get("coverage_type",""))
+                    ctx2.setdefault("budget","flexible")
+                    with st.spinner("Calculating premiums…"):
+                        try:
+                            r2 = _generate_quote_comparison(ctx2, api_key, el_lang)
+                            st.session_state.quote_result = r2
+                            try:
+                                qj2    = json.loads(r2)
+                                sp2    = qj2.get("recommendation","")
+                                st.session_state.quote_client_name = qj2.get("client_name","")
+                            except Exception:
+                                sp2 = ""
+                            if sp2:
+                                st.session_state.voice_history.append({"role":"assistant","content":sp2})
+                                st.session_state.hal_last_text = sp2
+                                if use_el:
+                                    _t4 = _elevenlabs_tts(sp2, el_key, el_voice)
+                                    if _t4: st.session_state.voice_tts_pending = _t4
+                        except Exception as eg:
+                            st.session_state._quote_triggered = False
+                            st.warning(f"Quote gen failed: {eg}")
+
+            except Exception as ce:
+                err = f"HAL error: {ce}"
+                st.session_state.voice_history.append({"role":"assistant","content":err})
+                st.session_state.hal_last_text = err
+
         st.rerun()
 
-    elif user_text and not api_key:
-        st.error("No Claude API key — add Claude_API_Key to Streamlit secrets.")
+    # ─────────────────────────────────────────────────────────────────────
+    # ── QUOTE RESULT DISPLAY ──────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
+    if st.session_state.quote_result:
+        st.markdown('<div class="hal-cards-wrap">', unsafe_allow_html=True)
+        st.markdown("### Your plans")
+        try:
+            cards_html = _render_quote_cards_html(st.session_state.quote_result)
+            components.html(cards_html, height=540, scrolling=True)
+        except Exception as e:
+            st.error(f"Display error: {e}")
+            st.json(st.session_state.quote_result)
 
-    if st.session_state.avatar_state == "speaking" and not user_text:
-        st.session_state.avatar_state = "idle"
+        # Email + controls
+        ec1, ec2 = st.columns([3,1])
+        with ec1:
+            cemail = st.text_input("Email quote to client", key="hal_cemail",
+                                   placeholder="client@example.com", label_visibility="collapsed")
+        with ec2:
+            if st.button("Send quote", type="primary", use_container_width=True, key="hal_send"):
+                gs = st.secrets.get("GMAIL_SENDER",""); gp = st.secrets.get("GMAIL_APP_PASSWORD","")
+                if gs and gp:
+                    with st.spinner("Sending…"):
+                        ok = _send_quote_email(cemail, st.session_state.quote_client_name or "Client",
+                                               st.session_state.quote_result, gs, gp)
+                    if ok: st.success(f"✅ Sent to {cemail}")
+                    else:  st.error("Email failed — check GMAIL_SENDER + GMAIL_APP_PASSWORD in secrets.")
+                else:
+                    st.warning("Add GMAIL_SENDER + GMAIL_APP_PASSWORD to Streamlit secrets.")
 
-    # ── Controls ───────────────────────────────────────────────────────────
-    if st.session_state.voice_last_reply:
-        st.divider()
-        c1, c2 = st.columns(2)
-        with c1:
-            st.download_button("📥 Download last reply", st.session_state.voice_last_reply,
-                               file_name="hal_reply.txt", use_container_width=True)
-        with c2:
-            if st.button("🗑 Clear conversation", use_container_width=True, key="clear_voice"):
-                st.session_state.voice_history     = []
-                st.session_state.voice_last_reply  = ""
-                st.session_state.avatar_state      = "idle"
-                st.session_state.quote_mode        = False
-                st.session_state.quote_result      = None
+        nc1, nc2 = st.columns(2)
+        with nc1:
+            st.download_button("📥 Download", st.session_state.quote_result,
+                               file_name="hal_quote.json", use_container_width=True)
+        with nc2:
+            if st.button("🔄 New quote", use_container_width=True, key="hal_newq"):
+                st.session_state.quote_result     = None
+                st.session_state.quote_ctx        = {}
+                st.session_state.quote_client_name = ""
+                st.session_state._quote_triggered = False
                 st.rerun()
-
-
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_quotes():
