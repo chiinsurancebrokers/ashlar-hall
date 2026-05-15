@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-HAL — Heuristically Assitant | Ashlar Insurance
+I am HAL the Heuristically AI Assistant | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -1268,6 +1268,18 @@ def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
         print(f"Email error: {e}")
         return False
 
+
+
+
+def _render_avatar(state: str = "idle"):
+    """Render HAL orb avatar. Uses .replace() not .format() — safe for JS {} braces."""
+    import streamlit.components.v1 as components
+    labels = {"idle": "standby", "listening": "listening...",
+              "thinking": "thinking...", "speaking": "speaking..."}
+    html = (_HAL_ORB_HTML
+            .replace("HAL_INIT_STATE",  state)
+            .replace("HAL_STATE_LABEL", labels.get(state, "standby")))
+    components.html(html, height=268, scrolling=False)
 
 
 def render_voice_chat():
