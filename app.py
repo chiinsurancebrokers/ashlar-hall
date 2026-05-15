@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Chris Iatropoulos | Ashlar Insurance
+Pantelis Kourbelas | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -910,15 +910,31 @@ _HAL_AVATAR_HTML = """
 
 
 def _elevenlabs_stt(audio_bytes: bytes, api_key: str, language: str = "el") -> str:
-    """Transcribe audio using ElevenLabs Scribe (Speech-to-Text → Access required)."""
+    """Transcribe audio via ElevenLabs Scribe. Requires Speech to Text -> Access on the key."""
     import io
     import requests as req
+
+    # Detect format from magic bytes (streamlit-mic-recorder may return WAV or WebM)
+    if audio_bytes[:4] == b'RIFF':
+        fname, mime = "audio.wav", "audio/wav"
+    elif audio_bytes[:4] == b'\x1a\x45\xdf\xa3':
+        fname, mime = "audio.webm", "audio/webm"
+    elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
+        fname, mime = "audio.mp3", "audio/mpeg"
+    else:
+        fname, mime = "audio.webm", "audio/webm"
+
+    # Field name MUST be "file" (not "audio") — ElevenLabs API spec
+    post_data = {"model_id": "scribe_v1"}
+    if language and language != "auto":
+        post_data["language_code"] = language
+
     try:
         resp = req.post(
             "https://api.elevenlabs.io/v1/speech-to-text",
             headers={"xi-api-key": api_key},
-            files={"audio": ("audio.webm", io.BytesIO(audio_bytes), "audio/webm")},
-            data={"model_id": "scribe_v1", "language_code": language},
+            files={"file": (fname, io.BytesIO(audio_bytes), mime)},
+            data=post_data,
             timeout=40,
         )
         resp.raise_for_status()
