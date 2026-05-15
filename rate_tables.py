@@ -1078,7 +1078,7 @@ CARRIER_BROCHURES = {
     "morgan_price": {
         "name":         "Morgan Price (Europe) ApS",
         "logo_code":    "MP",
-        "brochure_url": "brochures/morgan_price_evolution_health_eu.pdf",
+        "brochure_url": "morgan_price.pdf",
         "external_url": "https://morgan-price.eu",
         "claim_phone":  "+44 3300 581 668",
         "claim_email":  "euroclaims@morgan-price.eu",
@@ -1095,7 +1095,7 @@ CARRIER_BROCHURES = {
     "april": {
         "name":         "April International",
         "logo_code":    "APR",
-        "brochure_url": "brochures/april_international_benefit_schedule_2026.pdf",
+        "brochure_url": "april.pdf",
         "external_url": "https://april-international.com",
         "claim_phone":  "See policy certificate",
         "claim_email":  "See policy certificate",
@@ -1114,7 +1114,7 @@ CARRIER_BROCHURES = {
     "img": {
         "name":         "IMG Global Prima Medical Insurance",
         "logo_code":    "IMG",
-        "brochure_url": "brochures/img_gpmi_brochure.pdf",
+        "brochure_url": "img_gpmi.pdf",
         "external_url": "https://www.imglobal.com/intl",
         "claim_phone":  "+44 1903 817970",
         "claim_email":  "See MyIMG member portal",
