@@ -813,12 +813,11 @@ _TTS_PLAY_HTML = """
 #   'idle' | 'listening' | 'thinking' | 'speaking'
 _HAL_ORB_HTML = """
 <style>
-  html,body{margin:0;padding:0;background:transparent!important}
-  #w{display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0;background:transparent}
+  html,body,#w{margin:0;padding:0;background:transparent!important;display:flex;flex-direction:column;align-items:center;width:100%}
   #st{font-size:11px;font-family:monospace;letter-spacing:2px;text-transform:uppercase;min-height:16px;transition:color .5s}
 </style>
 <div id="w">
-  <canvas id="o" width="220" height="220" style="display:block"></canvas>
+  <canvas id="o" width="280" height="280" style="display:block"></canvas>
   <div id="st">HAL_STATE_LABEL</div>
 </div>
 <script>
@@ -848,7 +847,7 @@ _HAL_ORB_HTML = """
   function frame(){
     cx.clearRect(0,0,W,H);
     h1=lerp(h1,th1,.03);h2=lerp(h2,th2,.025);h3=lerp(h3,th3,.02);
-    const R=88;
+    const R=110;
     const p=state==='speaking'?.08*Math.sin(t*6):state==='listening'?.05*Math.sin(t*4):state==='thinking'?.04*Math.sin(t*3):.02*Math.sin(t*.8);
     const r=R*(1+p);
     const ga=state==='speaking'?.3+.15*Math.abs(Math.sin(t*5)):.12;
@@ -1496,30 +1495,114 @@ def render_voice_chat():
                   or st.secrets.get("openai_api_key", "")
                   or st.session_state.get("_oai_key_manual", ""))
 
-    # ── Stellar-style dark full-page CSS ───────────────────────────────────
+    # ── Stellar-style dark full-page CSS ─────────────────────────────────
     st.markdown("""
 <style>
-[data-testid="stAppViewContainer"] { background: #050A14 !important; }
-[data-testid="stAppViewBlockContainer"] { background: transparent !important; }
-[data-testid="block-container"] { background: transparent !important; }
-section[data-testid="stMain"] { background: #050A14 !important; }
-.hal-orb-wrap { display:flex; flex-direction:column; align-items:center;
-    justify-content:center; padding:32px 0 16px; }
-.hal-status { font-size:13px; letter-spacing:2px; text-transform:uppercase;
-    color:#5DCAA5; font-family:monospace; min-height:20px; text-align:center; }
-.hal-transcript { max-width:680px; margin:0 auto; font-size:15px;
-    color:#D0C8BE; text-align:center; padding:8px 16px; min-height:40px; line-height:1.6; }
-.hal-cards-wrap { max-width:900px; margin:0 auto; padding:16px; }
-.stChatMessage { background: #0D1520 !important; border-radius:12px;
-    margin-bottom:8px; border:1px solid #1E2D44; }
-/* dark inputs */
-.stTextInput > div > div { background:#0D1520 !important; border-color:#1E2D44 !important; color:#D0C8BE !important; }
-.stExpander { background:#0D1520 !important; border:1px solid #1E2D44 !important; border-radius:10px; }
-.stExpander summary { color:#A89880 !important; }
-/* hide streamlit decoration */
-#MainMenu, footer, header { visibility:hidden; }
+/* Target every possible Streamlit background container */
+html, body,
+.stApp, .main, .block-container,
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewBlockContainer"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
+[data-testid="block-container"],
+section[data-testid="stMain"],
+div[data-testid="stVerticalBlock"],
+div.stMainBlockContainer {
+    background-color: #050A14 !important;
+    background: #050A14 !important;
+}
+/* Orb section */
+.hal-orb-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 0 16px;
+    background: transparent;
+}
+/* Transcript text below orb */
+.hal-transcript {
+    max-width: 720px;
+    margin: 0 auto;
+    font-size: 15px;
+    color: #D0C8BE;
+    text-align: center;
+    padding: 10px 20px;
+    min-height: 44px;
+    line-height: 1.6;
+    font-family: -apple-system, sans-serif;
+}
+/* Chat messages dark */
+.stChatMessage, [data-testid="stChatMessage"] {
+    background: #0D1520 !important;
+    border-radius: 12px !important;
+    margin-bottom: 8px !important;
+    border: 1px solid #1E2D44 !important;
+    color: #D0C8BE !important;
+}
+[data-testid="stChatMessageContent"] p { color: #D0C8BE !important; }
+/* Inputs dark */
+.stTextInput > div > div, input {
+    background: #0D1520 !important;
+    border-color: #1E2D44 !important;
+    color: #D0C8BE !important;
+}
+/* Expander dark */
+[data-testid="stExpander"] {
+    background: #0D1520 !important;
+    border: 1px solid #1E2D44 !important;
+    border-radius: 10px !important;
+}
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] label { color: #A89880 !important; }
+/* Selectbox dark */
+[data-testid="stSelectbox"] > div { 
+    background: #0D1520 !important; 
+    color: #D0C8BE !important; 
+}
+/* Caption text */
+.stCaption p { color: #5A6A7A !important; }
+/* Cards wrap */
+.hal-cards-wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
+/* Hide Streamlit chrome */
+#MainMenu, footer, header { visibility: hidden !important; }
+/* Sidebar stays as-is */
 </style>
 """, unsafe_allow_html=True)
+
+    # ── Star field background (Stellar-style) ──────────────────────────────
+    st.html("""
+<div id="starfield" style="
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    pointer-events:none;z-index:0;overflow:hidden">
+<canvas id="stars"></canvas>
+</div>
+<script>
+(function(){
+  var c=document.getElementById('stars');
+  if(!c)return;
+  var cx=c.getContext('2d');
+  c.width=window.innerWidth;c.height=window.innerHeight;
+  var stars=[];
+  for(var i=0;i<120;i++){
+    stars.push({x:Math.random()*c.width,y:Math.random()*c.height,
+                r:Math.random()*1.2+0.2,o:Math.random()*0.6+0.2,
+                speed:Math.random()*0.003+0.001});
+  }
+  function draw(){
+    cx.clearRect(0,0,c.width,c.height);
+    stars.forEach(function(s){
+      s.o+=s.speed;if(s.o>0.9||s.o<0.2)s.speed*=-1;
+      cx.beginPath();cx.arc(s.x,s.y,s.r,0,Math.PI*2);
+      cx.fillStyle='rgba(255,255,255,'+s.o+')';cx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+</script>
+""")
 
     # ── Settings expander ─────────────────────────────────────────────────
     with st.expander("⚙️ Voice settings", expanded=False):
