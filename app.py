@@ -1211,35 +1211,53 @@ def render_voice_chat():
 
     api_key = get_api_key() or st.session_state.get("api_key_input", "")
 
-    # ── ElevenLabs key ────────────────────────────────────────────────────
-    el_key   = st.secrets.get("ELEVENLABS_API_KEY", "")
-    el_voice = "onwK4e9ZLuTAKqWW03F9"  # Daniel — multilingual
-    el_lang  = "el"
-    lang_code = "el-GR"
+    # ── Keys & settings ───────────────────────────────────────────────────
+    el_key      = st.secrets.get("ELEVENLABS_API_KEY", "")
+    openai_key  = st.secrets.get("OPENAI_API_KEY", "")
+    el_voice    = "onwK4e9ZLuTAKqWW03F9"
+    el_lang     = "el"
+    lang_code   = "el-GR"
+    stt_choice  = "ElevenLabs Scribe"
 
     with st.expander("⚙️ Voice settings", expanded=not bool(el_key)):
-        if not el_key:
-            el_key = st.text_input(
-                "ElevenLabs API key", type="password", key="el_key_input",
-                help="Add ELEVENLABS_API_KEY to Streamlit secrets (Settings → Secrets).",
-            )
-            st.caption("Needs: Text to Speech ✅  Speech to Text ✅  in your ElevenLabs API key settings")
-        else:
-            st.success("✅ ElevenLabs key loaded from secrets")
-
-        col1, col2 = st.columns(2)
-        with col1:
+        scol1, scol2 = st.columns(2)
+        with scol1:
+            st.markdown("**ElevenLabs** (TTS + Scribe STT)")
+            if not el_key:
+                el_key = st.text_input(
+                    "ElevenLabs API key", type="password", key="el_key_input",
+                    help="Add ELEVENLABS_API_KEY to Streamlit secrets.",
+                )
+                st.caption("Enable: Text to Speech ✅  Speech to Text ✅")
+            else:
+                st.success("✅ ElevenLabs key loaded")
             el_voice = st.text_input(
                 "Voice ID", value="onwK4e9ZLuTAKqWW03F9",
-                help="Default: Daniel (multilingual, Greek-capable). Find more at elevenlabs.io/voice-lab",
+                help="Default: Daniel (multilingual). Find more at elevenlabs.io/voice-lab",
                 key="el_voice_id",
             )
-        with col2:
-            lang_sel = st.selectbox("Language", ["el — Greek", "en — English", "auto"], index=0, key="voice_lang")
+        with scol2:
+            st.markdown("**Speech-to-text engine**")
+            stt_options = []
+            if el_key:
+                stt_options.append("ElevenLabs Scribe")
+            if openai_key:
+                stt_options.append("OpenAI Whisper")
+            if not stt_options:
+                stt_options = ["ElevenLabs Scribe"]
+            stt_choice = st.radio("STT engine", stt_options, key="stt_engine",
+                help="Whisper is excellent for Greek. Needs OPENAI_API_KEY in secrets.")
+            if not openai_key and len(stt_options) == 1:
+                openai_key = st.text_input(
+                    "OpenAI API key (for Whisper)", type="password", key="openai_key_input",
+                    help="Add OPENAI_API_KEY to Streamlit secrets to enable Whisper.",
+                )
+            lang_sel  = st.selectbox("Language", ["el — Greek", "en — English", "auto"], index=0, key="voice_lang")
             el_lang   = lang_sel.split("—")[0].strip()
             lang_code = "el-GR" if el_lang == "el" else ("en-US" if el_lang == "en" else "el-GR")
 
-    use_el = bool(el_key)
+    use_el      = bool(el_key)
+    use_whisper = stt_choice == "OpenAI Whisper" and bool(openai_key)
 
     # ── System prompts ─────────────────────────────────────────────────────
     system_business = """You are HAL — the AI voice assistant for Pantelis Kourbelas, Ashlar Insurance, Athens.
@@ -1289,17 +1307,29 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
             key="hal_mic",
         )
         if audio and audio.get("bytes"):
-            if use_el:
-                with st.spinner("Transcribing with ElevenLabs Scribe…"):
-                    transcript = _elevenlabs_stt(audio["bytes"], el_key, el_lang)
-                if transcript and not transcript.startswith("[ElevenLabs STT error"):
-                    st.info(f"Heard: *{transcript}*")
-                    user_text = transcript
+            # Guard: only process each recording once (prevent rerun loops)
+            audio_id = str(audio.get("id", id(audio["bytes"])))
+            if audio_id != st.session_state.get("_last_audio_id", ""):
+                st.session_state._last_audio_id = audio_id
+                if use_whisper:
+                    with st.spinner("Transcribing with OpenAI Whisper…"):
+                        transcript = _whisper_transcribe(audio["bytes"], openai_key, el_lang)
+                    if transcript and not transcript.startswith("[Whisper error"):
+                        st.info(f"Heard: *{transcript}*")
+                        user_text = transcript
+                    else:
+                        st.error(f"Whisper transcription failed: {transcript}")
+                elif use_el:
+                    with st.spinner("Transcribing with ElevenLabs Scribe…"):
+                        transcript = _elevenlabs_stt(audio["bytes"], el_key, el_lang)
+                    if transcript and not transcript.startswith("[ElevenLabs STT error"):
+                        st.info(f"Heard: *{transcript}*")
+                        user_text = transcript
+                    else:
+                        st.error(f"Transcription failed: {transcript}")
+                        st.caption("Check that Speech to Text → Access is enabled in your ElevenLabs API key.")
                 else:
-                    st.error(f"Transcription failed: {transcript}")
-                    st.caption("Check that Speech to Text → Access is enabled in your ElevenLabs API key.")
-            else:
-                st.warning("Add ELEVENLABS_API_KEY to Streamlit secrets to transcribe. Type below instead.")
+                    st.warning("Add ELEVENLABS_API_KEY or OPENAI_API_KEY to Streamlit secrets to transcribe.")
     else:
         st.warning(
             "Install `streamlit-mic-recorder` to enable the mic button. "
@@ -1338,37 +1368,42 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
             else:
                 st.warning("Add ELEVENLABS_API_KEY first.")
 
+    # ── Reset button — always visible when avatar is stuck ──────────────────
+    if st.session_state.get("avatar_state") in ("thinking", "speaking"):
+        if st.button("🔄 Reset HAL", key="voice_reset", help="Click if HAL appears frozen"):
+            st.session_state.avatar_state = "idle"
+            st.session_state._voice_processing = False
+            st.rerun()
+
     # ── Process → Claude → TTS ─────────────────────────────────────────────
-    if user_text and api_key:
+    if user_text and api_key and not st.session_state.get("_voice_processing"):
+        st.session_state._voice_processing = True
         st.session_state.voice_history.append({"role": "user", "content": user_text})
         st.session_state.avatar_state = "thinking"
 
         with st.spinner("HAL is thinking…"):
             try:
                 client_ai = anthropic.Anthropic(api_key=api_key)
-                messages  = [{"role": m["role"], "content": m["content"]}
-                             for m in st.session_state.voice_history]
-                response  = client_ai.messages.create(
+                history_trimmed = st.session_state.voice_history[-10:]
+                messages = [{"role": m["role"], "content": m["content"]}
+                            for m in history_trimmed]
+                response = client_ai.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=400,
                     system=system,
                     messages=messages,
+                    timeout=30,
                 )
                 reply = response.content[0].text
                 st.session_state.voice_history.append({"role": "assistant", "content": reply})
                 st.session_state.voice_last_reply = reply
                 st.session_state.avatar_state = "speaking"
+                st.session_state._voice_processing = False
 
-                # ── TTS ────────────────────────────────────────────────────
                 if use_el:
-                    audio_bytes = _elevenlabs_tts(reply, el_key, el_voice)
-                    if audio_bytes:
-                        b64 = base64.b64encode(audio_bytes).decode()
-                        components.html(
-                            f'<audio autoplay style="display:none">'
-                            f'<source src="data:audio/mpeg;base64,{b64}" type="audio/mpeg"></audio>',
-                            height=0,
-                        )
+                    tts_bytes = _elevenlabs_tts(reply, el_key, el_voice)
+                    if tts_bytes:
+                        st.audio(tts_bytes, format="audio/mp3", autoplay=True)
                     else:
                         st.warning("ElevenLabs TTS failed — using browser synthesis.")
                         components.html(
@@ -1389,6 +1424,7 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
 
             except Exception as e:
                 st.session_state.avatar_state = "idle"
+                st.session_state._voice_processing = False
                 st.error(f"HAL error: {e}")
 
         st.rerun()
@@ -1397,6 +1433,8 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
         st.error("No Claude API key — add Claude_API_Key to Streamlit secrets.")
 
     if st.session_state.avatar_state == "speaking" and not user_text:
+        st.session_state.avatar_state = "idle"
+
         st.session_state.avatar_state = "idle"
 
     # ── Controls ──────────────────────────────────────────────────────────
