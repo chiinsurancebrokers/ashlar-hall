@@ -1411,8 +1411,11 @@ def _render_quote_cards_html(quote_json_str: str) -> str:
 
 def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
                       sender_email: str, app_password: str) -> bool:
+    import smtplib as _smtp, json as _j
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text      import MIMEText
     try:
-        q     = json.loads(quote_json_str)
+        q     = _j.loads(quote_json_str)
         plans = q.get("plans", [])
         rec   = next((p for p in plans if p.get("recommended")), plans[0] if plans else {})
 
@@ -1482,7 +1485,7 @@ def _render_avatar(state: str = "idle"):
     html = (_HAL_ORB_HTML
             .replace("HAL_INIT_STATE",  state)
             .replace("HAL_STATE_LABEL", labels.get(state, "standby")))
-    _cv1.html(html, height=310, scrolling=False)
+    st.iframe(html, height=310, scrolling=False)
 
 
 
@@ -1717,6 +1720,27 @@ div.stMainBlockContainer {
         if k not in st.session_state:
             st.session_state[k] = v
 
+    # ── Auto-greeting on first open ───────────────────────────────────────
+    if not st.session_state._hal_greeted and api_key:
+        st.session_state._hal_greeted = True
+        _greet = (
+            "Γεια σας! Είμαι ο HAL, ο ασφαλιστικός βοηθός της Ashlar Insurance. "
+            "Πείτε μου το όνομά σας, την ηλικία σας και τι ασφάλιση χρειάζεστε — "
+            "θα σας φέρω τα πραγματικά τιμολόγια 2025 αμέσως."
+            if el_lang == "el" else
+            "Hello! I'm HAL, the AI insurance assistant at Ashlar. "
+            "Tell me your name, age, and the coverage you're looking for — "
+            "I'll calculate your actual 2025 premiums straight away."
+        )
+        st.session_state.voice_history.append({"role": "assistant", "content": _greet})
+        st.session_state.hal_last_text = _greet
+        st.session_state.avatar_state  = "speaking"
+        if use_el:
+            _tg = _elevenlabs_tts(_greet, el_key, el_voice)
+            if _tg:
+                st.session_state.voice_tts_pending = _tg
+        st.rerun()   # ← triggers audio playback on next render
+
     # ── Play pending TTS (Web Audio API — bypasses browser autoplay block) ─
     if st.session_state.voice_tts_pending:
         _audio_bytes = st.session_state.voice_tts_pending
@@ -1761,7 +1785,7 @@ div.stMainBlockContainer {
         user_text = st.chat_input("Type your message…") or ""
 
     # Always-visible text fallback (reliability when mic fails)
-    _typed = st.text_input("", key="hal_type_in",
+    _typed = st.text_input("Type message", key="hal_type_in",
                            placeholder="Didn't record? Type here…",
                            label_visibility="collapsed")
     if _typed and _typed.strip() and _typed != st.session_state.get("_last_typed",""):
