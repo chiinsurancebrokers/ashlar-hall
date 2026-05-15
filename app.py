@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-HAL | Ashlar Insurance
+I AM HAL THE VIRTUAL ASSISTANT | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -1231,11 +1231,19 @@ def render_voice_chat():
                 st.caption("Enable: Text to Speech ✅  Speech to Text ✅")
             else:
                 st.success("✅ ElevenLabs key loaded")
-            el_voice = st.text_input(
-                "Voice ID", value="onwK4e9ZLuTAKqWW03F9",
-                help="Default: Daniel (multilingual). Find more at elevenlabs.io/voice-lab",
-                key="el_voice_id",
-            )
+            VOICE_OPTIONS = {
+                "Kyriakos — Greek, soft & calm": "f5HLTX707KIM4SzJYzSz",
+                "Brad — English, welcoming & casual": "6z1Ks05MOtac6wYNh9PJ",
+                "Daniel — multilingual": "onwK4e9ZLuTAKqWW03F9",
+                "Custom voice ID…": "custom",
+            }
+            voice_sel = st.selectbox("HAL voice", list(VOICE_OPTIONS.keys()), index=0, key="el_voice_sel",
+                help="Kyriakos = native Greek. Brad = natural English. Daniel = multilingual fallback.")
+            if VOICE_OPTIONS[voice_sel] == "custom":
+                el_voice = st.text_input("Enter voice ID", value="", key="el_voice_custom")
+            else:
+                el_voice = VOICE_OPTIONS[voice_sel]
+                st.caption(f"ID: `{el_voice}`")
         with scol2:
             st.markdown("**Speech-to-text engine**")
             stt_options = []
@@ -1273,11 +1281,17 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
     system = system_private if is_private else system_business
 
     # ── Session state ──────────────────────────────────────────────────────
-    for _k, _v in [("voice_history", []), ("voice_last_reply", ""), ("avatar_state", "idle")]:
+    # ── Session state ──────────────────────────────────────────────────────
+    for _k, _v in [("voice_history", []), ("voice_last_reply", ""), ("avatar_state", "idle"), ("voice_tts_pending", None)]:
         if _k not in st.session_state:
             st.session_state[_k] = _v
-
     # ── Layout: avatar left, conversation right ────────────────────────────
+
+    # ── Play TTS audio (stored from prev render, before it gets wiped by rerun) ──
+    if st.session_state.get("voice_tts_pending"):
+        st.audio(st.session_state.voice_tts_pending, format="audio/mp3", autoplay=True)
+        st.session_state.voice_tts_pending = None
+
     col_av, col_main = st.columns([1, 2], gap="medium")
 
     with col_av:
@@ -1403,7 +1417,7 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
                 if use_el:
                     tts_bytes = _elevenlabs_tts(reply, el_key, el_voice)
                     if tts_bytes:
-                        st.audio(tts_bytes, format="audio/mp3", autoplay=True)
+                        st.session_state.voice_tts_pending = tts_bytes
                     else:
                         st.warning("ElevenLabs TTS failed — using browser synthesis.")
                         components.html(
@@ -1435,7 +1449,6 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
     if st.session_state.avatar_state == "speaking" and not user_text:
         st.session_state.avatar_state = "idle"
 
-        st.session_state.avatar_state = "idle"
 
     # ── Controls ──────────────────────────────────────────────────────────
     if st.session_state.voice_last_reply:
