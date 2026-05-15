@@ -283,6 +283,7 @@ with st.sidebar:
         modules_business = [
             ("🏠", "home", "Dashboard"),
             ("💬", "hal_chat", "HAL Assistant"),
+            ("🎙️", "voice_chat", "HAL Voice"),
             ("📊", "quotes", "Quote Engine"),
             ("📄", "documents", "Document Filler"),
             ("✉️", "comms", "Communications"),
@@ -310,6 +311,7 @@ with st.sidebar:
             modules_private = [
                 ("🏠", "home", "Dashboard"),
                 ("💬", "hal_chat", "HAL Assistant"),
+                ("🎙️", "voice_chat", "HAL Voice"),
                 ("🏛️", "lodge", "Lodge Secretary"),
                 ("📋", "minutes", "Minutes & Docs"),
                 ("👥", "attendance", "Attendance"),
@@ -554,6 +556,223 @@ def _build_api_content(user_text: str, uploaded_files) -> tuple[list, list[str]]
     return api_content, attachment_names
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# VOICE HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Browser-side recorder + Web Speech API component
+# Returns a dict via Streamlit component value:
+#   {"transcript": str, "audio_b64": str|None}
+_VOICE_COMPONENT_HTML = """
+<style>
+  body { margin:0; font-family: sans-serif; }
+  #vc { display:flex; flex-direction:column; align-items:center; gap:12px; padding:16px 0; }
+  #btn {
+    width:72px; height:72px; border-radius:50%; border:none; cursor:pointer;
+    background:#C9A96E; color:#1C1410; font-size:28px;
+    box-shadow:0 2px 8px rgba(201,169,110,.35);
+    transition:all .15s;
+  }
+  #btn.recording { background:#E2462C; box-shadow:0 0 0 8px rgba(226,70,44,.2); animation:pulse 1.2s ease-in-out infinite; }
+  #btn:disabled { opacity:.45; cursor:default; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 4px rgba(226,70,44,.2)} 50%{box-shadow:0 0 0 12px rgba(226,70,44,.08)} }
+  #status { font-size:13px; color:#7A6A5A; min-height:18px; }
+  #transcript-box {
+    width:92%; min-height:48px; padding:8px 12px; border-radius:8px;
+    border:1px solid #E8E0D5; font-size:13px; background:#FBF8F4;
+    color:#2C1810; resize:none; outline:none;
+  }
+  #send-btn {
+    padding:8px 24px; border-radius:8px; border:none; cursor:pointer;
+    background:#C9A96E; color:#1C1410; font-size:13px; font-weight:600;
+  }
+  #send-btn:disabled { opacity:.4; cursor:default; }
+</style>
+<div id="vc">
+  <button id="btn" title="Hold to record">🎙️</button>
+  <div id="status">Click the mic to start recording</div>
+  <textarea id="transcript-box" placeholder="Transcript will appear here — you can edit before sending…" rows="3"></textarea>
+  <button id="send-btn" disabled>Send to HAL ➜</button>
+</div>
+<script>
+(function(){
+  const btn = document.getElementById('btn');
+  const status = document.getElementById('status');
+  const box = document.getElementById('transcript-box');
+  const sendBtn = document.getElementById('send-btn');
+  let recognition = null;
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let isRecording = false;
+  const LANG = window.HAL_LANG || 'el-GR';
+  const MODE = window.HAL_STT_MODE || 'webspeech';  // 'webspeech' | 'whisper'
+
+  box.addEventListener('input', () => { sendBtn.disabled = box.value.trim().length === 0; });
+
+  // ── SEND ──────────────────────────────────────────────────────────────
+  sendBtn.addEventListener('click', () => {
+    const text = box.value.trim();
+    if (!text) return;
+    window.parent.postMessage({type:'hal_voice_send', text: text, audio: window._lastAudioB64 || null}, '*');
+    box.value = '';
+    sendBtn.disabled = true;
+    window._lastAudioB64 = null;
+    status.textContent = 'Sent — waiting for HAL…';
+  });
+
+  // ── RECORDING ─────────────────────────────────────────────────────────
+  btn.addEventListener('click', () => {
+    if (isRecording) stopRecording();
+    else startRecording();
+  });
+
+  function startRecording() {
+    isRecording = true;
+    btn.classList.add('recording');
+    btn.textContent = '⏹️';
+    audioChunks = [];
+    window._lastAudioB64 = null;
+
+    if (MODE === 'webspeech' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SR();
+      recognition.lang = LANG;
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      status.textContent = 'Listening…';
+      recognition.onresult = e => {
+        let interim = '', final = '';
+        for (let r of e.results) { if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript; }
+        box.value = (final || interim).trim();
+        sendBtn.disabled = box.value.length === 0;
+      };
+      recognition.onend = () => { stopRecording(); };
+      recognition.onerror = (e) => { status.textContent = 'Mic error: '+e.error; stopRecording(); };
+      recognition.start();
+    } else {
+      // Whisper mode — just record audio bytes
+      navigator.mediaDevices.getUserMedia({audio:true}).then(stream => {
+        status.textContent = 'Recording… click ⏹️ when done';
+        mediaRecorder = new MediaRecorder(stream, {mimeType:'audio/webm'});
+        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+        mediaRecorder.onstop = () => {
+          stream.getTracks().forEach(t => t.stop());
+          const blob = new Blob(audioChunks, {type:'audio/webm'});
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            window._lastAudioB64 = reader.result.split(',')[1];
+            status.textContent = 'Recording ready — transcribing…';
+            box.value = '…transcribing via ElevenLabs…';
+            sendBtn.disabled = true;
+            window.parent.postMessage({type:'hal_whisper_audio', audio: window._lastAudioB64}, '*');
+          };
+          reader.readAsDataURL(blob);
+        };
+        mediaRecorder.start();
+      }).catch(e => { status.textContent = 'Mic access denied'; stopRecording(); });
+    }
+  }
+
+  function stopRecording() {
+    isRecording = false;
+    btn.classList.remove('recording');
+    btn.textContent = '🎙️';
+    if (recognition) { try { recognition.stop(); } catch(e){} recognition = null; }
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    if (MODE === 'webspeech') status.textContent = box.value ? 'Edit transcript then send ↑' : 'Nothing heard — try again';
+  }
+
+  // ── RECEIVE transcript back from Streamlit (Whisper result) ───────────
+  window.addEventListener('message', e => {
+    if (e.data && e.data.type === 'hal_whisper_result') {
+      box.value = e.data.text || '';
+      sendBtn.disabled = box.value.trim().length === 0;
+      status.textContent = 'Transcript ready — edit or send ↑';
+    }
+    if (e.data && e.data.type === 'hal_speaking') {
+      status.textContent = 'HAL is speaking…';
+    }
+    if (e.data && e.data.type === 'hal_ready') {
+      status.textContent = 'Click the mic to start recording';
+    }
+  });
+})();
+</script>
+"""
+
+_TTS_PLAY_HTML = """
+<script>
+(function(){{
+  const text = {text_json};
+  const lang = {lang_json};
+  window.parent.postMessage({{type:'hal_speaking'}}, '*');
+  if (window.speechSynthesis) {{
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    u.rate = 0.95;
+    u.pitch = 1.0;
+    u.onend = () => window.parent.postMessage({{type:'hal_ready'}}, '*');
+    window.speechSynthesis.speak(u);
+  }}
+}})();
+</script>
+"""
+
+
+def _elevenlabs_stt(audio_bytes: bytes, api_key: str, language: str = "el") -> str:
+    """Transcribe audio using ElevenLabs Scribe (Speech-to-Text → Access required)."""
+    import io
+    import requests as req
+    try:
+        resp = req.post(
+            "https://api.elevenlabs.io/v1/speech-to-text",
+            headers={"xi-api-key": api_key},
+            files={"audio": ("audio.webm", io.BytesIO(audio_bytes), "audio/webm")},
+            data={"model_id": "scribe_v1", "language_code": language},
+            timeout=40,
+        )
+        resp.raise_for_status()
+        return resp.json().get("text", "")
+    except Exception as e:
+        return f"[ElevenLabs STT error: {e}]"
+
+
+def _whisper_transcribe(audio_bytes: bytes, openai_api_key: str, language: str = "el") -> str:
+    """Send audio bytes to OpenAI Whisper API and return transcript."""
+    import io
+    import requests as req
+    try:
+        resp = req.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {openai_api_key}"},
+            files={"file": ("audio.webm", io.BytesIO(audio_bytes), "audio/webm")},
+            data={"model": "whisper-1", "language": language},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json().get("text", "")
+    except Exception as e:
+        return f"[Whisper error: {e}]"
+
+
+def _elevenlabs_tts(text: str, api_key: str, voice_id: str = "onwK4e9ZLuTAKqWW03F9") -> bytes | None:
+    """Call ElevenLabs TTS and return MP3 bytes (or None on error)."""
+    import requests as req
+    try:
+        resp = req.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+            headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+            json={"text": text, "model_id": "eleven_multilingual_v2",
+                  "voice_settings": {"stability": 0.55, "similarity_boost": 0.80}},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.content
+    except Exception:
+        return None
+
+
 def render_hal_chat():
     import anthropic
 
@@ -749,6 +968,210 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
             st.session_state.chat_history = []
             st.session_state.upload_key_counter += 1   # reset uploader too
             st.rerun()
+
+
+def render_voice_chat():
+    """HAL Voice — speak to HAL and hear responses back."""
+    import anthropic
+    import json
+    import base64
+    import streamlit.components.v1 as components
+
+    is_private = st.session_state.mode == "private"
+    mode_label = "Private · Lodge & Personal" if is_private else "Business · Ashlar Insurance"
+    st.markdown(f"## 🎙️ HAL Voice — {mode_label}")
+    st.caption("Speak to HAL · HAL speaks back · Supports Greek & English")
+
+    api_key = get_api_key() or st.session_state.get("api_key_input", "")
+
+    # ── Settings ──────────────────────────────────────────────────────────
+    with st.expander("⚙️ Voice settings", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            stt_mode = st.radio(
+                "Speech-to-text",
+                ["🔊 ElevenLabs Scribe (recommended)", "🌐 Browser (free, Chrome only)"],
+                index=0,
+                help="ElevenLabs Scribe is accurate, multilingual, Greek-native. Browser Web Speech is free but Chrome-only and less accurate.",
+            )
+        with col2:
+            lang = st.selectbox(
+                "Language",
+                ["el (Greek)", "en (English)", "auto (auto-detect)"],
+                index=0,
+            )
+
+        use_el_stt = "ElevenLabs" in stt_mode
+        lang_code  = "el-GR" if lang.startswith("el") else ("en-US" if lang.startswith("en") else "el-GR")
+        el_lang    = lang.split()[0]  # "el", "en", or "auto"
+
+        # One key for both STT and TTS
+        el_key = st.secrets.get("ELEVENLABS_API_KEY", "") or st.text_input(
+            "ElevenLabs API key", type="password", key="el_key_input",
+            help="Used for both Speech-to-Text (Scribe) and Text-to-Speech. Add ELEVENLABS_API_KEY to Streamlit secrets.",
+        )
+        el_voice = st.text_input(
+            "ElevenLabs voice ID",
+            value="onwK4e9ZLuTAKqWW03F9",
+            help="Default: Daniel (multilingual, Greek-capable). Find more at elevenlabs.io/voice-lab",
+        )
+        if not el_key:
+            st.warning("Add ELEVENLABS_API_KEY to Streamlit secrets for full voice mode.")
+
+    use_elevenlabs = bool(el_key)
+    use_el_stt     = use_el_stt and use_elevenlabs
+    stt_mode_js    = "elevenlabs" if use_el_stt else "webspeech"
+
+    # System prompt (reuses the same logic as HAL chat)
+    system_business = """You are HAL — the AI assistant for Pantelis Kourbelas, Ashlar Insurance, Athens.
+You are in VOICE mode. Keep responses concise (2-4 sentences max per turn) — they will be spoken aloud.
+Specialise in international health insurance: Groupama, Generali, Ethniki, Morgan Price, NOW Health, Bupa Global.
+Respond in the language spoken to you. Be direct and conversational — no bullet lists, no markdown."""
+
+    system_private = """You are HAL — private voice assistant for Pantelis Kourbelas.
+You are in VOICE mode. Keep responses concise (2-4 sentences max) — they will be spoken aloud.
+Lodge: Στ∴ ΑΚΡΟΠΟΛΙΣ 84. Personal: finance, health, gym.
+Respond in Greek unless spoken to in English. Conversational tone — no bullet points, no markdown."""
+
+    system = system_private if is_private else system_business
+
+    # Session state
+    if "voice_history" not in st.session_state:
+        st.session_state.voice_history = []
+    if "voice_pending_audio" not in st.session_state:
+        st.session_state.voice_pending_audio = None
+    if "voice_last_reply" not in st.session_state:
+        st.session_state.voice_last_reply = ""
+
+    # ── Conversation display ───────────────────────────────────────────────
+    if st.session_state.voice_history:
+        for msg in st.session_state.voice_history[-12:]:  # last 6 exchanges
+            icon = "user" if msg["role"] == "user" else "assistant"
+            st.chat_message(icon).write(msg["content"])
+    else:
+        st.info("🎙️ Click the mic button below, speak your message, then click **Send to HAL**.")
+
+    # ── Voice recorder component ───────────────────────────────────────────
+    component_html = f"""
+<script>
+  window.HAL_LANG = '{lang_code}';
+  window.HAL_STT_MODE = '{stt_mode_js}';
+</script>
+""" + _VOICE_COMPONENT_HTML
+
+    components.html(component_html, height=220, scrolling=False)
+
+    st.markdown("---")
+
+    # ── Manual text fallback (always available) ────────────────────────────
+    col_input, col_send = st.columns([5, 1])
+    with col_input:
+        typed = st.text_input(
+            "Or type your message",
+            key="voice_typed_input",
+            label_visibility="collapsed",
+            placeholder="Type here if mic isn't working…",
+        )
+    with col_send:
+        send_typed = st.button("Send", type="primary", use_container_width=True, key="voice_send_typed")
+
+    # ── Audio file upload (ElevenLabs STT path) ────────────────────────────
+    if use_el_stt:
+        with st.expander("📁 Upload audio file instead", expanded=False):
+            audio_file = st.file_uploader(
+                "Upload WAV / MP3 / WEBM / M4A",
+                type=["wav", "mp3", "webm", "m4a", "ogg"],
+                key="voice_audio_upload",
+            )
+            if audio_file and st.button("Transcribe & Send", key="transcribe_upload"):
+                with st.spinner("Transcribing with ElevenLabs Scribe…"):
+                    transcript = _elevenlabs_stt(audio_file.read(), el_key, el_lang)
+                if not transcript.startswith("[ElevenLabs STT error"):
+                    st.session_state.voice_history.append({"role": "user", "content": transcript})
+                    st.session_state.voice_pending_audio = None
+                    st.session_state["_voice_trigger"] = transcript
+                else:
+                    st.error(transcript)
+
+    # ── Process text input ────────────────────────────────────────────────
+    user_text = None
+    if send_typed and typed.strip():
+        user_text = typed.strip()
+    elif st.session_state.get("_voice_trigger"):
+        user_text = st.session_state.pop("_voice_trigger")
+
+    if user_text and api_key:
+        st.session_state.voice_history.append({"role": "user", "content": user_text})
+
+        with st.spinner("HAL is thinking…"):
+            try:
+                client = anthropic.Anthropic(api_key=api_key)
+                messages = [{"role": m["role"], "content": m["content"]}
+                            for m in st.session_state.voice_history]
+                response = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=400,  # keep voice replies short
+                    system=system,
+                    messages=messages,
+                )
+                reply = response.content[0].text
+                st.session_state.voice_history.append({"role": "assistant", "content": reply})
+                st.session_state.voice_last_reply = reply
+
+                # ── TTS ────────────────────────────────────────────────────
+                if use_elevenlabs and el_key:
+                    audio_bytes = _elevenlabs_tts(reply, el_key, el_voice)
+                    if audio_bytes:
+                        b64 = base64.b64encode(audio_bytes).decode()
+                        # Auto-play via HTML audio element
+                        components.html(
+                            f'<audio autoplay style="display:none">'
+                            f'<source src="data:audio/mpeg;base64,{b64}" type="audio/mpeg"></audio>',
+                            height=0,
+                        )
+                    else:
+                        st.warning("ElevenLabs TTS failed — falling back to browser synthesis.")
+                        components.html(
+                            _TTS_PLAY_HTML.format(
+                                text_json=json.dumps(reply),
+                                lang_json=json.dumps(lang_code),
+                            ),
+                            height=0,
+                        )
+                else:
+                    # Browser speechSynthesis
+                    components.html(
+                        _TTS_PLAY_HTML.format(
+                            text_json=json.dumps(reply),
+                            lang_json=json.dumps(lang_code),
+                        ),
+                        height=0,
+                    )
+
+            except Exception as e:
+                st.error(f"HAL error: {e}")
+
+        st.rerun()
+
+    elif user_text and not api_key:
+        st.error("No Claude API key — add Claude_API_Key to Streamlit secrets.")
+
+    # ── Download last reply ────────────────────────────────────────────────
+    if st.session_state.voice_last_reply:
+        st.divider()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.download_button(
+                "📥 Download last reply",
+                st.session_state.voice_last_reply,
+                file_name="hal_reply.txt",
+                use_container_width=True,
+            )
+        with col_b:
+            if st.button("🗑 Clear conversation", use_container_width=True, key="clear_voice"):
+                st.session_state.voice_history = []
+                st.session_state.voice_last_reply = ""
+                st.rerun()
 
 
 def render_quotes():
@@ -1630,6 +2053,7 @@ if mode == "private" and not st.session_state.private_unlocked:
 elif mode == "business":
     if module == "home":        render_business_home()
     elif module == "hal_chat":  render_hal_chat()
+    elif module == "voice_chat": render_voice_chat()
     elif module == "quotes":    render_quotes()
     elif module == "documents": render_documents()
     elif module == "comms":     render_comms()
@@ -1643,6 +2067,7 @@ elif mode == "business":
 elif mode == "private" and st.session_state.private_unlocked:
     if module == "home":        render_private_home()
     elif module == "hal_chat":  render_hal_chat()
+    elif module == "voice_chat": render_voice_chat()
     elif module == "lodge":     render_lodge()
     elif module == "minutes":   render_placeholder("Minutes & Documents", "📋")
     elif module == "attendance": render_placeholder("Attendance Tracker", "👥")
