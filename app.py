@@ -813,7 +813,8 @@ _TTS_PLAY_HTML = """
 #   'idle' | 'listening' | 'thinking' | 'speaking'
 _HAL_ORB_HTML = """
 <style>
-  html,body,#w{margin:0;padding:0;background:transparent!important;display:flex;flex-direction:column;align-items:center;width:100%}
+  body{margin:0;padding:0;background:#050A14}
+  #w{display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 0;background:#050A14}
   #st{font-size:11px;font-family:monospace;letter-spacing:2px;text-transform:uppercase;min-height:16px;transition:color .5s}
 </style>
 <div id="w">
@@ -1466,14 +1467,14 @@ def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
 
 
 def _render_avatar(state: str = "idle"):
-    """Render HAL orb avatar. Uses .replace() not .format() — safe for JS {} braces."""
-    import streamlit.components.v1 as components
+    """Render HAL orb. Uses iframe via components.html for reliable canvas rendering."""
+    import streamlit.components.v1 as _cv1
     labels = {"idle": "standby", "listening": "listening...",
               "thinking": "thinking...", "speaking": "speaking..."}
     html = (_HAL_ORB_HTML
             .replace("HAL_INIT_STATE",  state)
             .replace("HAL_STATE_LABEL", labels.get(state, "standby")))
-    st.html(html)
+    _cv1.html(html, height=310, scrolling=False)
 
 
 
@@ -1639,12 +1640,40 @@ div.stMainBlockContainer {
     sys_biz = (
         "You are HAL — AI voice assistant for Ashlar Insurance, Athens. "
         "VOICE: 2-3 sentences max. No bullets. No markdown. "
-        "Specialise in: Morgan Price, April International, IMG Europe, NOW Health, Bupa Global. "
-        "When a client gives you their age, location, and coverage type, confirm what you understood "
-        "and say you are calculating their 2025 premiums. Do not ask any further questions — "
-        "the system will generate the actual rates automatically. "
-        "If you still need information, ask for ONE piece only. "
-        "Respond in the language the client speaks.\n\n"
+        "You specialise in: Morgan Price (Europe), April International, IMG Europe GPMI, NOW Health, Bupa Global. "
+        "When a client gives age, location, and coverage type, confirm and say you are calculating 2025 premiums. "
+        "Do not ask further questions — the system generates rates automatically. "
+        "If still missing info, ask ONE thing only. "
+        "Respond in the language spoken.\n\n"
+        "IMG GLOBAL PRIMA MEDICAL INSURANCE (GPMI) KEY FACTS:\n"
+        "Plans: Bronze (EUR 1M limit, no pre-ex cover) · Bronze Plus (EUR 2M) · Silver (EUR 3M) · Gold (EUR 4M) · Platinum (EUR 5M).\n"
+        "Greece is Zone A. Base excess EUR 150 (can increase to reduce premium by up to 51%).\n"
+        "All plans: full inpatient, cancer care, evacuation, Travel Intelligence app.\n"
+        "Bronze Plus+: telemedicine, physiotherapy 10 visits, psychiatric inpatient 15 days/yr.\n"
+        "Silver+: outpatient EUR 10K limit, chronic conditions routine care EUR 10K, complementary therapy, optical exam, wellness EUR 250.\n"
+        "Gold+: full outpatient unlimited, psychiatric EUR 5K/yr, HIV/AIDS EUR 10K/yr, kidney dialysis routine EUR 20K, vaccinations EUR 250, support programme.\n"
+        "Platinum: IVF 3 cycles (50% co-ins), psychiatric EUR 10K, HIV EUR 20K, kidney dialysis EUR 50K, wellness EUR 1K.\n"
+        "Chronic conditions (routine management): NOT covered Bronze/Bronze Plus. Silver EUR 10K inpatient. Gold EUR 50K. Platinum unlimited.\n"
+        "Optional: Routine Pregnancy (10-month wait) · Dental (6-month wait, 10%-50% co-insurance by class).\n"
+        "Eligibility: all nationalities, any age, lifetime renewal, no age limit.\n"
+        "Coverage areas: Area 1 Europe · Area 2 WW excl USA/SG/HK · Area 3 WW excl USA · Worldwide.\n"
+        "Claims & pre-auth: MyIMG portal at imglobal.com · Phone +44 1903 817970.\n\n"
+        "MORGAN PRICE EVOLUTION HEALTH EU KEY FACTS:\n"
+        "Plans: Standard (EUR 500K) · Standard Plus (EUR 750K) · Comprehensive (EUR 1M) · Premium (EUR 1.5M) · Elite (EUR 2M).\n"
+        "ALL plans: full inpatient, cancer care, evacuation, home country evacuation option.\n"
+        "Standard Plus+: MRI/CT/PET, outpatient (combined limit EUR 2.5K), physiotherapy EUR 500.\n"
+        "Comprehensive+: outpatient EUR 5K, non-emergency dental EUR 750, complementary therapy EUR 500, maternity complications EUR 10K.\n"
+        "Elite: outpatient unlimited, dental EUR 1.5K, optician EUR 300, physiotherapy EUR 2K.\n"
+        "IMPORTANT: 25% co-insurance on ALL costs if not pre-authorised for inpatient.\n"
+        "Claims: +44 3300 581 668 option 3 · euroclaims@morgan-price.eu.\n\n"
+        "APRIL INTERNATIONAL LONG-TERM KEY FACTS (2026-2027):\n"
+        "Plans: International · International Plus · Executive · Executive Plus.\n"
+        "All plans aggregate limit: GBP 1M / USD 2M / EUR 1.5M per certificate period.\n"
+        "All plans: full inpatient, cancer, evacuation, teleconsultation (Teladoc), Crisis24 security.\n"
+        "International Plus+: outpatient GP/specialist fees full refund (EUR 50 excess per claim), MRI/CT/PET, physiotherapy 20 sessions, routine dental EUR 300 (6-month wait), routine health screening EUR 300.\n"
+        "Executive+: maternity normal EUR 6K / complicated EUR 12K (18-month wait), optical EUR 300, hearing EUR 300, cancer genetic testing EUR 1.25K, congenital EUR 15K.\n"
+        "Executive Plus: maternity EUR 10K / EUR 20K, congenital EUR 30K, cancer preventive EUR 25K.\n"
+        "Nil excess option on outpatient available for additional premium.\n\n"
         + HAL_CLIENT_KB
     )
     sys_priv = (
