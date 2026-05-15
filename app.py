@@ -1258,37 +1258,99 @@ def _render_quote_cards_html(quote_json_str: str) -> str:
                 f'<span style="color:#888;font-size:12px;padding-top:1px">{label}</span>'
                 f'<span style="color:{val_color};font-weight:500;line-height:1.4">{val}</span></div>')
 
-    def card(p):
+    def card(p, idx):
         rec     = p.get("recommended", False)
         ann     = p.get("annual_eur", 0)
         mo      = p.get("monthly_eur", 0)
         cc      = p.get("carrier_code","??")[:5]
         name    = p.get("name","")
         carrier = p.get("carrier","")
+        suit    = p.get("suitability", 0)
+        cid     = f"hc{idx}"
+        xid     = f"hx{idx}"
+
         rec_badge = ('<div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);'
                      'background:#1a6fd4;color:#fff;font-size:11px;font-weight:600;padding:3px 14px;'
                      'border-radius:20px;white-space:nowrap;box-shadow:0 2px 8px #1a6fd433">'
                      '★ HAL recommends</div>') if rec else ""
         card_border = "border:2px solid #1a6fd4;box-shadow:0 4px 16px #1a6fd422" if rec else "border:1px solid #e5e2dc"
         price_color = "#1a6fd4" if rec else "#1a1a1a"
-        btn_style   = ("background:#1a6fd4;color:#fff;border:none;cursor:pointer;font-weight:600"
-                       if rec else "background:#f5f3f0;color:#444;border:1px solid #ddd;cursor:pointer")
-        btn_label   = "Select this plan" if rec else "View details"
         lbg = "#e8f0fb" if rec else "#f5f3f0"
         lc  = "#1a6fd4" if rec else "#666"
+        suit_pct = int(suit * 10)
 
         rows = (tag("Coverage",       p.get("coverage",""))
               + tag("Annual limit",   p.get("annual_limit",""))
               + tag("Deductible",     p.get("deductible",""))
               + tag("Inpatient",      p.get("inpatient",""))
               + tag("Outpatient",     p.get("outpatient",""))
-              + tag("Dental",        p.get("dental",""))
+              + tag("Dental",         p.get("dental",""))
               + tag("Direct billing", p.get("direct_billing","")))
 
+        if rec:
+            # "Select" button — toggles a confirmation panel
+            btn = (f'<button id="btn{cid}" '
+                   f'onclick="var p=document.getElementById(\'{xid}\');'
+                   f'var b=document.getElementById(\'btn{cid}\');'
+                   f'if(p.style.display===\'none\'){{p.style.display=\'block\';b.textContent=\'✓ Selected — see below\';}}'
+                   f'else{{p.style.display=\'none\';b.textContent=\'Select this plan\';}}" '
+                   f'style="width:100%;margin-top:14px;padding:10px;border-radius:8px;'
+                   f'background:#1a6fd4;color:#fff;border:none;cursor:pointer;font-weight:600;font-size:14px">'
+                   f'Select this plan</button>'
+                   f'<div id="{xid}" style="display:none;margin-top:10px;padding:12px;'
+                   f'background:#e8f0fb;border-radius:8px;font-size:13px;color:#1a6fd4;line-height:1.6">'
+                   f'<b>Good choice!</b> To proceed, tell HAL:<br>'
+                   f'<i style="color:#333">"I want to go with {name}"</i>'
+                   f'</div>')
+        else:
+            # "View details" button — expands extra info + brochure link
+            from rate_tables import get_brochure_info as _gbi
+            _broc = _gbi(carrier if isinstance(carrier, str) else "")
+            _carrier_key = carrier if isinstance(carrier, str) else ""
+            # Map plan carrier name back to key if needed
+            for _ck in ["morgan_price","april","img"]:
+                if _ck.replace("_"," ") in str(name).lower() or _ck in str(name).lower():
+                    _carrier_key = _ck; break
+            _broc = get_brochure_info(_carrier_key)
+            _broc_url   = _broc.get("brochure_url","")
+            _ext_url    = _broc.get("external_url","#")
+            _claim_ph   = _broc.get("claim_phone","")
+            _highlights = _broc.get("highlights",[])
+            _hi_html    = "".join(f'<li style="margin:2px 0">{h}</li>' for h in _highlights)
+            _broc_btn   = (f'<a href="{_broc_url}" target="_blank" '
+                           f'style="display:inline-block;margin-top:6px;margin-right:6px;padding:5px 12px;'
+                           f'border-radius:6px;background:#e8f0fb;color:#1a6fd4;font-size:12px;'
+                           f'text-decoration:none;border:1px solid #c0d4f5">📄 Brochure PDF</a>') if _broc_url else ""
+            _ext_btn    = (f'<a href="{_ext_url}" target="_blank" '
+                           f'style="display:inline-block;margin-top:6px;padding:5px 12px;'
+                           f'border-radius:6px;background:#f5f3f0;color:#444;font-size:12px;'
+                           f'text-decoration:none;border:1px solid #ddd">🌐 Carrier site</a>') if _ext_url != "#" else ""
+            btn = (f'<button id="btn{cid}" '
+                   f'onclick="var p=document.getElementById(\'{xid}\');'
+                   f'var b=document.getElementById(\'btn{cid}\');'
+                   f'if(p.style.display===\'none\'){{p.style.display=\'block\';b.textContent=\'▲ Hide details\';}}'
+                   f'else{{p.style.display=\'none\';b.textContent=\'View details\';}}" '
+                   f'style="width:100%;margin-top:14px;padding:10px;border-radius:8px;'
+                   f'background:#f5f3f0;color:#444;border:1px solid #ddd;cursor:pointer;font-size:14px">'
+                   f'View details</button>'
+                   f'<div id="{xid}" style="display:none;margin-top:10px;padding:14px;'
+                   f'background:#f8f8f8;border-radius:8px;font-size:12px;color:#444;line-height:1.7">'
+                   f'<b style="font-size:13px">{name}</b><br>'
+                   f'<span style="color:#888">{carrier}</span><br>'
+                   f'<div style="margin:6px 0">Annual: <b>&#8364;{ann:,}</b> &middot; Monthly: <b>&#8364;{mo}</b></div>'
+                   + (f'<div style="margin:4px 0 8px"><div style="font-size:11px;color:#888;margin-bottom:2px">Suitability {suit}/10</div>'
+                      f'<div style="height:4px;background:#e0ddd8;border-radius:2px">'
+                      f'<div style="width:{suit_pct}%;height:100%;background:#888;border-radius:2px"></div></div></div>')
+                   + (f'<ul style="margin:6px 0 8px;padding-left:16px;color:#555;font-size:12px;line-height:1.6">{_hi_html}</ul>' if _hi_html else "")
+                   + (f'<div style="margin-top:2px">{_broc_btn}{_ext_btn}</div>' if _broc_btn or _ext_btn else "")
+                   + (f'<div style="margin-top:8px;font-size:11px;color:#888">Claims: {_claim_ph}</div>' if _claim_ph and _claim_ph != "See policy certificate" else "")
+                   + f'<div style="margin-top:8px;font-size:11px;color:#888;border-top:1px solid #e8e5e0;padding-top:6px">'
+                   + f'Tell HAL: <i>"I want to go with {name}"</i></div>'
+                   + f'</div>')
+
         return (
-            f'<div style="position:relative;background:#fff;{card_border};border-radius:14px;'
+            f'<div id="{cid}" style="position:relative;background:#fff;{card_border};border-radius:14px;'
             f'padding:20px;flex:1;min-width:220px;max-width:320px;font-family:-apple-system,sans-serif">{rec_badge}'
-            # Header
             f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'
             f'<div style="width:40px;height:40px;border-radius:10px;background:{lbg};color:{lc};'
             f'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">{cc}</div>'
@@ -1296,21 +1358,16 @@ def _render_quote_cards_html(quote_json_str: str) -> str:
             f'<div style="font-size:15px;font-weight:600;color:#1a1a1a;line-height:1.2">{name}</div>'
             f'<div style="font-size:12px;color:#888;margin-top:2px">{carrier}</div>'
             f'</div></div>'
-            # Price
             f'<div style="margin-bottom:4px">'
             f'<span style="font-size:30px;font-weight:700;color:{price_color}">&#8364;{ann:,}</span>'
             f'<span style="font-size:14px;color:#888;margin-left:4px">/year</span>'
             f'</div>'
             f'<div style="font-size:13px;color:#888;margin-bottom:14px">&#8364;{mo}/month</div>'
-            # Benefit rows
-            + rows
-            # Button
-            + f'<button style="width:100%;margin-top:14px;padding:10px;border-radius:8px;'
-              f'{btn_style};font-size:14px">{btn_label}</button>'
+            + rows + btn +
             f'</div>'
         )
 
-    cards_html = "".join(card(p) for p in plans)
+    cards_html = "".join(card(p, i) for i, p in enumerate(plans))
     cons_li    = "".join(f'<li style="margin:5px 0;color:#444;font-size:13px">{c}</li>' for c in considerations)
     cons_block = (f'<div style="background:#f8f6f2;border-radius:10px;padding:14px 18px;margin:16px 0">'
                   f'<div style="font-weight:600;margin-bottom:8px;font-size:14px">Key considerations</div>'
@@ -1767,8 +1824,8 @@ section[data-testid="stMain"] { background: #050A14 !important; }
                                    placeholder="client@example.com", label_visibility="collapsed")
         with ec2:
             if st.button("Send quote", type="primary", use_container_width=True, key="hal_send"):
-                gs = st.secrets.get("GMAIL_SENDER",""); gp = st.secrets.get("GMAIL_APP_PASSWORD","")
-                gp = gp.replace(" ", "")  # Gmail app passwords contain spaces — strip them
+                gs = st.secrets.get("GMAIL_SENDER","")
+                gp = st.secrets.get("GMAIL_APP_PASSWORD","").replace(" ","")
                 if gs and gp:
                     with st.spinner("Sending…"):
                         ok = _send_quote_email(cemail, st.session_state.quote_client_name or "Client",
@@ -1776,7 +1833,18 @@ section[data-testid="stMain"] { background: #050A14 !important; }
                     if ok: st.success(f"✅ Sent to {cemail}")
                     else:  st.error("Email failed — check GMAIL_SENDER + GMAIL_APP_PASSWORD in secrets.")
                 else:
-                    st.warning("Add GMAIL_SENDER + GMAIL_APP_PASSWORD to Streamlit secrets.")
+                    missing = []
+                    if not gs: missing.append("GMAIL_SENDER")
+                    if not gp: missing.append("GMAIL_APP_PASSWORD")
+                    st.warning(
+                        f"Missing secrets: **{' and '.join(missing)}**\n\n"
+                        "Go to your app on Streamlit Cloud → ⋮ menu → **Settings → Secrets** and add:\n\n"
+                        "```toml\n"
+                        "GMAIL_SENDER       = \"info@chiinsurancebrokers.com\"\n"
+                        "GMAIL_APP_PASSWORD = \"xxxx xxxx xxxx xxxx\"\n"
+                        "```\n\n"
+                        "Get an App Password at: myaccount.google.com → Security → 2-Step Verification → App passwords"
+                    )
 
         nc1, nc2 = st.columns(2)
         with nc1:
