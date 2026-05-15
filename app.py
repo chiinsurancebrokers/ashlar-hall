@@ -1411,7 +1411,7 @@ def _render_quote_cards_html(quote_json_str: str) -> str:
 
 def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
                       sender_email: str, app_password: str) -> bool:
-    import smtplib as _smtp, json as _j
+    import smtplib, json as _j
     from email.mime.multipart import MIMEMultipart
     from email.mime.text      import MIMEText
     try:
