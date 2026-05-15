@@ -1455,13 +1455,21 @@ def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
         msg.attach(MIMEText(html, "html"))
 
         app_password = app_password.replace(" ", "")  # strip spaces from app password
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
-            srv.login(sender_email, app_password)
-            srv.sendmail(sender_email, to_email, msg.as_string())
+        # Try SSL first (port 465), fall back to STARTTLS (port 587)
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as srv:
+                srv.login(sender_email, app_password)
+                srv.sendmail(sender_email, to_email, msg.as_string())
+        except Exception:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as srv:
+                srv.ehlo()
+                srv.starttls()
+                srv.login(sender_email, app_password)
+                srv.sendmail(sender_email, to_email, msg.as_string())
         return True
     except Exception as e:
-        print(f"Email error: {e}")
-        return False
+        print(f"Email error detail: {type(e).__name__}: {e}")
+        raise  # re-raise so caller can show the real error
 
 
 
@@ -1644,7 +1652,13 @@ div.stMainBlockContainer {
         "When a client gives age, location, and coverage type, confirm and say you are calculating 2025 premiums. "
         "Do not ask further questions — the system generates rates automatically. "
         "If still missing info, ask ONE thing only. "
-        "Respond in the language spoken.\n\n"
+        "Respond in the language spoken.\n"
+        "PLAN COMPARISON — when asked why one plan vs another:\n"
+        "Morgan Price Standard: lowest cost, 80% outpatient, no dental. Best for healthy budget clients.\n"
+        "Morgan Price Comprehensive: adds full dental+optical+outpatient. Best all-rounder.\n"
+        "April International: no excess on outpatient, strong worldwide cover. Best for travellers.\n"
+        "IMG Silver/Gold/Platinum: highest limits, chronic conditions, psychiatric, HIV. Best for complex needs.\n"
+        "Ask client priorities: budget / outpatient / dental / chronic conditions / travel frequency.\n\n"
         "IMG GLOBAL PRIMA MEDICAL INSURANCE (GPMI) KEY FACTS:\n"
         "Plans: Bronze (EUR 1M limit, no pre-ex cover) · Bronze Plus (EUR 2M) · Silver (EUR 3M) · Gold (EUR 4M) · Platinum (EUR 5M).\n"
         "Greece is Zone A. Base excess EUR 150 (can increase to reduce premium by up to 51%).\n"
@@ -1690,12 +1704,14 @@ div.stMainBlockContainer {
         "voice_tts_pending": None,
         "_last_audio_id":    "",
         "avatar_state":      "idle",
-        "hal_last_text":     "",   # last thing HAL said (for display)
+        "hal_last_text":     "",
         "quote_result":      None,
         "quote_ctx":         {},
         "quote_client_name": "",
-        "_quote_triggered":  False, # ONE-SHOT guard — prevents re-generation
-        "_is_speaking":      False, # Echo loop guard — mic muted while TTS plays
+        "_quote_triggered":  False,
+        "_is_speaking":      False,
+        "_hal_greeted":      False,
+        "_last_typed":       "",
     }
     for k, v in _DEFAULTS.items():
         if k not in st.session_state:
@@ -1736,8 +1752,21 @@ div.stMainBlockContainer {
                         user_text = _whisper_transcribe(raw_bytes, openai_key,
                             "el" if el_lang == "el" else "en")
                     user_text = (user_text or "").strip()
+                if user_text:
+                    st.caption(f"📝 *{user_text}*")
+                else:
+                    _sorry = "Συγνώμη, δεν κατάλαβα — παρακαλώ επαναλάβετε ή γράψτε παρακάτω." if el_lang == "el" else "Sorry, didn't catch that — please repeat or type below."
+                    st.warning(_sorry)
     else:
         user_text = st.chat_input("Type your message…") or ""
+
+    # Always-visible text fallback (reliability when mic fails)
+    _typed = st.text_input("", key="hal_type_in",
+                           placeholder="Didn't record? Type here…",
+                           label_visibility="collapsed")
+    if _typed and _typed.strip() and _typed != st.session_state.get("_last_typed",""):
+        st.session_state._last_typed = _typed
+        user_text = _typed.strip()
 
     # ── Reset button ──────────────────────────────────────────────────────
     rcol1, rcol2 = st.columns([3, 1])
@@ -1994,12 +2023,14 @@ div.stMainBlockContainer {
                     )
                 else:
                     with st.spinner("Sending…"):
-                        ok = _send_quote_email(cemail, st.session_state.quote_client_name or "Client",
-                                               st.session_state.quote_result, gs, gp)
-                    if ok:
-                        st.success(f"✅ Quote sent to {cemail}")
-                    else:
-                        st.error("SMTP failed. Check: 1) App Password is correct 2-Step Verification enabled 2) Gmail account allows less secure apps or App Passwords.")
+                        try:
+                            ok = _send_quote_email(cemail,
+                                                   st.session_state.quote_client_name or "Client",
+                                                   st.session_state.quote_result, gs, gp)
+                            st.success(f"✅ Quote sent to {cemail}")
+                        except Exception as _email_err:
+                            st.error(f"Email failed: **{type(_email_err).__name__}** — {_email_err}")
+                            st.info("Common fixes: 1) Generate a new App Password at myaccount.google.com → Security → App passwords  2) Make sure 2-Step Verification is ON  3) The sender must be a Gmail or Google Workspace account")
 
         nc1, nc2 = st.columns(2)
         with nc1:
