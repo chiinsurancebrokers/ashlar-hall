@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-I am HAL the Heuristically AI Assistant | Ashlar Insurance
+Alex | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -372,7 +372,7 @@ def render_pin_screen():
 
 def render_business_home():
     st.markdown("## 🏛 Ashlar Insurance — HAL Dashboard")
-    st.caption("Pantelis Kourbelas · Your AI business operating system")
+    st.caption("Alex · Your AI business operating system")
 
     # KPI row
     col1, col2, col3, col4 = st.columns(4)
@@ -426,7 +426,7 @@ def render_business_home():
 
     projects = [
         ("Ashlar Quote Engine", "Streamlit · Claude API", "github.com/chiinsurancebrokers/chi_quote_engine", "Live"),
-        ("Ashlar Client Portal", "Netlify · HTML/JS", "panteliskourbelas-chiinsurancebrokers.netlify.app", "Live"),
+        ("Ashlar Client Portal", "Netlify · HTML/JS", "alexkourbelas-chiinsurancebrokers.netlify.app", "Live"),
         ("Document Filler", "Streamlit · ReportLab · Claude API", "Internal", "Live"),
         ("PPT Quote Generator", "python-pptx · Claude API", "Internal", "Live"),
         ("Ashlar Assurance Site", "WordPress · Breakdance", "ashlar-assurance.com", "In Build"),
@@ -882,7 +882,7 @@ def render_hal_chat():
     mode_label = "Private · Lodge & Personal" if is_private else "Business · Ashlar Insurance"
     st.markdown(f"## 💬 HAL Assistant — {mode_label}")
 
-    system_prompt_business = """You are HAL — the AI operating system for Pantelis Kourbelas, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
+    system_prompt_business = """You are HAL — the AI operating system for Alex, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
 
 You specialise in international health insurance brokerage. Key knowledge:
 - Carriers: Groupama, Generali, Ethniki, Morgan Price, NOW Health, Bupa Global, Safe Pet System
@@ -895,7 +895,7 @@ You specialise in international health insurance brokerage. Key knowledge:
 When documents are provided, analyse them thoroughly before responding.
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send."""
 
-    system_prompt_private = """You are HAL — the private AI assistant for Pantelis Kourbelas. In this private mode you have access to lodge and personal context.
+    system_prompt_private = """You are HAL — the private AI assistant for Alex. In this private mode you have access to lodge and personal context.
 
 LODGE: You assist as secretary for Στ∴ ΑΚΡΟΠΟΛΙΣ υπ' αρ. 84 (Grand Lodge of Greece, ΜΣΤΕ) and ΚΛΕΙΣ ΑΛΗΘΕΙΑΣ αρ. 1 (A.A.S.R.). Always use Masonic ∴ notation. Style: contemporary Greek Tektonic — NOT archaic. Closing: Μ.τ.Τ.Α.Α. / Κατ' εντολήν του Σεβ∴ / Ο Γραμμ∴ / Χρήστος Ιατρόπουλος. Lodge email: st.akropolis.84@gmail.com. Speech order: 18 levels (Μαθηταί → Μέγας Διδάσκαλος).
 
@@ -1351,11 +1351,13 @@ def render_voice_chat():
     use_whisper = (stt_choice == "OpenAI Whisper") and bool(openai_key)
 
     # ── System prompts ─────────────────────────────────────────────────────
-    system_business = """You are HAL — the AI voice assistant for Pantelis Kourbelas, Ashlar Insurance, Athens.
+    system_business = """You are HAL — the AI voice assistant for Alex, Ashlar Insurance, Athens.
 VOICE MODE: Keep replies to 2-4 sentences only — they will be spoken aloud.
-Specialise in international health insurance: Groupama, Generali, Ethniki, Morgan Price, NOW Health, Bupa Global.
+You specialise in international health insurance: Morgan Price, April International, IMG Europe, NOW Health, Bupa Global, Generali.
+CRITICAL: When a client asks for quotes, prices, premiums, plans, or comparisons — DO NOT refer them to a human. Say: "Let me start a short quote interview — I have the actual 2025 carrier rates." Then stop. The system will launch the interview automatically.
+Do NOT mention Alex, do NOT say you will arrange contact, do NOT ask them to call anyone. You ARE the quote system.
 Respond in the language spoken to you. Conversational — no bullet points, no markdown."""
-    system_private = """You are HAL — private voice assistant for Pantelis Kourbelas.
+    system_private = """You are HAL — private voice assistant for Alex.
 VOICE MODE: Keep replies to 2-4 sentences only — they will be spoken aloud.
 Lodge: Στ∴ ΑΚΡΟΠΟΛΙΣ 84. Personal: finance, health, gym.
 Respond in Greek unless spoken to in English. Conversational — no bullet points."""
@@ -1372,8 +1374,24 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
 
     # ── Play TTS audio stored from previous render ─────────────────────────
     if st.session_state.get("voice_tts_pending"):
-        st.audio(st.session_state.voice_tts_pending, format="audio/mp3", autoplay=True)
+        import base64 as _b64, streamlit.components.v1 as _comp
+        _audio_b64 = _b64.b64encode(st.session_state.voice_tts_pending).decode()
         st.session_state.voice_tts_pending = None
+        # Web Audio API — bypasses browser autoplay restrictions on <audio> elements
+        _comp.html(f"""<script>
+(function(){{
+  try {{
+    var s=atob('{_audio_b64}');
+    var a=new Uint8Array(s.length);
+    for(var i=0;i<s.length;i++) a[i]=s.charCodeAt(i);
+    var ctx=new(window.AudioContext||window.webkitAudioContext)();
+    ctx.decodeAudioData(a.buffer,function(buf){{
+      var src=ctx.createBufferSource();
+      src.buffer=buf;src.connect(ctx.destination);src.start(0);
+    }});
+  }} catch(e){{ console.warn('HAL audio error:',e); }}
+}})();
+</script>""", height=0, scrolling=False)
 
     # ── Layout: avatar left, conversation right ────────────────────────────
     col_av, col_main = st.columns([1, 2], gap="medium")
@@ -1546,6 +1564,97 @@ Respond in Greek unless spoken to in English. Conversational — no bullet point
         if st.button("🔄 Reset HAL", key="voice_reset", help="Click if HAL appears frozen"):
             st.session_state.avatar_state     = "idle"
             st.session_state._voice_processing = False
+            st.rerun()
+
+    # ── AUTO-TRIGGER: detect quote intent → extract context → skip interview ─
+    _QUOTE_KW = [
+        "quot", "premium", "price", "cost", "how much", "plan", "compare",
+        "rates", "show me", "give me", "what are",
+        "τιμ", "ασφάλιστρ", "προσφορ", "πόσο", "πλάν", "σύγκριν",
+        "τιμολόγ", "κόστ", "δείξε", "δωσε",
+    ]
+    if (user_text
+        and not st.session_state.quote_mode
+        and not st.session_state.quote_result
+        and not st.session_state.get("_voice_processing")
+        and any(kw in user_text.lower() for kw in _QUOTE_KW)
+        and st.session_state.voice_history
+    ):
+        import re as _re
+        # ── Extract everything we already know from conversation history ──
+        _hist = " ".join(m["content"] for m in st.session_state.voice_history) + " " + user_text
+        _histl = _hist.lower()
+        _known = {}
+
+        # Name
+        _nm = _re.search(r"(?:my name is|i am|call me)\s+([A-Za-z]+)", _histl)
+        if _nm: _known["client_name"] = _nm.group(1).title()
+
+        # Age — look for patterns like "52 years old", "fifty-two", "age 52"
+        _am = _re.search(r"(\d{2})\s*(?:years?\s*old|yr)", _histl)
+        if _am: _known["client_age"] = _am.group(1)
+
+        # Location
+        if any(w in _histl for w in ["greece", "ελλάδ", "athens", "αθήν", "greek", "thessal"]):
+            _known["location"] = "Greece"
+
+        # Coverage type
+        _cov = []
+        if any(w in _histl for w in ["inpatient", "hospital", "νοσοκομ", "εισαγωγ"]): _cov.append("inpatient")
+        if any(w in _histl for w in ["outpatient", "εξωτερ", "εξωτ"]): _cov.append("outpatient")
+        if any(w in _histl for w in ["international", "διεθν", "worldwide"]): _cov.append("international")
+        if _cov: _known["coverage_type"] = " + ".join(_cov) if _cov else "international"
+
+        # Priorities / budget hints
+        if any(w in _histl for w in ["budget", "cheap", "afford", "προϋπολογ", "φθην"]): _known["budget"] = "budget-conscious"
+
+        st.session_state.voice_history.append({"role": "user", "content": user_text})
+
+        # ── If we have age + location + coverage → generate immediately ────
+        _can_generate = ("client_age" in _known and "location" in _known and "coverage_type" in _known)
+        if _can_generate:
+            # Fill any missing optional fields with defaults
+            _known.setdefault("client_name", "Client")
+            _known.setdefault("priorities", "inpatient coverage")
+            _known.setdefault("budget", "not specified")
+            _ack = ("Τέλεια! Έχω ήδη τα στοιχεία σου. Υπολογίζω τα πραγματικά ασφάλιστρα για το 2025..." if el_lang == "el"
+                    else f"Perfect, I have everything I need. Calculating your actual 2025 premiums now...")
+            st.session_state.voice_history.append({"role": "assistant", "content": _ack})
+            st.session_state.avatar_state = "thinking"
+            if use_el:
+                st.session_state.voice_tts_pending = _elevenlabs_tts(_ack, el_key, el_voice)
+            with st.spinner("Calculating premiums from 2025 carrier rates…"):
+                _result = _generate_quote_comparison(_known, api_key, el_lang)
+            st.session_state.quote_result = _result
+            st.session_state.quote_data   = _known
+            st.session_state.quote_mode   = False
+            import json as _jj
+            try:
+                _spoken = _jj.loads(_result).get("recommendation", "")
+                st.session_state.quote_client_name = _jj.loads(_result).get("client_name", "")
+            except Exception:
+                _spoken = _result[:200]
+            st.session_state.voice_history.append({"role": "assistant", "content": _spoken})
+            st.session_state.avatar_state = "speaking"
+            if use_el and _spoken:
+                st.session_state.voice_tts_pending = _elevenlabs_tts(_spoken, el_key, el_voice)
+            st.rerun()
+
+        else:
+            # ── Not enough context → start interview from first missing field ─
+            _answered = set(_known.keys())
+            _next_idx = next((i for i, q in enumerate(QUOTE_QUESTIONS) if q[0] not in _answered), 0)
+            _next_q   = _get_quote_question(_next_idx, el_lang)
+            _intro    = ("Αναζητώ τα καλύτερα πλάνα για εσάς. " if el_lang == "el"
+                         else "Let me find the best plans for you. ") + _next_q
+            st.session_state.quote_mode  = True
+            st.session_state.quote_step  = _next_idx
+            st.session_state.quote_data  = _known
+            st.session_state.quote_result = None
+            st.session_state.voice_history.append({"role": "assistant", "content": _intro})
+            st.session_state.avatar_state = "speaking"
+            if use_el:
+                st.session_state.voice_tts_pending = _elevenlabs_tts(_intro, el_key, el_voice)
             st.rerun()
 
     # ── QUOTE MODE: answer → next question or generate comparison ──────────
@@ -1935,7 +2044,7 @@ def render_finance():
                     r = client.messages.create(
                         model="claude-sonnet-4-20250514",
                         max_tokens=1000,
-                        system="You are a personal financial adviser for Pantelis Kourbelas, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
+                        system="You are a personal financial adviser for Alex, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
                         messages=[{"role": "user", "content": fin_query}]
                     )
                     st.markdown(r.content[0].text)
