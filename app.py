@@ -719,6 +719,195 @@ _TTS_PLAY_HTML = """
 </script>
 """
 
+# ── HAL Avatar Face ───────────────────────────────────────────────────────────
+# Canvas-rendered humanoid face. Pass state via window.HAL_AVATAR_STATE:
+#   'idle' | 'listening' | 'thinking' | 'speaking'
+_HAL_AVATAR_HTML = """
+<style>
+  body{{margin:0;background:#000}}
+  #av{{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0 6px;background:#000;border-radius:12px}}
+  #lbl{{font-size:9px;letter-spacing:2px;color:#C9A96E55;font-family:monospace;text-transform:uppercase}}
+</style>
+<div id="av">
+  <canvas id="fc" width="240" height="290"></canvas>
+  <div id="lbl">HAL · {state_label}</div>
+</div>
+<script>
+(function(){{
+  const cv=document.getElementById('fc'), cx=cv.getContext('2d');
+  const W=cv.width, H=cv.height, mx=W/2, my=H/2-8;
+  let state='{init_state}', t=0;
+  let blinkClock=0, nextBlink=3+Math.random()*2, blinkAmt=0;
+  let scanY=0, scanDir=1, mouthWave=0, thinkAngle=0;
+  const particles=Array.from({{length:22}},()=>({{
+    angle:Math.random()*Math.PI*2,
+    r:110+Math.random()*14,
+    speed:(Math.random()-.5)*0.009,
+    size:Math.random()*1.6+.4,
+    alpha:Math.random()*0.45+0.08
+  }}));
+
+  window.addEventListener('message',e=>{{
+    if(e.data&&e.data.hal_state) state=e.data.hal_state;
+  }});
+  if(window.HAL_AVATAR_STATE) state=window.HAL_AVATAR_STATE;
+
+  function ac(a){{return state==='listening'?`rgba(93,202,165,${{a}})`:state==='thinking'?`rgba(100,170,255,${{a}})`:`rgba(201,169,110,${{a}})`}}
+
+  function draw(){{
+    cx.clearRect(0,0,W,H);
+    const br=Math.sin(t*.38)*.011;
+    cx.save(); cx.translate(mx,my); cx.scale(1+br,1+br);
+
+    // halo
+    const h=cx.createRadialGradient(0,0,75,0,0,130);
+    h.addColorStop(0,ac(state==='speaking'?.15+Math.abs(Math.sin(t*6))*.1:.09));
+    h.addColorStop(1,'rgba(0,0,0,0)');
+    cx.fillStyle=h; cx.beginPath(); cx.arc(0,0,130,0,Math.PI*2); cx.fill();
+
+    // neck
+    cx.save(); cx.translate(0,110);
+    const ng=cx.createLinearGradient(-16,0,16,0);
+    ng.addColorStop(0,'#0A0806'); ng.addColorStop(.35,'#1C1610'); ng.addColorStop(.65,'#1C1610'); ng.addColorStop(1,'#0A0806');
+    cx.fillStyle=ng; cx.beginPath(); cx.moveTo(-15,0); cx.lineTo(-18,46); cx.lineTo(18,46); cx.lineTo(15,0); cx.closePath(); cx.fill();
+    cx.strokeStyle=ac(.12); cx.lineWidth=.4;
+    [-6,0,6].forEach(x=>{{cx.beginPath();cx.moveTo(x,3);cx.lineTo(x,42);cx.stroke()}});
+    cx.restore();
+
+    // shoulders
+    cx.save(); cx.translate(0,112);
+    cx.fillStyle='#0D0B08'; cx.strokeStyle=ac(.2); cx.lineWidth=.6;
+    cx.beginPath(); cx.moveTo(-18,44); cx.bezierCurveTo(-55,48,-80,38,-90,34); cx.lineTo(-98,50); cx.bezierCurveTo(-72,56,-44,52,-18,52); cx.closePath(); cx.fill(); cx.stroke();
+    cx.beginPath(); cx.moveTo(18,44); cx.bezierCurveTo(55,48,80,38,90,34); cx.lineTo(98,50); cx.bezierCurveTo(72,56,44,52,18,52); cx.closePath(); cx.fill(); cx.stroke();
+    cx.restore();
+
+    // face oval
+    cx.save(); cx.scale(1,1.11);
+    const fg=cx.createRadialGradient(-10,-15,15,0,0,96);
+    fg.addColorStop(0,'#1E1A14'); fg.addColorStop(.6,'#141008'); fg.addColorStop(1,'#0A0806');
+    cx.fillStyle=fg; cx.beginPath(); cx.arc(0,0,96,0,Math.PI*2); cx.fill();
+    cx.strokeStyle=ac(.28); cx.lineWidth=.8; cx.stroke();
+    cx.restore();
+
+    // brow
+    cx.strokeStyle=ac(.1); cx.lineWidth=1.2;
+    cx.beginPath(); cx.moveTo(-46,-38); cx.bezierCurveTo(-32,-46,-16,-48,0,-47); cx.bezierCurveTo(16,-48,32,-46,46,-38); cx.stroke();
+
+    // EYES
+    [[-30,0],[30,0]].forEach(([ex],idx)=>{{
+      const eg=state==='thinking'?.88+Math.sin(t*3+idx)*.1:state==='listening'?.82+Math.sin(t*2)*.1:state==='speaking'?.78+Math.sin(t*5+idx)*.14:.72+Math.sin(t*.8+idx)*.05;
+      const bs=blinkAmt>0?Math.max(.05,1-blinkAmt*6):1;
+      cx.save(); cx.translate(ex,-13); cx.scale(1,bs);
+      cx.fillStyle='rgba(0,0,0,.7)'; cx.beginPath(); cx.ellipse(0,0,17,10,0,0,Math.PI*2); cx.fill();
+      [20,15,10].forEach((r,i)=>{{
+        const g2=cx.createRadialGradient(0,0,0,0,0,r);
+        g2.addColorStop(0,ac(eg*(.75-i*.18))); g2.addColorStop(1,'rgba(0,0,0,0)');
+        cx.fillStyle=g2; cx.beginPath(); cx.arc(0,0,r,0,Math.PI*2); cx.fill();
+      }});
+      cx.fillStyle=ac(eg); cx.beginPath(); cx.arc(0,0,7,0,Math.PI*2); cx.fill();
+      cx.fillStyle='#050302'; cx.beginPath(); cx.arc(0,0,3.5,0,Math.PI*2); cx.fill();
+      cx.fillStyle='rgba(255,255,255,.5)'; cx.beginPath(); cx.arc(-1.5,-1.5,1.5,0,Math.PI*2); cx.fill();
+      cx.strokeStyle=ac(.32); cx.lineWidth=.7;
+      cx.beginPath(); cx.moveTo(-17,0); cx.bezierCurveTo(-9,-10,9,-10,17,0); cx.stroke();
+      cx.beginPath(); cx.moveTo(-17,0); cx.bezierCurveTo(-9,8,9,8,17,0); cx.stroke();
+      cx.restore();
+    }});
+
+    // think dot
+    if(state==='thinking'){{ thinkAngle+=.05; const tx=Math.cos(thinkAngle)*22,ty=Math.sin(thinkAngle*.7)*9-13; cx.fillStyle=`rgba(100,170,255,${{.55+Math.sin(t*8)*.3}})`; cx.beginPath(); cx.arc(tx,ty,1.5,0,Math.PI*2); cx.fill(); }}
+
+    // nose
+    cx.strokeStyle=ac(.09); cx.lineWidth=.6;
+    cx.beginPath(); cx.moveTo(-4,8); cx.bezierCurveTo(-6,22,-7,32,-10,38); cx.stroke();
+    cx.beginPath(); cx.moveTo(4,8); cx.bezierCurveTo(6,22,7,32,10,38); cx.stroke();
+    cx.beginPath(); cx.moveTo(-10,38); cx.bezierCurveTo(-6,43,6,43,10,38); cx.stroke();
+
+    // cheeks
+    cx.strokeStyle=ac(.06); cx.lineWidth=.5;
+    cx.beginPath(); cx.moveTo(-58,8); cx.bezierCurveTo(-48,22,-36,34,-22,41); cx.stroke();
+    cx.beginPath(); cx.moveTo(58,8); cx.bezierCurveTo(48,22,36,34,22,41); cx.stroke();
+
+    // MOUTH
+    const mY=62, mW=34;
+    cx.save(); cx.translate(0,mY);
+    if(state==='speaking'){{
+      mouthWave+=.18;
+      const op=Math.abs(Math.sin(mouthWave))*7+1.5;
+      cx.strokeStyle=ac(.7); cx.lineWidth=1;
+      cx.beginPath();
+      for(let i=0;i<=mW*2;i++){{ const x=-mW+i,w=Math.sin(i*.14+mouthWave)*2; i===0?cx.moveTo(x,-op+w):cx.lineTo(x,-op+w); }}
+      cx.stroke();
+      cx.beginPath();
+      for(let i=0;i<=mW*2;i++){{ const x=-mW+i,w=Math.sin(i*.14+mouthWave+Math.PI)*2; i===0?cx.moveTo(x,op+w):cx.lineTo(x,op+w); }}
+      cx.stroke();
+      cx.fillStyle='rgba(5,3,2,.85)'; cx.beginPath(); cx.ellipse(0,0,mW,op+2,0,0,Math.PI*2); cx.fill();
+    }} else if(state==='listening'){{
+      cx.strokeStyle=`rgba(93,202,165,${{.45+Math.sin(t*3)*.2}})`; cx.lineWidth=1.2;
+      cx.beginPath();
+      for(let i=0;i<=mW*2;i++){{ const x=-mW+i,w=Math.sin(i*.1+t*4)*2.2*Math.sin(t*1.4); i===0?cx.moveTo(x,w):cx.lineTo(x,w); }}
+      cx.stroke();
+    }} else {{
+      const rc=Math.sin(t*.28)*.7;
+      cx.strokeStyle=ac(.32); cx.lineWidth=.9;
+      cx.beginPath(); cx.moveTo(-mW,rc); cx.bezierCurveTo(-mW*.5,rc+2.5,mW*.5,rc+2.5,mW,rc); cx.stroke();
+      cx.fillStyle=ac(.38); cx.beginPath(); cx.arc(-mW,rc,1.2,0,Math.PI*2); cx.fill();
+      cx.beginPath(); cx.arc(mW,rc,1.2,0,Math.PI*2); cx.fill();
+    }}
+    cx.restore();
+
+    // jaw
+    cx.strokeStyle=ac(.1); cx.lineWidth=.5;
+    cx.beginPath(); cx.moveTo(-30,80); cx.bezierCurveTo(-14,96,14,96,30,80); cx.stroke();
+
+    // scan line
+    if(state==='thinking'){{
+      scanY+=scanDir*1.4; if(scanY>90||scanY<-90) scanDir*=-1;
+      cx.save(); cx.beginPath(); cx.arc(0,0,96,0,Math.PI*2); cx.clip();
+      const sg=cx.createLinearGradient(0,scanY-5,0,scanY+5);
+      sg.addColorStop(0,'rgba(100,170,255,0)'); sg.addColorStop(.5,'rgba(100,170,255,.16)'); sg.addColorStop(1,'rgba(100,170,255,0)');
+      cx.fillStyle=sg; cx.fillRect(-100,scanY-5,200,10); cx.restore();
+    }}
+
+    // particles
+    particles.forEach(p=>{{
+      p.angle+=p.speed;
+      const px=Math.cos(p.angle)*p.r, py=Math.sin(p.angle)*p.r*.82;
+      if(Math.sqrt(px*px+py*py)>90){{
+        cx.fillStyle=ac(p.alpha*(state==='speaking'?1.4:1));
+        cx.beginPath(); cx.arc(px,py,p.size,0,Math.PI*2); cx.fill();
+      }}
+    }});
+
+    // circuit accents
+    cx.strokeStyle=ac(.05+Math.sin(t*.6)*.015); cx.lineWidth=.35;
+    cx.beginPath(); cx.moveTo(-40,-60); cx.lineTo(-40,-52); cx.lineTo(-28,-52); cx.stroke();
+    cx.beginPath(); cx.moveTo(40,-60); cx.lineTo(40,-52); cx.lineTo(28,-52); cx.stroke();
+    cx.beginPath(); cx.moveTo(0,-74); cx.lineTo(0,-62); cx.stroke();
+
+    cx.restore();
+
+    // status ring
+    const rp=state==='speaking'?Math.abs(Math.sin(t*6)):state==='listening'?.38+Math.sin(t*2)*.18:state==='thinking'?.38+Math.sin(t*4)*.25:.22+Math.sin(t)*.08;
+    cx.strokeStyle=ac(rp); cx.lineWidth=1.5;
+    cx.setLineDash(state==='thinking'?[5,3]:[]);
+    cx.beginPath(); cx.arc(mx,H-16,8,0,Math.PI*2); cx.stroke();
+    cx.setLineDash([]);
+    cx.fillStyle=ac(.12); cx.beginPath(); cx.arc(mx,H-16,8,0,Math.PI*2); cx.fill();
+  }}
+
+  function loop(){{
+    t+=.016;
+    blinkClock+=.016;
+    if(blinkClock>=nextBlink&&blinkAmt===0) blinkAmt=.01;
+    if(blinkAmt>0){{ blinkAmt+=.1; if(blinkAmt>=1){{blinkAmt=0;blinkClock=0;nextBlink=2+Math.random()*4;}} }}
+    draw();
+    requestAnimationFrame(loop);
+  }}
+  loop();
+}})();
+</script>
+"""
+
 
 def _elevenlabs_stt(audio_bytes: bytes, api_key: str, language: str = "el") -> str:
     """Transcribe audio using ElevenLabs Scribe (Speech-to-Text → Access required)."""
@@ -970,6 +1159,22 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
             st.rerun()
 
 
+def _render_avatar(state: str = "idle"):
+    """Render HAL's animated face in the given state."""
+    import streamlit.components.v1 as components
+    state_labels = {
+        "idle": "standby",
+        "listening": "listening",
+        "thinking": "processing",
+        "speaking": "speaking",
+    }
+    html = _HAL_AVATAR_HTML.format(
+        init_state=state,
+        state_label=state_labels.get(state, "standby"),
+    )
+    components.html(html, height=320, scrolling=False)
+
+
 def render_voice_chat():
     """HAL Voice — speak to HAL and hear responses back."""
     import anthropic
@@ -1042,14 +1247,23 @@ Respond in Greek unless spoken to in English. Conversational tone — no bullet 
         st.session_state.voice_pending_audio = None
     if "voice_last_reply" not in st.session_state:
         st.session_state.voice_last_reply = ""
+    if "avatar_state" not in st.session_state:
+        st.session_state.avatar_state = "idle"
 
-    # ── Conversation display ───────────────────────────────────────────────
-    if st.session_state.voice_history:
-        for msg in st.session_state.voice_history[-12:]:  # last 6 exchanges
-            icon = "user" if msg["role"] == "user" else "assistant"
-            st.chat_message(icon).write(msg["content"])
-    else:
-        st.info("🎙️ Click the mic button below, speak your message, then click **Send to HAL**.")
+    # ── Layout: avatar left, conversation right ────────────────────────────
+    col_av, col_chat = st.columns([1, 2], gap="medium")
+
+    with col_av:
+        _render_avatar(st.session_state.avatar_state)
+
+    with col_chat:
+        # ── Conversation display ───────────────────────────────────────────
+        if st.session_state.voice_history:
+            for msg in st.session_state.voice_history[-10:]:
+                icon = "user" if msg["role"] == "user" else "assistant"
+                st.chat_message(icon).write(msg["content"])
+        else:
+            st.info("🎙️ Click the mic button below, speak your message, then click **Send to HAL**.")
 
     # ── Voice recorder component ───────────────────────────────────────────
     component_html = f"""
@@ -1102,6 +1316,7 @@ Respond in Greek unless spoken to in English. Conversational tone — no bullet 
 
     if user_text and api_key:
         st.session_state.voice_history.append({"role": "user", "content": user_text})
+        st.session_state.avatar_state = "thinking"
 
         with st.spinner("HAL is thinking…"):
             try:
@@ -1110,22 +1325,22 @@ Respond in Greek unless spoken to in English. Conversational tone — no bullet 
                             for m in st.session_state.voice_history]
                 response = client.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=400,  # keep voice replies short
+                    max_tokens=400,
                     system=system,
                     messages=messages,
                 )
                 reply = response.content[0].text
                 st.session_state.voice_history.append({"role": "assistant", "content": reply})
                 st.session_state.voice_last_reply = reply
+                st.session_state.avatar_state = "speaking"
 
                 # ── TTS ────────────────────────────────────────────────────
                 if use_elevenlabs and el_key:
                     audio_bytes = _elevenlabs_tts(reply, el_key, el_voice)
                     if audio_bytes:
                         b64 = base64.b64encode(audio_bytes).decode()
-                        # Auto-play via HTML audio element
                         components.html(
-                            f'<audio autoplay style="display:none">'
+                            f'<audio autoplay style="display:none" onended="window.parent.postMessage({{type:\'hal_ready\'}},\'*\')">'
                             f'<source src="data:audio/mpeg;base64,{b64}" type="audio/mpeg"></audio>',
                             height=0,
                         )
@@ -1139,7 +1354,6 @@ Respond in Greek unless spoken to in English. Conversational tone — no bullet 
                             height=0,
                         )
                 else:
-                    # Browser speechSynthesis
                     components.html(
                         _TTS_PLAY_HTML.format(
                             text_json=json.dumps(reply),
@@ -1149,12 +1363,17 @@ Respond in Greek unless spoken to in English. Conversational tone — no bullet 
                     )
 
             except Exception as e:
+                st.session_state.avatar_state = "idle"
                 st.error(f"HAL error: {e}")
 
         st.rerun()
 
     elif user_text and not api_key:
         st.error("No Claude API key — add Claude_API_Key to Streamlit secrets.")
+
+    # After speaking, revert avatar to idle on next render
+    if st.session_state.avatar_state == "speaking" and not user_text:
+        st.session_state.avatar_state = "idle"
 
     # ── Download last reply ────────────────────────────────────────────────
     if st.session_state.voice_last_reply:
@@ -1171,6 +1390,7 @@ Respond in Greek unless spoken to in English. Conversational tone — no bullet 
             if st.button("🗑 Clear conversation", use_container_width=True, key="clear_voice"):
                 st.session_state.voice_history = []
                 st.session_state.voice_last_reply = ""
+                st.session_state.avatar_state = "idle"
                 st.rerun()
 
 
