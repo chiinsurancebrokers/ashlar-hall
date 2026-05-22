@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Alex | Ashlar Insurance
+Hi I am Hal the Heuristically Programmed Algorithmic Assistant  | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -17,95 +17,6 @@ try:
     GSHEETS_AVAILABLE = True
 except ImportError:
     GSHEETS_AVAILABLE = False
-
-
-# ── Rate tables ─────────────────────────────────────────────────────────────
-# Tries rate_tables.py, "Rate tables.py", then falls back to embedded 2025 data.
-# The app will always load — quotes always work.
-def _load_rate_tables():
-    import importlib.util as _ilu, pathlib as _pl
-    for _name in ["rate_tables.py", "Rate tables.py", "Rate_tables.py"]:
-        _p = _pl.Path(__file__).parent / _name
-        if _p.exists():
-            try:
-                _s = _ilu.spec_from_file_location("_rt", _p)
-                _m = _ilu.module_from_spec(_s); _s.loader.exec_module(_m)
-                return _m.lookup_premium, _m.RATE_PLANS
-            except Exception:
-                pass
-    # Full embedded 2025 fallback
-    _MP  = {"area1": {"Child": {"standard": 747, "standard_plus": 882, "comprehensive": 1364, "premium": 1808, "elite": 2722}, "20-24": {"standard": 899, "standard_plus": 1120, "comprehensive": 1903, "premium": 2523, "elite": 3800}, "25-29": {"standard": 968, "standard_plus": 1205, "comprehensive": 2047, "premium": 2715, "elite": 4087}, "30-34": {"standard": 1061, "standard_plus": 1322, "comprehensive": 2247, "premium": 2980, "elite": 4488}, "35-39": {"standard": 1210, "standard_plus": 1508, "comprehensive": 2563, "premium": 3399, "elite": 5119}, "40-44": {"standard": 1380, "standard_plus": 1719, "comprehensive": 2921, "premium": 3873, "elite": 5726}, "45-49": {"standard": 1698, "standard_plus": 2136, "comprehensive": 3690, "premium": 4895, "elite": 7237}, "50-54": {"standard": 2041, "standard_plus": 2495, "comprehensive": 4104, "premium": 5444, "elite": 8049}, "55-59": {"standard": 2810, "standard_plus": 3436, "comprehensive": 5656, "premium": 7502, "elite": 11093}, "60-64": {"standard": 3548, "standard_plus": 4338, "comprehensive": 7849, "premium": 9894, "elite": 14257}, "65-69": {"standard": 4719, "standard_plus": 5810, "comprehensive": 10647, "premium": 13282, "elite": 18959}, "70-74": {"standard": 6077, "standard_plus": 7429, "comprehensive": 13444, "premium": 16946, "elite": 24419}}, "area2": {"Child": {"standard": 1485, "standard_plus": 1730, "comprehensive": 2903, "premium": 3629, "elite": 7893}, "20-24": {"standard": 1772, "standard_plus": 2207, "comprehensive": 4191, "premium": 5240, "elite": 8197}, "25-29": {"standard": 1933, "standard_plus": 2457, "comprehensive": 4824, "premium": 6031, "elite": 9085}, "30-34": {"standard": 2108, "standard_plus": 2740, "comprehensive": 5568, "premium": 6962, "elite": 10490}, "35-39": {"standard": 2688, "standard_plus": 3285, "comprehensive": 6038, "premium": 7550, "elite": 11375}, "40-44": {"standard": 3072, "standard_plus": 3754, "comprehensive": 6902, "premium": 8627, "elite": 12994}, "45-49": {"standard": 3724, "standard_plus": 4553, "comprehensive": 8372, "premium": 10466, "elite": 15765}, "50-54": {"standard": 4691, "standard_plus": 5560, "comprehensive": 9654, "premium": 12014, "elite": 18023}, "55-59": {"standard": 7149, "standard_plus": 8326, "comprehensive": 14707, "premium": 17904, "elite": 26302}, "60-64": {"standard": 8464, "standard_plus": 9858, "comprehensive": 19150, "premium": 22917, "elite": 36410}, "65-69": {"standard": 10842, "standard_plus": 12739, "comprehensive": 25189, "premium": 30453, "elite": 48876}, "70-74": {"standard": 13768, "standard_plus": 16048, "comprehensive": 31228, "premium": 37435, "elite": 59578}}}
-    _APR = {"area1": {"Child": {"international": 1010, "intl_plus": 1396, "intl_plus_nxs": 1648, "executive": 2232, "exec_nxs": 2635, "exec_plus": 2934, "exec_plus_nxs": 3463}, "18-25": {"international": 1498, "intl_plus": 2128, "intl_plus_nxs": 2509, "executive": 3431, "exec_nxs": 3979, "exec_plus": 4419, "exec_plus_nxs": 5082}, "26-29": {"international": 1630, "intl_plus": 2555, "intl_plus_nxs": 3013, "executive": 4125, "exec_nxs": 4785, "exec_plus": 5287, "exec_plus_nxs": 6079}, "30-34": {"international": 1940, "intl_plus": 2764, "intl_plus_nxs": 3259, "executive": 4459, "exec_nxs": 5175, "exec_plus": 5710, "exec_plus_nxs": 6509}, "35-39": {"international": 2243, "intl_plus": 3210, "intl_plus_nxs": 3788, "executive": 5178, "exec_nxs": 5953, "exec_plus": 6607, "exec_plus_nxs": 7466}, "40-44": {"international": 2501, "intl_plus": 3565, "intl_plus_nxs": 4099, "executive": 5743, "exec_nxs": 6490, "exec_plus": 7320, "exec_plus_nxs": 8125}, "45-49": {"international": 2869, "intl_plus": 4091, "intl_plus_nxs": 4623, "executive": 6596, "exec_nxs": 7453, "exec_plus": 8389, "exec_plus_nxs": 9227}, "50-54": {"international": 3700, "intl_plus": 5242, "intl_plus_nxs": 5766, "executive": 8640, "exec_nxs": 9503, "exec_plus": 10716, "exec_plus_nxs": 11821}, "55-59": {"international": 4913, "intl_plus": 6923, "intl_plus_nxs": 7476, "executive": 10678, "exec_nxs": 11535, "exec_plus": 12891, "exec_plus_nxs": 13664}, "60-64": {"international": 6670, "intl_plus": 9354, "intl_plus_nxs": 9822, "executive": 13675, "exec_nxs": 14495, "exec_plus": 16479, "exec_plus_nxs": 17302}, "65-69": {"international": 10011, "intl_plus": 14058, "intl_plus_nxs": 14621, "executive": 20142, "exec_nxs": 20950, "exec_plus": 25269, "exec_plus_nxs": 26029}, "70-74": {"international": 15288, "intl_plus": 20231, "intl_plus_nxs": 21039, "executive": 28267, "exec_nxs": 29116, "exec_plus": 35372, "exec_plus_nxs": 36257}, "75-79": {"international": 20604, "intl_plus": 27264, "intl_plus_nxs": 28353, "executive": 33978, "exec_nxs": 37162, "exec_plus": 42089, "exec_plus_nxs": 42931}, "80+": {"international": 25780, "intl_plus": 34117, "intl_plus_nxs": 35484, "executive": 41206, "exec_nxs": 42442, "exec_plus": 51042, "exec_plus_nxs": 52062}}, "area2": {"Child": {"international": 2730, "intl_plus": 3765, "intl_plus_nxs": 4341, "executive": 6023, "exec_nxs": 6939, "exec_plus": 7930, "exec_plus_nxs": 9140}, "18-25": {"international": 4039, "intl_plus": 5743, "intl_plus_nxs": 6620, "executive": 9266, "exec_nxs": 10543, "exec_plus": 11924, "exec_plus_nxs": 13478}, "26-29": {"international": 4796, "intl_plus": 6899, "intl_plus_nxs": 7950, "executive": 11136, "exec_nxs": 12671, "exec_plus": 14279, "exec_plus_nxs": 16142}, "30-34": {"international": 5242, "intl_plus": 7461, "intl_plus_nxs": 8598, "executive": 12038, "exec_nxs": 13698, "exec_plus": 15417, "exec_plus_nxs": 17312}, "35-39": {"international": 6050, "intl_plus": 8666, "intl_plus_nxs": 9987, "executive": 13979, "exec_nxs": 15803, "exec_plus": 17848, "exec_plus_nxs": 19900}, "40-44": {"international": 6750, "intl_plus": 9621, "intl_plus_nxs": 10876, "executive": 15508, "exec_nxs": 17293, "exec_plus": 19763, "exec_plus_nxs": 21723}, "45-49": {"international": 7753, "intl_plus": 11046, "intl_plus_nxs": 12315, "executive": 17807, "exec_nxs": 19855, "exec_plus": 22651, "exec_plus_nxs": 24712}, "50-54": {"international": 9987, "intl_plus": 14156, "intl_plus_nxs": 15443, "executive": 23325, "exec_nxs": 25448, "exec_plus": 28929, "exec_plus_nxs": 30823}, "55-59": {"international": 13269, "intl_plus": 18682, "intl_plus_nxs": 20063, "executive": 28837, "exec_nxs": 30973, "exec_plus": 43533, "exec_plus_nxs": 45997}, "60-64": {"international": 18009, "intl_plus": 25258, "intl_plus_nxs": 26460, "executive": 36919, "exec_nxs": 39010, "exec_plus": 55494, "exec_plus_nxs": 58137}, "65-69": {"international": 27027, "intl_plus": 37951, "intl_plus_nxs": 39410, "executive": 54406, "exec_nxs": 56498, "exec_plus": 68218, "exec_plus_nxs": 70205}, "70-74": {"international": 41276, "intl_plus": 54618, "intl_plus_nxs": 56720, "executive": 76346, "exec_nxs": 78569, "exec_plus": 95495, "exec_plus_nxs": 97822}, "75-79": {"international": 55627, "intl_plus": 73609, "intl_plus_nxs": 76440, "executive": 91820, "exec_nxs": 94497, "exec_plus": 113640, "exec_plus_nxs": 116410}, "80+": {"international": 69464, "intl_plus": 91918, "intl_plus_nxs": 95454, "executive": 111105, "exec_nxs": 114342, "exec_plus": 137501, "exec_plus_nxs": 140856}}}
-    _IMG = {"0": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "1": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "2": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "3": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "4": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "5": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "6": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "7": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "8": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "9": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "10": {"platinum": 1902, "gold": 1534, "silver": 1213, "bronze_plus": 865, "bronze": 590}, "11": {"platinum": 1910, "gold": 1545, "silver": 1215, "bronze_plus": 866, "bronze": 591}, "12": {"platinum": 1922, "gold": 1552, "silver": 1223, "bronze_plus": 872, "bronze": 594}, "13": {"platinum": 1936, "gold": 1565, "silver": 1232, "bronze_plus": 878, "bronze": 600}, "14": {"platinum": 1955, "gold": 1576, "silver": 1243, "bronze_plus": 885, "bronze": 604}, "15": {"platinum": 1975, "gold": 1588, "silver": 1251, "bronze_plus": 891, "bronze": 609}, "16": {"platinum": 2006, "gold": 1614, "silver": 1272, "bronze_plus": 906, "bronze": 619}, "17": {"platinum": 2041, "gold": 1642, "silver": 1293, "bronze_plus": 920, "bronze": 631}, "18": {"platinum": 2096, "gold": 1686, "silver": 1324, "bronze_plus": 942, "bronze": 645}, "19": {"platinum": 2147, "gold": 1729, "silver": 1357, "bronze_plus": 966, "bronze": 662}, "20": {"platinum": 2206, "gold": 1770, "silver": 1393, "bronze_plus": 990, "bronze": 679}, "21": {"platinum": 2284, "gold": 1834, "silver": 1437, "bronze_plus": 1021, "bronze": 702}, "22": {"platinum": 2363, "gold": 1893, "silver": 1486, "bronze_plus": 1057, "bronze": 727}, "23": {"platinum": 2449, "gold": 1962, "silver": 1536, "bronze_plus": 1090, "bronze": 750}, "24": {"platinum": 2536, "gold": 2029, "silver": 1588, "bronze_plus": 1128, "bronze": 778}, "25": {"platinum": 2594, "gold": 2073, "silver": 1625, "bronze_plus": 1153, "bronze": 794}, "26": {"platinum": 2652, "gold": 2118, "silver": 1657, "bronze_plus": 1176, "bronze": 812}, "27": {"platinum": 2715, "gold": 2166, "silver": 1695, "bronze_plus": 1202, "bronze": 831}, "28": {"platinum": 2779, "gold": 2214, "silver": 1735, "bronze_plus": 1230, "bronze": 850}, "29": {"platinum": 2845, "gold": 2268, "silver": 1773, "bronze_plus": 1257, "bronze": 870}, "30": {"platinum": 2912, "gold": 2320, "silver": 1813, "bronze_plus": 1286, "bronze": 890}, "31": {"platinum": 2979, "gold": 2373, "silver": 1855, "bronze_plus": 1313, "bronze": 911}, "32": {"platinum": 3048, "gold": 2429, "silver": 1896, "bronze_plus": 1342, "bronze": 931}, "33": {"platinum": 3124, "gold": 2483, "silver": 1940, "bronze_plus": 1373, "bronze": 954}, "34": {"platinum": 3196, "gold": 2542, "silver": 1983, "bronze_plus": 1403, "bronze": 975}, "35": {"platinum": 3256, "gold": 2588, "silver": 2021, "bronze_plus": 1430, "bronze": 993}, "36": {"platinum": 3314, "gold": 2630, "silver": 2053, "bronze_plus": 1454, "bronze": 1010}, "37": {"platinum": 3404, "gold": 2702, "silver": 2109, "bronze_plus": 1493, "bronze": 1038}, "38": {"platinum": 3499, "gold": 2775, "silver": 2164, "bronze_plus": 1530, "bronze": 1064}, "39": {"platinum": 3644, "gold": 2887, "silver": 2250, "bronze_plus": 1589, "bronze": 1108}, "40": {"platinum": 3797, "gold": 3004, "silver": 2339, "bronze_plus": 1654, "bronze": 1154}, "41": {"platinum": 3937, "gold": 3114, "silver": 2424, "bronze_plus": 1712, "bronze": 1197}, "42": {"platinum": 4081, "gold": 3231, "silver": 2515, "bronze_plus": 1777, "bronze": 1241}, "43": {"platinum": 4274, "gold": 3375, "silver": 2626, "bronze_plus": 1854, "bronze": 1296}, "44": {"platinum": 4473, "gold": 3529, "silver": 2745, "bronze_plus": 1937, "bronze": 1356}, "45": {"platinum": 4686, "gold": 3694, "silver": 2872, "bronze_plus": 2026, "bronze": 1420}, "46": {"platinum": 4905, "gold": 3866, "silver": 3005, "bronze_plus": 2119, "bronze": 1485}, "47": {"platinum": 5184, "gold": 4081, "silver": 3174, "bronze_plus": 2237, "bronze": 1570}, "48": {"platinum": 5481, "gold": 4311, "silver": 3345, "bronze_plus": 2358, "bronze": 1656}, "49": {"platinum": 5814, "gold": 4572, "silver": 3544, "bronze_plus": 2496, "bronze": 1755}, "50": {"platinum": 6178, "gold": 4854, "silver": 3764, "bronze_plus": 2651, "bronze": 1865}, "51": {"platinum": 6566, "gold": 5154, "silver": 3996, "bronze_plus": 2812, "bronze": 1981}, "52": {"platinum": 6968, "gold": 5466, "silver": 4233, "bronze_plus": 2978, "bronze": 2101}, "53": {"platinum": 7378, "gold": 5780, "silver": 4479, "bronze_plus": 3152, "bronze": 2223}, "54": {"platinum": 7834, "gold": 6139, "silver": 4753, "bronze_plus": 3343, "bronze": 2360}, "55": {"platinum": 8238, "gold": 6450, "silver": 4993, "bronze_plus": 3511, "bronze": 2479}, "56": {"platinum": 8662, "gold": 6783, "silver": 5246, "bronze_plus": 3689, "bronze": 2607}, "57": {"platinum": 9093, "gold": 7117, "silver": 5505, "bronze_plus": 3868, "bronze": 2735}, "58": {"platinum": 9532, "gold": 7456, "silver": 5766, "bronze_plus": 4051, "bronze": 2867}, "59": {"platinum": 9967, "gold": 7793, "silver": 6025, "bronze_plus": 4234, "bronze": 2996}, "60": {"platinum": 10535, "gold": 8233, "silver": 6366, "bronze_plus": 4473, "bronze": 3166}, "61": {"platinum": 11133, "gold": 8698, "silver": 6726, "bronze_plus": 4723, "bronze": 3346}, "62": {"platinum": 11827, "gold": 9239, "silver": 7138, "bronze_plus": 5012, "bronze": 3552}, "63": {"platinum": 12514, "gold": 9774, "silver": 7549, "bronze_plus": 5300, "bronze": 3758}, "64": {"platinum": 13208, "gold": 10310, "silver": 7962, "bronze_plus": 5590, "bronze": 3963}, "65": {"platinum": 13987, "gold": 10914, "silver": 8427, "bronze_plus": 5915, "bronze": 4196}, "66": {"platinum": 14947, "gold": 11655, "silver": 8999, "bronze_plus": 6315, "bronze": 4483}, "67": {"platinum": 15992, "gold": 12471, "silver": 9623, "bronze_plus": 6753, "bronze": 4796}, "68": {"platinum": 17112, "gold": 13340, "silver": 10293, "bronze_plus": 7220, "bronze": 5129}, "69": {"platinum": 18244, "gold": 14216, "silver": 10970, "bronze_plus": 7695, "bronze": 5469}, "70": {"platinum": 19399, "gold": 15114, "silver": 11661, "bronze_plus": 8178, "bronze": 5814}, "71": {"platinum": 20412, "gold": 15900, "silver": 12268, "bronze_plus": 8603, "bronze": 6117}, "72": {"platinum": 21364, "gold": 16637, "silver": 12836, "bronze_plus": 9001, "bronze": 6401}, "73": {"platinum": 22510, "gold": 17531, "silver": 13518, "bronze_plus": 9479, "bronze": 6743}, "74": {"platinum": 23606, "gold": 18377, "silver": 14172, "bronze_plus": 9937, "bronze": 7069}, "75": {"platinum": 24747, "gold": 19267, "silver": 14854, "bronze_plus": 10413, "bronze": 7409}, "76": {"platinum": 26050, "gold": 20278, "silver": 15633, "bronze_plus": 10957, "bronze": 7800}, "77": {"platinum": 27418, "gold": 21338, "silver": 16451, "bronze_plus": 11532, "bronze": 8208}, "78": {"platinum": 28864, "gold": 22462, "silver": 17314, "bronze_plus": 12134, "bronze": 8640}, "79": {"platinum": 30382, "gold": 23640, "silver": 18220, "bronze_plus": 12770, "bronze": 9093}, "80": {"platinum": 31986, "gold": 24882, "silver": 19178, "bronze_plus": 13442, "bronze": 9573}}
-    _PL  = [('morgan_price', 'standard', 'Morgan Price Standard', 'international', 'standard deductible, outpatient 80%'), ('morgan_price', 'standard_plus', 'Morgan Price Standard Plus', 'international', 'outpatient 80%, enhanced limits'), ('morgan_price', 'comprehensive', 'Morgan Price Comprehensive', 'international', 'full outpatient, dental, optical'), ('april', 'international', 'April International', 'international', 'no voluntary excess, WW excl USA'), ('april', 'intl_plus', "April Int'l Plus", 'international', 'enhanced outpatient, no excess'), ('april', 'executive', 'April Executive', 'international', 'full cover, maternity option'), ('img', 'silver', 'IMG Silver', 'international', 'EUR 150 excess, Europe Area 1'), ('img', 'gold', 'IMG Gold', 'international', 'EUR 150 excess, comprehensive'), ('img', 'platinum', 'IMG Platinum', 'international', 'EUR 150 excess, premium cover')]
-    def _mpb(a):
-        for lo,hi,b in [(0,20,"Child"),(20,25,"20-24"),(25,30,"25-29"),(30,35,"30-34"),
-            (35,40,"35-39"),(40,45,"40-44"),(45,50,"45-49"),(50,55,"50-54"),
-            (55,60,"55-59"),(60,65,"60-64"),(65,70,"65-69")]:
-            if lo<=a<hi: return b
-        return "70-74"
-    def _apb(a):
-        for lo,hi,b in [(0,18,"Child"),(18,26,"18-25"),(26,30,"26-29"),(30,35,"30-34"),
-            (35,40,"35-39"),(40,45,"40-44"),(45,50,"45-49"),(50,55,"50-54"),
-            (55,60,"55-59"),(60,65,"60-64"),(65,70,"65-69"),(70,75,"70-74"),(75,80,"75-79")]:
-            if lo<=a<hi: return b
-        return "80+"
-    def _lp(carrier, plan, age, area="area1"):
-        try: a=int(age)
-        except: a=45
-        if carrier=="morgan_price": return _MP.get(area,{}).get(_mpb(a),{}).get(plan)
-        if carrier=="april":        return _APR.get(area,{}).get(_apb(a),{}).get(plan)
-        if carrier=="img":          return _IMG.get(str(min(a,80)),{}).get(plan)
-        return None
-    return _lp, _PL
-
-lookup_premium, RATE_PLANS = _load_rate_tables()
-
-
-
-
-# ── HAL Voice client knowledge base ─────────────────────────────────────────
-HAL_CLIENT_KB = """
-ACTIVE CLIENT CASES — speak from this when asked about any client:
-
-KONSTANTINA ALEXOPOULOU (Tzina) | Bupa Global | Policy BI-6000-0113-6189 | STATUS: 🔴 ESCALATED
-Claim CL260306821932 — EUR 12,999.97 — Facial nerve palsy surgery (G51.9) at IASO 04–06/02/2026.
-Surgeon: Dr. Andreas Foustanos. Procedure: plastic reconstruction local flap (Code 6093009).
-Nine weeks of delays. Formal complaint filed. FSPO referral (Lincoln House, Dublin 2), 7-day deadline.
-Key argument: surgery reconstructive NOT cosmetic. Member since 1996. Annual premium GBP 66,219.
-NEXT ACTION: Chase Bupa for formal complaint response. No resolution → refer to FSPO.
-
-KATIA TOTIKIDOU + ALEXIA (17) | Comparing Generali / Morgan Price / NOW Health | STATUS: 🟡 PENDING
-Katia 54, daughter Alexia 17. Based in Greece. German citizenship but NOT covered by German public health.
-Priority: hospitalisation + diagnostics abroad (Germany, Cyprus). Cancer history — needs PET/diagnostics.
-PPT comparison prepared. Recommendation: Morgan Price Standard as balanced international solution.
-NEXT ACTION: Follow up — has she reviewed the PPT? Chase for decision.
-
-CHRISTOS IATROPOULOS | Morgan Price | Policy M000106069/1 | STATUS: 🟡 PENDING
-Own Morgan Price claim — colonoscopy + gastroscopy outpatient 28/04/2026.
-Condition: hematochezia (K92.1) + abdominal bloating (K57.30). Dr. Emmanouil, Metropolitan General.
-Claim form filled 29/04/2026. Documents NOT yet uploaded to Morgan Price portal.
-Outstanding: Dr. Emmanouil signature, stamp, medical licence number.
-NEXT ACTION: Upload claim docs to Morgan Price portal. Chase Dr. Emmanouil.
-
-MR. SYNODINOS | Lloyd's binder | STATUS: 🔵 IN PROGRESS
-Holiday rental: Thesi Rozou, Syros (Bay View House). Coverage: 02/04/2026–02/04/2027.
-NOT a policy yet — no coverage until signed and premium paid.
-Outstanding: P.2 energy sources + rental period, P.3 drainage/water pump, P.5 + pages 8-9 signatures.
-NEXT ACTION: Chase Synodinos for signed completed form.
-
-SYROS STAIR ACCIDENT | Personal Accident | STATUS: 🟢 READY TO SUBMIT
-Client fell on stairs in Syros — head trauma + spinal injury. Hospital Vardakeios & Proios.
-Loss of consciousness → 48h monitoring. CT + X-rays normal. Records translated to English.
-NEXT ACTION: Submit claim to insurer with full documentation.
-
-TANIA — GROUP RENEWAL | Group Health | STATUS: 🟢 COMPLETED
-Renewal EUR 9,731 (Main: EUR 8,520.71 + Dependants: EUR 1,210.32). Previous: EUR 6,950.33.
-Increase: +39.9%. Communicated to HR. Market-wide rate adjustment 2024–2025.
-"""
-
-
-
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -372,7 +283,6 @@ with st.sidebar:
         modules_business = [
             ("🏠", "home", "Dashboard"),
             ("💬", "hal_chat", "HAL Assistant"),
-            ("🎙️", "voice_chat", "HAL Voice"),
             ("📊", "quotes", "Quote Engine"),
             ("📄", "documents", "Document Filler"),
             ("✉️", "comms", "Communications"),
@@ -400,7 +310,6 @@ with st.sidebar:
             modules_private = [
                 ("🏠", "home", "Dashboard"),
                 ("💬", "hal_chat", "HAL Assistant"),
-                ("🎙️", "voice_chat", "HAL Voice"),
                 ("🏛️", "lodge", "Lodge Secretary"),
                 ("📋", "minutes", "Minutes & Docs"),
                 ("👥", "attendance", "Attendance"),
@@ -461,7 +370,7 @@ def render_pin_screen():
 
 def render_business_home():
     st.markdown("## 🏛 Ashlar Insurance — HAL Dashboard")
-    st.caption("Alex · Your AI business operating system")
+    st.caption("Pantelis Kourbelas · Your AI business operating system")
 
     # KPI row
     col1, col2, col3, col4 = st.columns(4)
@@ -515,7 +424,7 @@ def render_business_home():
 
     projects = [
         ("Ashlar Quote Engine", "Streamlit · Claude API", "github.com/chiinsurancebrokers/chi_quote_engine", "Live"),
-        ("Ashlar Client Portal", "Netlify · HTML/JS", "alexkourbelas-chiinsurancebrokers.netlify.app", "Live"),
+        ("Ashlar Client Portal", "Netlify · HTML/JS", "panteliskourbelas-chiinsurancebrokers.netlify.app", "Live"),
         ("Document Filler", "Streamlit · ReportLab · Claude API", "Internal", "Live"),
         ("PPT Quote Generator", "python-pptx · Claude API", "Internal", "Live"),
         ("Ashlar Assurance Site", "WordPress · Breakdance", "ashlar-assurance.com", "In Build"),
@@ -572,398 +481,6 @@ def render_private_home():
                         st.rerun()
 
 
-def _extract_pdf_text(file_bytes: bytes, filename: str) -> str:
-    """Extract text from a PDF using pypdf / PyPDF2 (whichever is installed)."""
-    import io
-    try:
-        try:
-            from pypdf import PdfReader
-        except ImportError:
-            from PyPDF2 import PdfReader
-        reader = PdfReader(io.BytesIO(file_bytes))
-        pages = []
-        for i, page in enumerate(reader.pages):
-            text = page.extract_text() or ""
-            if text.strip():
-                pages.append(f"[Page {i+1}]\n{text.strip()}")
-        return "\n\n".join(pages) if pages else "[No readable text found in PDF]"
-    except Exception as e:
-        return f"[PDF extraction failed for {filename}: {e}]"
-
-
-def _build_api_content(user_text: str, uploaded_files) -> tuple[list, list[str]]:
-    """
-    Convert user text + uploaded files into a Claude API content list.
-    Returns (api_content_list, attachment_names).
-    """
-    import base64
-    api_content = []
-    attachment_names = []
-
-    for uf in (uploaded_files or []):
-        attachment_names.append(uf.name)
-        file_bytes = uf.read()
-        mime = uf.type or ""
-
-        if mime == "application/pdf" or uf.name.lower().endswith(".pdf"):
-            pdf_text = _extract_pdf_text(file_bytes, uf.name)
-            size_kb = round(len(file_bytes) / 1024, 1)
-            api_content.append({
-                "type": "text",
-                "text": (
-                    f"<document filename='{uf.name}' size='{size_kb} KB'>\n"
-                    f"{pdf_text}\n"
-                    f"</document>"
-                ),
-            })
-
-        elif mime.startswith("image/") and mime in (
-            "image/jpeg", "image/png", "image/gif", "image/webp"
-        ):
-            b64 = base64.standard_b64encode(file_bytes).decode("utf-8")
-            api_content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": mime, "data": b64},
-            })
-
-        elif mime in ("text/plain", "text/csv") or uf.name.lower().endswith((".txt", ".csv")):
-            text = file_bytes.decode("utf-8", errors="replace")
-            api_content.append({
-                "type": "text",
-                "text": f"<document filename='{uf.name}'>\n{text}\n</document>",
-            })
-
-        else:
-            # Unsupported — note it so user knows
-            api_content.append({
-                "type": "text",
-                "text": f"[Attached file '{uf.name}' — type '{mime}' not directly readable; please describe what you need from it.]",
-            })
-
-    # User message always last so it reads naturally
-    api_content.append({"type": "text", "text": user_text})
-    return api_content, attachment_names
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# VOICE HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Browser-side recorder + Web Speech API component
-# Returns a dict via Streamlit component value:
-#   {"transcript": str, "audio_b64": str|None}
-_VOICE_COMPONENT_HTML = """
-<style>
-  body { margin:0; font-family: sans-serif; }
-  #vc { display:flex; flex-direction:column; align-items:center; gap:12px; padding:16px 0; }
-  #btn {
-    width:72px; height:72px; border-radius:50%; border:none; cursor:pointer;
-    background:#C9A96E; color:#1C1410; font-size:28px;
-    box-shadow:0 2px 8px rgba(201,169,110,.35);
-    transition:all .15s;
-  }
-  #btn.recording { background:#E2462C; box-shadow:0 0 0 8px rgba(226,70,44,.2); animation:pulse 1.2s ease-in-out infinite; }
-  #btn:disabled { opacity:.45; cursor:default; }
-  @keyframes pulse { 0%,100%{box-shadow:0 0 0 4px rgba(226,70,44,.2)} 50%{box-shadow:0 0 0 12px rgba(226,70,44,.08)} }
-  #status { font-size:13px; color:#7A6A5A; min-height:18px; }
-  #transcript-box {
-    width:92%; min-height:48px; padding:8px 12px; border-radius:8px;
-    border:1px solid #E8E0D5; font-size:13px; background:#FBF8F4;
-    color:#2C1810; resize:none; outline:none;
-  }
-  #send-btn {
-    padding:8px 24px; border-radius:8px; border:none; cursor:pointer;
-    background:#C9A96E; color:#1C1410; font-size:13px; font-weight:600;
-  }
-  #send-btn:disabled { opacity:.4; cursor:default; }
-</style>
-<div id="vc">
-  <button id="btn" title="Hold to record">🎙️</button>
-  <div id="status">Click the mic to start recording</div>
-  <textarea id="transcript-box" placeholder="Transcript will appear here — you can edit before sending…" rows="3"></textarea>
-  <button id="send-btn" disabled>Send to HAL ➜</button>
-</div>
-<script>
-(function(){
-  const btn = document.getElementById('btn');
-  const status = document.getElementById('status');
-  const box = document.getElementById('transcript-box');
-  const sendBtn = document.getElementById('send-btn');
-  let recognition = null;
-  let mediaRecorder = null;
-  let audioChunks = [];
-  let isRecording = false;
-  const LANG = window.HAL_LANG || 'el-GR';
-  const MODE = window.HAL_STT_MODE || 'webspeech';  // 'webspeech' | 'whisper'
-
-  box.addEventListener('input', () => { sendBtn.disabled = box.value.trim().length === 0; });
-
-  // ── SEND ──────────────────────────────────────────────────────────────
-  sendBtn.addEventListener('click', () => {
-    const text = box.value.trim();
-    if (!text) return;
-    window.parent.postMessage({type:'hal_voice_send', text: text, audio: window._lastAudioB64 || null}, '*');
-    box.value = '';
-    sendBtn.disabled = true;
-    window._lastAudioB64 = null;
-    status.textContent = 'Sent — waiting for HAL…';
-  });
-
-  // ── RECORDING ─────────────────────────────────────────────────────────
-  btn.addEventListener('click', () => {
-    if (isRecording) stopRecording();
-    else startRecording();
-  });
-
-  function startRecording() {
-    isRecording = true;
-    btn.classList.add('recording');
-    btn.textContent = '⏹️';
-    audioChunks = [];
-    window._lastAudioB64 = null;
-
-    if (MODE === 'webspeech' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      recognition = new SR();
-      recognition.lang = LANG;
-      recognition.interimResults = true;
-      recognition.continuous = false;
-      status.textContent = 'Listening…';
-      recognition.onresult = e => {
-        let interim = '', final = '';
-        for (let r of e.results) { if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript; }
-        box.value = (final || interim).trim();
-        sendBtn.disabled = box.value.length === 0;
-      };
-      recognition.onend = () => { stopRecording(); };
-      recognition.onerror = (e) => { status.textContent = 'Mic error: '+e.error; stopRecording(); };
-      recognition.start();
-    } else {
-      // Whisper mode — just record audio bytes
-      navigator.mediaDevices.getUserMedia({audio:true}).then(stream => {
-        status.textContent = 'Recording… click ⏹️ when done';
-        mediaRecorder = new MediaRecorder(stream, {mimeType:'audio/webm'});
-        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-        mediaRecorder.onstop = () => {
-          stream.getTracks().forEach(t => t.stop());
-          const blob = new Blob(audioChunks, {type:'audio/webm'});
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            window._lastAudioB64 = reader.result.split(',')[1];
-            status.textContent = 'Recording ready — transcribing…';
-            box.value = '…transcribing via ElevenLabs…';
-            sendBtn.disabled = true;
-            window.parent.postMessage({type:'hal_whisper_audio', audio: window._lastAudioB64}, '*');
-          };
-          reader.readAsDataURL(blob);
-        };
-        mediaRecorder.start();
-      }).catch(e => { status.textContent = 'Mic access denied'; stopRecording(); });
-    }
-  }
-
-  function stopRecording() {
-    isRecording = false;
-    btn.classList.remove('recording');
-    btn.textContent = '🎙️';
-    if (recognition) { try { recognition.stop(); } catch(e){} recognition = null; }
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-    if (MODE === 'webspeech') status.textContent = box.value ? 'Edit transcript then send ↑' : 'Nothing heard — try again';
-  }
-
-  // ── RECEIVE transcript back from Streamlit (Whisper result) ───────────
-  window.addEventListener('message', e => {
-    if (e.data && e.data.type === 'hal_whisper_result') {
-      box.value = e.data.text || '';
-      sendBtn.disabled = box.value.trim().length === 0;
-      status.textContent = 'Transcript ready — edit or send ↑';
-    }
-    if (e.data && e.data.type === 'hal_speaking') {
-      status.textContent = 'HAL is speaking…';
-    }
-    if (e.data && e.data.type === 'hal_ready') {
-      status.textContent = 'Click the mic to start recording';
-    }
-  });
-})();
-</script>
-"""
-
-_TTS_PLAY_HTML = """
-<script>
-(function(){{
-  const text = {text_json};
-  const lang = {lang_json};
-  window.parent.postMessage({{type:'hal_speaking'}}, '*');
-  if (window.speechSynthesis) {{
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang;
-    u.rate = 0.95;
-    u.pitch = 1.0;
-    u.onend = () => window.parent.postMessage({{type:'hal_ready'}}, '*');
-    window.speechSynthesis.speak(u);
-  }}
-}})();
-</script>
-"""
-
-# ── HAL Avatar Face ───────────────────────────────────────────────────────────
-# Canvas-rendered humanoid face. Pass state via window.HAL_AVATAR_STATE:
-#   'idle' | 'listening' | 'thinking' | 'speaking'
-_HAL_ORB_HTML = """
-<style>
-  body{margin:0;padding:0;background:#050A14}
-  #w{display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 0;background:#050A14}
-  #st{font-size:11px;font-family:monospace;letter-spacing:2px;text-transform:uppercase;min-height:16px;transition:color .5s}
-</style>
-<div id="w">
-  <canvas id="o" width="280" height="280" style="display:block"></canvas>
-  <div id="st">HAL_STATE_LABEL</div>
-</div>
-<script>
-(function(){
-  const cv=document.getElementById('o'),cx=cv.getContext('2d');
-  const W=cv.width,H=cv.height,mx=W/2,my=H/2;
-  let state='HAL_INIT_STATE',t=0;
-  let h1=35,h2=20,h3=45,th1=35,th2=20,th3=45;
-  const COLS={
-    idle:[[35,85,65],[20,90,55],[45,80,60]],
-    listening:[[170,90,60],[150,85,55],[190,80,65]],
-    thinking:[[240,85,60],[220,90,55],[260,80,65]],
-    speaking:[[320,85,60],[20,90,60],[170,85,65]]
-  };
-  const SC={idle:'#C9A96E55',listening:'#5DCAA5',thinking:'#85B7EB',speaking:'#C9A96E'};
-  function applyState(s){
-    state=s;
-    const c=COLS[s]||COLS.idle;
-    th1=c[0][0];th2=c[1][0];th3=c[2][0];
-    const el=document.getElementById('st');
-    if(el){el.style.color=SC[s]||'#888';}
-  }
-  window.addEventListener('message',e=>{if(e.data&&e.data.hal_state)applyState(e.data.hal_state);});
-  applyState(state);
-  function lerp(a,b,f){return a+(b-a)*f;}
-  function hsl(h,s,l,a){return 'hsla('+h+','+s+'%,'+l+'%,'+(a==null?1:a)+')';}
-  function frame(){
-    cx.clearRect(0,0,W,H);
-    h1=lerp(h1,th1,.03);h2=lerp(h2,th2,.025);h3=lerp(h3,th3,.02);
-    const R=110;
-    const p=state==='speaking'?.08*Math.sin(t*6):state==='listening'?.05*Math.sin(t*4):state==='thinking'?.04*Math.sin(t*3):.02*Math.sin(t*.8);
-    const r=R*(1+p);
-    const ga=state==='speaking'?.3+.15*Math.abs(Math.sin(t*5)):.12;
-    const glow=cx.createRadialGradient(mx,my,r*.6,mx,my,r*1.8);
-    glow.addColorStop(0,hsl(h1,85,60,ga));
-    glow.addColorStop(1,'rgba(0,0,0,0)');
-    cx.fillStyle=glow;cx.beginPath();cx.arc(mx,my,r*1.8,0,Math.PI*2);cx.fill();
-    const base=cx.createRadialGradient(mx-r*.25,my-r*.3,r*.05,mx,my,r);
-    base.addColorStop(0,hsl(h1,90,88));
-    base.addColorStop(.3,hsl(h2,85,65));
-    base.addColorStop(.6,hsl(h3,80,45));
-    base.addColorStop(1,hsl(h1,70,20));
-    cx.fillStyle=base;cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
-    const bx=mx+Math.sin(t*.7)*r*.3,by=my+Math.cos(t*.5)*r*.25;
-    const b1=cx.createRadialGradient(bx,by,0,bx,by,r*.55);
-    b1.addColorStop(0,hsl(h2,90,70,.7));b1.addColorStop(1,'rgba(0,0,0,0)');
-    cx.globalCompositeOperation='screen';cx.fillStyle=b1;
-    cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
-    const bx2=mx-Math.cos(t*.9)*r*.35,by2=my-Math.sin(t*.6)*r*.3;
-    const b2=cx.createRadialGradient(bx2,by2,0,bx2,by2,r*.5);
-    b2.addColorStop(0,hsl(h3+30,85,65,.6));b2.addColorStop(1,'rgba(0,0,0,0)');
-    cx.fillStyle=b2;cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
-    cx.globalCompositeOperation='source-over';
-    const sp=cx.createRadialGradient(mx-r*.32,my-r*.38,0,mx-r*.2,my-r*.25,r*.45);
-    sp.addColorStop(0,'rgba(255,255,255,0.55)');
-    sp.addColorStop(.5,'rgba(255,255,255,0.12)');
-    sp.addColorStop(1,'rgba(255,255,255,0)');
-    cx.fillStyle=sp;cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
-    cx.globalCompositeOperation='destination-in';
-    cx.beginPath();cx.arc(mx,my,r,0,Math.PI*2);cx.fill();
-    cx.globalCompositeOperation='source-over';
-    if(state==='listening'){
-      cx.strokeStyle=hsl(170,90,65,.45+.3*Math.sin(t*4));
-      cx.lineWidth=2;cx.setLineDash([6,4]);
-      cx.beginPath();cx.arc(mx,my,r+10+Math.sin(t*5)*4,0,Math.PI*2);cx.stroke();
-      cx.setLineDash([]);
-    }
-    t+=.016;requestAnimationFrame(frame);
-  }
-  frame();
-})();
-</script>
-"""
-
-
-
-def _elevenlabs_stt(audio_bytes: bytes, api_key: str, language: str = "el") -> str:
-    """Transcribe audio via ElevenLabs Scribe. Requires Speech to Text -> Access on the key."""
-    import io
-    import requests as req
-
-    # Detect format from magic bytes (streamlit-mic-recorder may return WAV or WebM)
-    if audio_bytes[:4] == b'RIFF':
-        fname, mime = "audio.wav", "audio/wav"
-    elif audio_bytes[:4] == b'\x1a\x45\xdf\xa3':
-        fname, mime = "audio.webm", "audio/webm"
-    elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
-        fname, mime = "audio.mp3", "audio/mpeg"
-    else:
-        fname, mime = "audio.webm", "audio/webm"
-
-    # Field name MUST be "file" (not "audio") — ElevenLabs API spec
-    post_data = {"model_id": "scribe_v1"}
-    if language and language != "auto":
-        post_data["language_code"] = language
-
-    try:
-        resp = req.post(
-            "https://api.elevenlabs.io/v1/speech-to-text",
-            headers={"xi-api-key": api_key},
-            files={"file": (fname, io.BytesIO(audio_bytes), mime)},
-            data=post_data,
-            timeout=40,
-        )
-        resp.raise_for_status()
-        return resp.json().get("text", "")
-    except Exception as e:
-        return f"[ElevenLabs STT error: {e}]"
-
-
-def _whisper_transcribe(audio_bytes: bytes, openai_api_key: str, language: str = "el") -> str:
-    """Send audio bytes to OpenAI Whisper API and return transcript."""
-    import io
-    import requests as req
-    try:
-        resp = req.post(
-            "https://api.openai.com/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {openai_api_key}"},
-            files={"file": ("audio.webm", io.BytesIO(audio_bytes), "audio/webm")},
-            data={"model": "whisper-1", "language": language},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return resp.json().get("text", "")
-    except Exception as e:
-        return f"[Whisper error: {e}]"
-
-
-def _elevenlabs_tts(text: str, api_key: str, voice_id: str = "onwK4e9ZLuTAKqWW03F9") -> bytes | None:
-    """Call ElevenLabs TTS and return MP3 bytes (or None on error)."""
-    import requests as req
-    try:
-        resp = req.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-            json={"text": text, "model_id": "eleven_multilingual_v2",
-                  "voice_settings": {"stability": 0.55, "similarity_boost": 0.80}},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return resp.content
-    except Exception:
-        return None
-
-
 def render_hal_chat():
     import anthropic
 
@@ -971,7 +488,7 @@ def render_hal_chat():
     mode_label = "Private · Lodge & Personal" if is_private else "Business · Ashlar Insurance"
     st.markdown(f"## 💬 HAL Assistant — {mode_label}")
 
-    system_prompt_business = """You are HAL — the AI operating system for Alex, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
+    system_prompt_business = """You are HAL — the AI operating system for Pantelis Kourbelas, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
 
 You specialise in international health insurance brokerage. Key knowledge:
 - Carriers: Groupama, Generali, Ethniki, Morgan Price, NOW Health, Bupa Global, Safe Pet System
@@ -981,84 +498,36 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Tech stack: Python, Streamlit, Netlify, Claude API, ReportLab, python-pptx, Firebase, Google Sheets.
 - Brand: Ashlar Insurance (ashlar-assurance.com). Pet brand: petshealth.gr.
 
-When documents are provided, analyse them thoroughly before responding.
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send."""
 
-    system_prompt_private = """You are HAL — the private AI assistant for Alex. In this private mode you have access to lodge and personal context.
+    system_prompt_private = """You are HAL — the private AI assistant for Pantelis Kourbelas. In this private mode you have access to lodge and personal context.
 
 LODGE: You assist as secretary for Στ∴ ΑΚΡΟΠΟΛΙΣ υπ' αρ. 84 (Grand Lodge of Greece, ΜΣΤΕ) and ΚΛΕΙΣ ΑΛΗΘΕΙΑΣ αρ. 1 (A.A.S.R.). Always use Masonic ∴ notation. Style: contemporary Greek Tektonic — NOT archaic. Closing: Μ.τ.Τ.Α.Α. / Κατ' εντολήν του Σεβ∴ / Ο Γραμμ∴ / Χρήστος Ιατρόπουλος. Lodge email: st.akropolis.84@gmail.com. Speech order: 18 levels (Μαθηταί → Μέγας Διδάσκαλος).
 
 PERSONAL: Financial adviser, nurse, gym coach. Help with savings plans, retirement modelling, workout programmes, health monitoring.
 
-When documents are provided, analyse them thoroughly before responding.
 Never mix lodge content with business sessions. Respond in Greek unless asked otherwise."""
 
     system = system_prompt_private if is_private else system_prompt_business
+
     api_key = get_api_key() or st.session_state.get("api_key_input", "")
 
-    # ── Upload key counter — incremented after send to reset the uploader ──
-    if "upload_key_counter" not in st.session_state:
-        st.session_state.upload_key_counter = 0
-
-    # ── Document upload panel ──────────────────────────────────────────────
-    st.markdown("""
-    <style>
-    .upload-hint { 
-        font-size: 12px; color: #7A6A5A; 
-        margin: -8px 0 8px; padding: 6px 10px;
-        background: #FBF8F4; border-radius: 6px; 
-        border-left: 3px solid #C9A96E;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    with st.expander(
-        "📎 Attach documents to next message",
-        expanded=st.session_state.get("upload_panel_open", False)
-    ):
-        st.markdown(
-            '<div class="upload-hint">'
-            'Supported: <b>PDF</b> (text extracted), <b>images</b> (PNG/JPG/WEBP — analysed visually), '
-            '<b>TXT / CSV</b>. Files attach to your <em>next</em> message only.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        uploaded_files = st.file_uploader(
-            "Drop files here or click to browse",
-            type=["pdf", "png", "jpg", "jpeg", "gif", "webp", "txt", "csv"],
-            accept_multiple_files=True,
-            key=f"hal_upload_{st.session_state.upload_key_counter}",
-            label_visibility="collapsed",
-        )
-        if uploaded_files:
-            for uf in uploaded_files:
-                size_str = f"{round(uf.size/1024, 1)} KB" if uf.size < 1024*1024 else f"{round(uf.size/1024/1024, 1)} MB"
-                icon = "🖼️" if (uf.type or "").startswith("image/") else "📄"
-                st.caption(f"{icon} **{uf.name}** · {size_str} · ready to attach")
+    # Chat history display
+    chat_container = st.container()
+    with chat_container:
+        if not st.session_state.chat_history:
+            st.info("HAL is ready. Ask anything about insurance, clients, quotes, documents, or use quick actions below.")
         else:
-            uploaded_files = []
+            for msg in st.session_state.chat_history:
+                if msg["role"] == "user":
+                    st.chat_message("user").write(msg["content"])
+                else:
+                    st.chat_message("assistant").write(msg["content"])
 
-    st.markdown("")
-
-    # ── Chat history display ───────────────────────────────────────────────
-    if not st.session_state.chat_history:
-        st.info("HAL is ready. Type a message below — or attach documents above and ask HAL to analyse them.")
-    else:
-        for msg in st.session_state.chat_history:
-            if msg["role"] == "user":
-                with st.chat_message("user"):
-                    st.write(msg.get("display", msg.get("content", "")))
-                    for att in msg.get("attachments", []):
-                        icon = "🖼️" if any(
-                            att.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp")
-                        ) else "📄"
-                        st.caption(f"{icon} {att}")
-            else:
-                st.chat_message("assistant").write(msg["content"])
-
-    # ── Quick actions (only when chat is empty) ────────────────────────────
+    # Quick actions
     if not st.session_state.chat_history:
         st.markdown("**Quick actions:**")
+        quick = []
         if is_private:
             quick = [
                 "Draft a circular to the lodge brothers in Greek Tektonic style",
@@ -1080,994 +549,46 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
         for i, q in enumerate(quick):
             with cols[i % 2]:
                 if st.button(q, key=f"quick_{i}", use_container_width=True):
-                    st.session_state.chat_history.append({
-                        "role": "user",
-                        "content": q,
-                        "display": q,
-                        "attachments": [],
-                    })
+                    st.session_state.chat_history.append({"role": "user", "content": q})
                     st.rerun()
 
-    # ── Chat input ─────────────────────────────────────────────────────────
-    user_input = st.chat_input("Message HAL... (attach documents above to include them)")
+    # Input
+    user_input = st.chat_input("Message HAL...")
     if user_input:
-        # Build API content blocks (text + any uploaded files)
-        api_content, attachment_names = _build_api_content(user_input, uploaded_files)
-
-        # History entry — display text separate from api_content
-        history_entry = {
-            "role": "user",
-            "display": user_input,
-            "content": user_input,          # plain text fallback
-            "attachments": attachment_names,
-        }
-        if attachment_names:
-            history_entry["api_content"] = api_content  # rich content for API
-
-        st.session_state.chat_history.append(history_entry)
-
-        # Reset uploader for next message
-        if attachment_names:
-            st.session_state.upload_key_counter += 1
-            st.session_state.upload_panel_open = False
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
 
         if not api_key:
             st.session_state.chat_history.append({
                 "role": "assistant",
-                "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets.",
+                "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."
             })
         else:
             with st.spinner("HAL is thinking..."):
                 try:
                     client = anthropic.Anthropic(api_key=api_key)
-
-                    # Build messages — use api_content when present, else plain string
-                    messages = []
-                    for m in st.session_state.chat_history:
-                        if m["role"] == "user":
-                            messages.append({
-                                "role": "user",
-                                "content": m.get("api_content") or m.get("content", ""),
-                            })
-                        else:
-                            messages.append({
-                                "role": "assistant",
-                                "content": m["content"],
-                            })
-
-                    # Use more tokens when documents are attached
-                    max_tok = 4000 if attachment_names else 2000
-
+                    messages = [
+                        {"role": m["role"], "content": m["content"]}
+                        for m in st.session_state.chat_history
+                    ]
                     response = client.messages.create(
-                        model="claude-sonnet-4-6",
-                        max_tokens=max_tok,
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=2000,
                         system=system,
-                        messages=messages,
+                        messages=messages
                     )
                     reply = response.content[0].text
                     st.session_state.chat_history.append({"role": "assistant", "content": reply})
                 except Exception as e:
                     st.session_state.chat_history.append({
                         "role": "assistant",
-                        "content": f"⚠️ Error: {str(e)}",
+                        "content": f"⚠️ Error: {str(e)}"
                     })
         st.rerun()
 
-    # ── Clear button ───────────────────────────────────────────────────────
     if st.session_state.chat_history:
         if st.button("🗑 Clear conversation", key="clear_chat"):
             st.session_state.chat_history = []
-            st.session_state.upload_key_counter += 1   # reset uploader too
             st.rerun()
-
-
-# ── Quote Interview — question sequence ──────────────────────────────────────
-QUOTE_QUESTIONS = [
-    ("client_name",    "el", "Ποιο είναι το όνομα του πελάτη;",
-                       "en", "What is the client's name?"),
-    ("client_age",     "el", "Πόσο χρονών είναι; Υπάρχουν εξαρτώμενα μέλη;",
-                       "en", "How old is the client? Any dependants to cover?"),
-    ("location",       "el", "Πού διαμένει; Ταξιδεύει συχνά στο εξωτερικό;",
-                       "en", "Where are they based? Do they travel internationally?"),
-    ("coverage_type",  "el", "Ψάχνουν για ελληνική ή διεθνή κάλυψη υγείας;",
-                       "en", "Greek domestic insurance or international coverage?"),
-    ("priorities",     "el", "Ποιες είναι οι βασικές τους προτεραιότητες; Νοσοκομειακή, εξωτερική, οδοντιατρική, διαγνωστικά;",
-                       "en", "Main priorities: hospitalisation, outpatient, dental, diagnostics?"),
-    ("budget",         "el", "Έχουν κάποιον προϋπολογισμό κατά νου;",
-                       "en", "Do they have a budget in mind?"),
-]
-
-
-def _get_quote_question(step: int, lang: str) -> str:
-    """Return the question text for the given step in the given language."""
-    if step >= len(QUOTE_QUESTIONS):
-        return ""
-    row = QUOTE_QUESTIONS[step]
-    field, el_q, en_q = row[0], row[2], row[4]
-    return el_q if lang == "el" else en_q
-
-
-def _generate_quote_comparison(quote_data: dict, api_key: str, lang: str) -> str:
-    import anthropic, re
-
-    age_raw    = quote_data.get("client_age", "45")
-    age_match  = re.search(r"\b(\d{1,2})\b", str(age_raw))
-    client_age = int(age_match.group(1)) if age_match else 45
-    location   = quote_data.get("location", "").lower()
-    area       = "area2" if any(w in location for w in ["usa","america","\u03b1\u03bc\u03b5\u03c1"]) else "area1"
-    lang_instr = "Respond ONLY in Greek inside the JSON strings." if lang == "el" else "Respond ONLY in English inside the JSON strings."
-
-    plan_rows = []
-    for carrier, plan_key, name, ctype, notes in RATE_PLANS:
-        prem = lookup_premium(carrier, plan_key, client_age, area)
-        if prem:
-            plan_rows.append({"name": name, "carrier_code": carrier.upper()[:3],
-                              "annual_eur": prem, "monthly_eur": round(prem / 12),
-                              "notes": notes, "carrier": name.split()[0]})
-    plan_rows.sort(key=lambda x: x["annual_eur"])
-
-    premium_list = "\n".join(
-        f"- {p['name']}: EUR {p['annual_eur']:,}/year ({p['notes']})" for p in plan_rows)
-    profile = "\n".join(f"- {k.replace('_',' ').title()}: {v}" for k, v in quote_data.items())
-
-    prompt = (
-        "You are HAL, insurance specialist for Ashlar Insurance.\n\n"
-        f"CLIENT PROFILE:\n{profile}\nAge extracted: {client_age}\n\n"
-        f"CALCULATED 2025 PREMIUMS (use these exact figures):\n{premium_list}\n\n"
-        "Return ONLY valid JSON with this exact structure:\n"
-        "{"
-        '"recommendation": "1-2 sentence spoken recommendation naming the best plan with exact EUR price",'
-        '"client_name": "extracted first name only",'
-        '"plans": ['
-        '{"name":"","carrier":"","carrier_code":"","annual_eur":0,"monthly_eur":0,'
-        '"coverage":"","annual_limit":"","deductible":"","inpatient":"",'
-        '"outpatient":"","dental":"","direct_billing":"","suitability":8,"recommended":false}'
-        '],'
-        '"considerations": ["","",""],'
-        '"next_step": ""'
-        "}\n\n"
-        "Pick the 3 most suitable plans. Mark best as recommended:true.\n"
-        f"{lang_instr}"
-    )
-
-    client_ai = anthropic.Anthropic(api_key=api_key)
-    resp = client_ai.messages.create(
-        model="claude-sonnet-4-6", max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}], timeout=45)
-    raw = resp.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-    return raw
-
-
-def _render_quote_cards_html(quote_json_str: str) -> str:
-    try:
-        q = json.loads(quote_json_str)
-    except Exception:
-        return f"<pre style='color:#c00'>{quote_json_str[:500]}</pre>"
-
-    plans          = q.get("plans", [])
-    considerations = q.get("considerations", [])
-    next_step      = q.get("next_step", "")
-
-    def tag(label, val):
-        dim = any(w in str(val) for w in ["Not","Δεν","Όχι","No"])
-        val_color = "#aaa" if dim else "#1a1a1a"
-        return (f'<div style="display:grid;grid-template-columns:110px 1fr;gap:4px;'
-                f'padding:6px 0;border-bottom:1px solid #f0ede8;font-size:13px;align-items:start">'
-                f'<span style="color:#888;font-size:12px;padding-top:1px">{label}</span>'
-                f'<span style="color:{val_color};font-weight:500;line-height:1.4">{val}</span></div>')
-
-    def card(p, idx):
-        rec     = p.get("recommended", False)
-        ann     = p.get("annual_eur", 0)
-        mo      = p.get("monthly_eur", 0)
-        cc      = p.get("carrier_code","??")[:5]
-        name    = p.get("name","")
-        carrier = p.get("carrier","")
-        suit    = p.get("suitability", 0)
-        cid     = f"hc{idx}"
-        xid     = f"hx{idx}"
-
-        rec_badge = ('<div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);'
-                     'background:#1a6fd4;color:#fff;font-size:11px;font-weight:600;padding:3px 14px;'
-                     'border-radius:20px;white-space:nowrap;box-shadow:0 2px 8px #1a6fd433">'
-                     '★ HAL recommends</div>') if rec else ""
-        card_border = "border:2px solid #1a6fd4;box-shadow:0 4px 16px #1a6fd422" if rec else "border:1px solid #e5e2dc"
-        price_color = "#1a6fd4" if rec else "#1a1a1a"
-        lbg = "#e8f0fb" if rec else "#f5f3f0"
-        lc  = "#1a6fd4" if rec else "#666"
-        suit_pct = int(suit * 10)
-
-        rows = (tag("Coverage",       p.get("coverage",""))
-              + tag("Annual limit",   p.get("annual_limit",""))
-              + tag("Deductible",     p.get("deductible",""))
-              + tag("Inpatient",      p.get("inpatient",""))
-              + tag("Outpatient",     p.get("outpatient",""))
-              + tag("Dental",         p.get("dental",""))
-              + tag("Direct billing", p.get("direct_billing","")))
-
-        if rec:
-            # "Select" button — toggles a confirmation panel
-            btn = (f'<button id="btn{cid}" '
-                   f'onclick="var p=document.getElementById(\'{xid}\');'
-                   f'var b=document.getElementById(\'btn{cid}\');'
-                   f'if(p.style.display===\'none\'){{p.style.display=\'block\';b.textContent=\'✓ Selected — see below\';}}'
-                   f'else{{p.style.display=\'none\';b.textContent=\'Select this plan\';}}" '
-                   f'style="width:100%;margin-top:14px;padding:10px;border-radius:8px;'
-                   f'background:#1a6fd4;color:#fff;border:none;cursor:pointer;font-weight:600;font-size:14px">'
-                   f'Select this plan</button>'
-                   f'<div id="{xid}" style="display:none;margin-top:10px;padding:12px;'
-                   f'background:#e8f0fb;border-radius:8px;font-size:13px;color:#1a6fd4;line-height:1.6">'
-                   f'<b>Good choice!</b> To proceed, tell HAL:<br>'
-                   f'<i style="color:#333">"I want to go with {name}"</i>'
-                   f'</div>')
-        else:
-            # "View details" button — expands extra info + brochure link
-            # Inline brochure map — no import needed
-            _BROC_MAP = {
-                "morgan_price": {"brochure_url":"brochures/morgan_price.pdf",
-                                 "external_url":"https://morgan-price.eu",
-                                 "claim_phone":"+44 3300 581 668",
-                                 "highlights":["Plans: Standard · Standard Plus · Comprehensive · Premium · Elite",
-                                               "Overall limits: EUR 500K to EUR 2M",
-                                               "Full inpatient + cancer on all plans",
-                                               "MRI/CT/PET from Standard Plus",
-                                               "25% co-insurance if not pre-authorised",
-                                               "Claims: +44 3300 581 668 option 3"]},
-                "april":        {"brochure_url":"brochures/april.pdf",
-                                 "external_url":"https://april-international.com",
-                                 "claim_phone":"See policy certificate",
-                                 "highlights":["Plans: International · Int\'l Plus · Executive · Executive Plus",
-                                               "Aggregate limit: EUR 1.5M per period",
-                                               "Outpatient (incl. GP fees) from International Plus",
-                                               "Maternity from Int\'l Plus (18-month wait)",
-                                               "Telehealth (Teladoc) + Crisis24 included",
-                                               "2026-2027 benefit schedule"]},
-                "img":          {"brochure_url":"brochures/img_gpmi.pdf",
-                                 "external_url":"https://www.imglobal.com/intl",
-                                 "claim_phone":"+44 1903 817970",
-                                 "highlights":["Plans: Bronze · Bronze Plus · Silver · Gold · Platinum",
-                                               "Overall limits: EUR 1M to EUR 5M",
-                                               "Telemedicine from Bronze Plus",
-                                               "Chronic condition care from Silver",
-                                               "EUR 150 base deductible (Greece Zone A)",
-                                               "No age limit. Lifetime renewal guaranteed"]},
-            }
-            _carrier_key = carrier if isinstance(carrier, str) else ""
-            for _ck in ["morgan_price","april","img"]:
-                if _ck in str(name).lower().replace(" ","_") or _ck.replace("_"," ") in str(name).lower():
-                    _carrier_key = _ck; break
-            _broc = _BROC_MAP.get(_carrier_key, {})
-            _broc_url   = _broc.get("brochure_url","")
-            _ext_url    = _broc.get("external_url","#")
-            _claim_ph   = _broc.get("claim_phone","")
-            _highlights = _broc.get("highlights",[])
-            _hi_html    = "".join(f'<li style="margin:2px 0">{h}</li>' for h in _highlights)
-            _broc_btn   = (f'<a href="{_broc_url}" target="_blank" '
-                           f'style="display:inline-block;margin-top:6px;margin-right:6px;padding:5px 12px;'
-                           f'border-radius:6px;background:#e8f0fb;color:#1a6fd4;font-size:12px;'
-                           f'text-decoration:none;border:1px solid #c0d4f5">📄 Brochure PDF</a>') if _broc_url else ""
-            _ext_btn    = (f'<a href="{_ext_url}" target="_blank" '
-                           f'style="display:inline-block;margin-top:6px;padding:5px 12px;'
-                           f'border-radius:6px;background:#f5f3f0;color:#444;font-size:12px;'
-                           f'text-decoration:none;border:1px solid #ddd">🌐 Carrier site</a>') if _ext_url != "#" else ""
-            btn = (f'<button id="btn{cid}" '
-                   f'onclick="var p=document.getElementById(\'{xid}\');'
-                   f'var b=document.getElementById(\'btn{cid}\');'
-                   f'if(p.style.display===\'none\'){{p.style.display=\'block\';b.textContent=\'▲ Hide details\';}}'
-                   f'else{{p.style.display=\'none\';b.textContent=\'View details\';}}" '
-                   f'style="width:100%;margin-top:14px;padding:10px;border-radius:8px;'
-                   f'background:#f5f3f0;color:#444;border:1px solid #ddd;cursor:pointer;font-size:14px">'
-                   f'View details</button>'
-                   f'<div id="{xid}" style="display:none;margin-top:10px;padding:14px;'
-                   f'background:#f8f8f8;border-radius:8px;font-size:12px;color:#444;line-height:1.7">'
-                   f'<b style="font-size:13px">{name}</b><br>'
-                   f'<span style="color:#888">{carrier}</span><br>'
-                   f'<div style="margin:6px 0">Annual: <b>&#8364;{ann:,}</b> &middot; Monthly: <b>&#8364;{mo}</b></div>'
-                   + (f'<div style="margin:4px 0 8px"><div style="font-size:11px;color:#888;margin-bottom:2px">Suitability {suit}/10</div>'
-                      f'<div style="height:4px;background:#e0ddd8;border-radius:2px">'
-                      f'<div style="width:{suit_pct}%;height:100%;background:#888;border-radius:2px"></div></div></div>')
-                   + (f'<ul style="margin:6px 0 8px;padding-left:16px;color:#555;font-size:12px;line-height:1.6">{_hi_html}</ul>' if _hi_html else "")
-                   + (f'<div style="margin-top:2px">{_broc_btn}{_ext_btn}</div>' if _broc_btn or _ext_btn else "")
-                   + (f'<div style="margin-top:8px;font-size:11px;color:#888">Claims: {_claim_ph}</div>' if _claim_ph and _claim_ph != "See policy certificate" else "")
-                   + f'<div style="margin-top:8px;font-size:11px;color:#888;border-top:1px solid #e8e5e0;padding-top:6px">'
-                   + f'Tell HAL: <i>"I want to go with {name}"</i></div>'
-                   + f'</div>')
-
-        return (
-            f'<div id="{cid}" style="position:relative;background:#fff;{card_border};border-radius:14px;'
-            f'padding:20px;flex:1;min-width:220px;max-width:320px;font-family:-apple-system,sans-serif">{rec_badge}'
-            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'
-            f'<div style="width:40px;height:40px;border-radius:10px;background:{lbg};color:{lc};'
-            f'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">{cc}</div>'
-            f'<div>'
-            f'<div style="font-size:15px;font-weight:600;color:#1a1a1a;line-height:1.2">{name}</div>'
-            f'<div style="font-size:12px;color:#888;margin-top:2px">{carrier}</div>'
-            f'</div></div>'
-            f'<div style="margin-bottom:4px">'
-            f'<span style="font-size:30px;font-weight:700;color:{price_color}">&#8364;{ann:,}</span>'
-            f'<span style="font-size:14px;color:#888;margin-left:4px">/year</span>'
-            f'</div>'
-            f'<div style="font-size:13px;color:#888;margin-bottom:14px">&#8364;{mo}/month</div>'
-            + rows + btn +
-            f'</div>'
-        )
-
-    cards_html = "".join(card(p, i) for i, p in enumerate(plans))
-    cons_li    = "".join(f'<li style="margin:5px 0;color:#444;font-size:13px">{c}</li>' for c in considerations)
-    cons_block = (f'<div style="background:#f8f6f2;border-radius:10px;padding:14px 18px;margin:16px 0">'
-                  f'<div style="font-weight:600;margin-bottom:8px;font-size:14px">Key considerations</div>'
-                  f'<ul style="margin:0;padding-left:18px">{cons_li}</ul></div>') if considerations else ""
-    ns_block   = (f'<div style="font-size:13px;color:#555;padding:6px 0">'
-                  f'<b>Next step:</b> {next_step}</div>') if next_step else ""
-    disc       = ('<div style="font-size:11px;color:#aaa;margin-top:12px;padding-top:10px;border-top:1px solid #eee">'
-                  'Premiums from 2025 carrier rate tables &middot; Indicative — subject to underwriting &middot; Valid 30 days</div>')
-    return (f'<div style="font-family:-apple-system,sans-serif;padding:8px 0">'
-            f'<div style="display:flex;gap:16px;flex-wrap:wrap">{cards_html}</div>'
-            f'{cons_block}{ns_block}{disc}</div>')
-
-
-
-def _send_quote_email(to_email: str, client_name: str, quote_json_str: str,
-                      sender_email: str, app_password: str) -> bool:
-    import smtplib, json as _j
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text      import MIMEText
-    try:
-        q     = _j.loads(quote_json_str)
-        plans = q.get("plans", [])
-        rec   = next((p for p in plans if p.get("recommended")), plans[0] if plans else {})
-
-        rows = ""
-        for p in plans:
-            badge = " &#11088; HAL recommends" if p.get("recommended") else ""
-            pcolor = "#185FA5" if p.get("recommended") else "#2C1810"
-            rows += (f'<tr><td style="padding:10px 12px;border-bottom:1px solid #F0ECE5">'
-                     f'<b style="font-size:14px">{p.get("name","")}</b>{badge}<br>'
-                     f'<span style="color:#888;font-size:12px">{p.get("carrier","")} &middot; {p.get("coverage","")} &middot; {p.get("annual_limit","")} limit</span></td>'
-                     f'<td style="padding:10px 12px;border-bottom:1px solid #F0ECE5;text-align:right;white-space:nowrap">'
-                     f'<b style="font-size:16px;color:{pcolor}">&#8364;{p.get("annual_eur",0):,}</b>'
-                     f'<span style="color:#888;font-size:12px">/yr</span><br>'
-                     f'<span style="color:#888;font-size:12px">&#8364;{p.get("monthly_eur",0)}/mo</span></td></tr>')
-
-        cons_li = "".join(f'<li style="margin:4px 0">{c}</li>' for c in q.get("considerations",[]))
-        cons_bl = f'<div style="margin-top:20px;background:#FBF8F4;border-radius:8px;padding:14px 16px"><b style="font-size:13px">Key considerations</b><ul style="margin:8px 0 0;padding-left:18px;color:#5F5E5A;font-size:13px">{cons_li}</ul></div>' if cons_li else ""
-        ns_bl   = f'<p style="margin-top:16px;font-size:13px;color:#5F5E5A"><b>Next step:</b> {q.get("next_step","")}</p>' if q.get("next_step") else ""
-
-        html = (
-            f'<!DOCTYPE html><html><body style="margin:0;padding:0;font-family:-apple-system,Helvetica,sans-serif;background:#F8F6F2">'
-            f'<div style="max-width:560px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #E8E0D5">'
-            f'<div style="background:#1C1410;padding:28px 32px">'
-            f'<div style="font-size:24px;font-weight:700;letter-spacing:3px;color:#C9A96E">HAL</div>'
-            f'<div style="font-size:11px;color:#7A6A5A;letter-spacing:2px;text-transform:uppercase;margin-top:2px">Ashlar Insurance &middot; Quote</div>'
-            f'</div><div style="padding:28px 32px">'
-            f'<h2 style="font-size:20px;font-weight:500;color:#2C1810;margin:0 0 6px">Your quote is ready, {client_name}.</h2>'
-            f'<p style="color:#7A6A5A;font-size:14px;margin:0 0 24px">{q.get("recommendation","")}</p>'
-            f'<table style="width:100%;border-collapse:collapse;border:1px solid #E8E0D5;border-radius:8px;overflow:hidden">{rows}</table>'
-            f'{cons_bl}{ns_bl}'
-            f'</div><div style="padding:16px 32px;border-top:1px solid #F0ECE5">'
-            f'<p style="font-size:11px;color:#A89880;margin:0">This quote is indicative and does not constitute a binding offer. Final premiums subject to underwriting. Valid 30 days. &copy; 2026 Ashlar Insurance.</p>'
-            f'</div></div></body></html>'
-        )
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"Your Ashlar Insurance Quote — {rec.get('name','')}"
-        msg["From"]    = f"HAL - Ashlar Insurance <{sender_email}>"
-        msg["To"]      = to_email
-        msg.attach(MIMEText(html, "html"))
-
-        app_password = app_password.replace(" ", "")  # strip spaces from app password
-        # Try SSL first (port 465), fall back to STARTTLS (port 587)
-        try:
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as srv:
-                srv.login(sender_email, app_password)
-                srv.sendmail(sender_email, to_email, msg.as_string())
-        except Exception:
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as srv:
-                srv.ehlo()
-                srv.starttls()
-                srv.login(sender_email, app_password)
-                srv.sendmail(sender_email, to_email, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"Email error detail: {type(e).__name__}: {e}")
-        raise  # re-raise so caller can show the real error
-
-
-
-
-def _render_avatar(state: str = "idle"):
-    """Render HAL orb via components.html (iframe with fixed height)."""
-    import streamlit.components.v1 as _cv1
-    labels = {"idle": "standby", "listening": "listening...",
-              "thinking": "thinking...", "speaking": "speaking..."}
-    html = (_HAL_ORB_HTML
-            .replace("HAL_INIT_STATE",  state)
-            .replace("HAL_STATE_LABEL", labels.get(state, "standby")))
-    _cv1.html(html, height=310, scrolling=False)
-
-
-
-def render_voice_chat():
-    """HAL Voice — Stellar-style UI. Clean state machine, no loops."""
-    import anthropic, base64, json, re
-    import streamlit.components.v1 as components
-    try:
-        from streamlit_mic_recorder import mic_recorder
-        MIC_OK = True
-    except ImportError:
-        MIC_OK = False
-
-    is_private = st.session_state.mode == "private"
-    api_key    = get_api_key() or st.session_state.get("api_key_input", "")
-    el_key     = st.secrets.get("ELEVENLABS_API_KEY", "")
-    # Check OpenAI key from secrets first, then session (manual entry fallback)
-    openai_key = (st.secrets.get("OPENAI_API_KEY", "")
-                  or st.secrets.get("openai_api_key", "")
-                  or st.session_state.get("_oai_key_manual", ""))
-
-    # ── Stellar-style dark full-page CSS ─────────────────────────────────
-    st.markdown("""
-<style>
-/* Target every possible Streamlit background container */
-html, body,
-.stApp, .main, .block-container,
-[data-testid="stAppViewContainer"],
-[data-testid="stAppViewBlockContainer"],
-[data-testid="stMain"],
-[data-testid="stMainBlockContainer"],
-[data-testid="block-container"],
-section[data-testid="stMain"],
-div[data-testid="stVerticalBlock"],
-div.stMainBlockContainer {
-    background-color: #050A14 !important;
-    background: #050A14 !important;
-}
-/* Orb section */
-.hal-orb-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 0 16px;
-    background: transparent;
-}
-/* Transcript text below orb */
-.hal-transcript {
-    max-width: 720px;
-    margin: 0 auto;
-    font-size: 15px;
-    color: #D0C8BE;
-    text-align: center;
-    padding: 10px 20px;
-    min-height: 44px;
-    line-height: 1.6;
-    font-family: -apple-system, sans-serif;
-}
-/* Chat messages dark */
-.stChatMessage, [data-testid="stChatMessage"] {
-    background: #0D1520 !important;
-    border-radius: 12px !important;
-    margin-bottom: 8px !important;
-    border: 1px solid #1E2D44 !important;
-    color: #D0C8BE !important;
-}
-[data-testid="stChatMessageContent"] p { color: #D0C8BE !important; }
-/* Inputs dark */
-.stTextInput > div > div, input {
-    background: #0D1520 !important;
-    border-color: #1E2D44 !important;
-    color: #D0C8BE !important;
-}
-/* Expander dark */
-[data-testid="stExpander"] {
-    background: #0D1520 !important;
-    border: 1px solid #1E2D44 !important;
-    border-radius: 10px !important;
-}
-[data-testid="stExpander"] summary,
-[data-testid="stExpander"] label { color: #A89880 !important; }
-/* Selectbox dark */
-[data-testid="stSelectbox"] > div { 
-    background: #0D1520 !important; 
-    color: #D0C8BE !important; 
-}
-/* Caption text */
-.stCaption p { color: #5A6A7A !important; }
-/* Cards wrap */
-.hal-cards-wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
-/* Hide Streamlit chrome */
-#MainMenu, footer, header { visibility: hidden !important; }
-/* Sidebar stays as-is */
-</style>
-""", unsafe_allow_html=True)
-
-    # ── Star field background (Stellar-style) ──────────────────────────────
-    st.html("""
-<div id="starfield" style="
-    position:fixed;top:0;left:0;width:100%;height:100%;
-    pointer-events:none;z-index:0;overflow:hidden">
-<canvas id="stars"></canvas>
-</div>
-<script>
-(function(){
-  var c=document.getElementById('stars');
-  if(!c)return;
-  var cx=c.getContext('2d');
-  c.width=window.innerWidth;c.height=window.innerHeight;
-  var stars=[];
-  for(var i=0;i<120;i++){
-    stars.push({x:Math.random()*c.width,y:Math.random()*c.height,
-                r:Math.random()*1.2+0.2,o:Math.random()*0.6+0.2,
-                speed:Math.random()*0.003+0.001});
-  }
-  function draw(){
-    cx.clearRect(0,0,c.width,c.height);
-    stars.forEach(function(s){
-      s.o+=s.speed;if(s.o>0.9||s.o<0.2)s.speed*=-1;
-      cx.beginPath();cx.arc(s.x,s.y,s.r,0,Math.PI*2);
-      cx.fillStyle='rgba(255,255,255,'+s.o+')';cx.fill();
-    });
-    requestAnimationFrame(draw);
-  }
-  draw();
-})();
-</script>
-""")
-
-    # ── Settings expander ─────────────────────────────────────────────────
-    with st.expander("⚙️ Voice settings", expanded=False):
-        sc1, sc2 = st.columns(2)
-        with sc1:
-            lang_sel  = st.selectbox("Language", ["el — Greek", "en — English"], index=0, key="hal_lang")
-            el_lang   = lang_sel.split("—")[0].strip()
-            voice_map = {
-                "Kyriakos (Greek, calm)":   "f5HLTX707KIM4SzJYzSz",
-                "Brad (English, warm)":     "6z1Ks05MOtac6wYNh9PJ",
-                "Daniel (Multilingual)":    "onwK4e9ZLuTAKqWW03F9",
-            }
-            el_voice = voice_map.get(
-                st.selectbox("Voice", list(voice_map), key="hal_voice"), list(voice_map.values())[0])
-        with sc2:
-            if not el_key:
-                el_key = st.text_input("ElevenLabs API key", type="password", key="el_key_in")
-            else:
-                st.success("✅ ElevenLabs loaded")
-            if openai_key:
-                st.success("✅ OpenAI loaded")
-            else:
-                _manual = st.text_input("OpenAI key (Whisper fallback)",
-                                         type="password", key="oai_key_in",
-                                         help="Add OPENAI_API_KEY to Streamlit secrets for permanent storage")
-                if _manual:
-                    st.session_state._oai_key_manual = _manual
-                    openai_key = _manual
-    
-    use_el      = bool(el_key)
-    use_whisper = bool(openai_key)
-
-    # ── System prompts ─────────────────────────────────────────────────────
-    sys_biz = (
-        "You are HAL — AI voice assistant for Ashlar Insurance, Athens. "
-        "VOICE: 2-3 sentences max. No bullets. No markdown. "
-        "You specialise in: Morgan Price (Europe), April International, IMG Europe GPMI, NOW Health, Bupa Global. "
-        "When a client gives age, location, and coverage type, confirm and say you are calculating 2025 premiums. "
-        "Do not ask further questions — the system generates rates automatically. "
-        "If still missing info, ask ONE thing only. "
-        "Respond in the language spoken.\n"
-        "PLAN COMPARISON — when asked why one plan vs another:\n"
-        "Morgan Price Standard: lowest cost, 80% outpatient, no dental. Best for healthy budget clients.\n"
-        "Morgan Price Comprehensive: adds full dental+optical+outpatient. Best all-rounder.\n"
-        "April International: no excess on outpatient, strong worldwide cover. Best for travellers.\n"
-        "IMG Silver/Gold/Platinum: highest limits, chronic conditions, psychiatric, HIV. Best for complex needs.\n"
-        "Ask client priorities: budget / outpatient / dental / chronic conditions / travel frequency.\n\n"
-        "IMG GLOBAL PRIMA MEDICAL INSURANCE (GPMI) KEY FACTS:\n"
-        "Plans: Bronze (EUR 1M limit, no pre-ex cover) · Bronze Plus (EUR 2M) · Silver (EUR 3M) · Gold (EUR 4M) · Platinum (EUR 5M).\n"
-        "Greece is Zone A. Base excess EUR 150 (can increase to reduce premium by up to 51%).\n"
-        "All plans: full inpatient, cancer care, evacuation, Travel Intelligence app.\n"
-        "Bronze Plus+: telemedicine, physiotherapy 10 visits, psychiatric inpatient 15 days/yr.\n"
-        "Silver+: outpatient EUR 10K limit, chronic conditions routine care EUR 10K, complementary therapy, optical exam, wellness EUR 250.\n"
-        "Gold+: full outpatient unlimited, psychiatric EUR 5K/yr, HIV/AIDS EUR 10K/yr, kidney dialysis routine EUR 20K, vaccinations EUR 250, support programme.\n"
-        "Platinum: IVF 3 cycles (50% co-ins), psychiatric EUR 10K, HIV EUR 20K, kidney dialysis EUR 50K, wellness EUR 1K.\n"
-        "Chronic conditions (routine management): NOT covered Bronze/Bronze Plus. Silver EUR 10K inpatient. Gold EUR 50K. Platinum unlimited.\n"
-        "Optional: Routine Pregnancy (10-month wait) · Dental (6-month wait, 10%-50% co-insurance by class).\n"
-        "Eligibility: all nationalities, any age, lifetime renewal, no age limit.\n"
-        "Coverage areas: Area 1 Europe · Area 2 WW excl USA/SG/HK · Area 3 WW excl USA · Worldwide.\n"
-        "Claims & pre-auth: MyIMG portal at imglobal.com · Phone +44 1903 817970.\n\n"
-        "MORGAN PRICE EVOLUTION HEALTH EU KEY FACTS:\n"
-        "Plans: Standard (EUR 500K) · Standard Plus (EUR 750K) · Comprehensive (EUR 1M) · Premium (EUR 1.5M) · Elite (EUR 2M).\n"
-        "ALL plans: full inpatient, cancer care, evacuation, home country evacuation option.\n"
-        "Standard Plus+: MRI/CT/PET, outpatient (combined limit EUR 2.5K), physiotherapy EUR 500.\n"
-        "Comprehensive+: outpatient EUR 5K, non-emergency dental EUR 750, complementary therapy EUR 500, maternity complications EUR 10K.\n"
-        "Elite: outpatient unlimited, dental EUR 1.5K, optician EUR 300, physiotherapy EUR 2K.\n"
-        "IMPORTANT: 25% co-insurance on ALL costs if not pre-authorised for inpatient.\n"
-        "Claims: +44 3300 581 668 option 3 · euroclaims@morgan-price.eu.\n\n"
-        "APRIL INTERNATIONAL LONG-TERM KEY FACTS (2026-2027):\n"
-        "Plans: International · International Plus · Executive · Executive Plus.\n"
-        "All plans aggregate limit: GBP 1M / USD 2M / EUR 1.5M per certificate period.\n"
-        "All plans: full inpatient, cancer, evacuation, teleconsultation (Teladoc), Crisis24 security.\n"
-        "International Plus+: outpatient GP/specialist fees full refund (EUR 50 excess per claim), MRI/CT/PET, physiotherapy 20 sessions, routine dental EUR 300 (6-month wait), routine health screening EUR 300.\n"
-        "Executive+: maternity normal EUR 6K / complicated EUR 12K (18-month wait), optical EUR 300, hearing EUR 300, cancer genetic testing EUR 1.25K, congenital EUR 15K.\n"
-        "Executive Plus: maternity EUR 10K / EUR 20K, congenital EUR 30K, cancer preventive EUR 25K.\n"
-        "Nil excess option on outpatient available for additional premium.\n\n"
-        + HAL_CLIENT_KB
-    )
-    sys_priv = (
-        "You are HAL — private voice assistant. "
-        "VOICE: 2-3 sentences max. No bullets. "
-        "Lodge: Στ∴ ΑΚΡΟΠΟΛΙΣ 84. Personal: finance, health, gym. "
-        "Respond in Greek unless spoken to in English."
-    )
-    system = sys_priv if is_private else sys_biz
-
-    # ── Session state (clean set) ─────────────────────────────────────────
-    _DEFAULTS = {
-        "voice_history":     [],
-        "voice_tts_pending": None,
-        "_last_audio_id":    "",
-        "avatar_state":      "idle",
-        "hal_last_text":     "",
-        "quote_result":      None,
-        "quote_ctx":         {},
-        "quote_client_name": "",
-        "_quote_triggered":  False,
-        "_is_speaking":      False,
-        "_hal_greeted":      False,
-        "_last_typed":       "",
-    }
-    for k, v in _DEFAULTS.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-    # ── Auto-greeting on first open ───────────────────────────────────────
-    if not st.session_state._hal_greeted and api_key:
-        st.session_state._hal_greeted = True
-        _greet = (
-            "Γεια σας! Είμαι ο HAL, ο ασφαλιστικός βοηθός της Ashlar Insurance. "
-            "Πείτε μου το όνομά σας, την ηλικία σας και τι ασφάλιση χρειάζεστε — "
-            "θα σας φέρω τα πραγματικά τιμολόγια 2025 αμέσως."
-            if el_lang == "el" else
-            "Hello! I'm HAL, the AI insurance assistant at Ashlar. "
-            "Tell me your name, age, and the coverage you're looking for — "
-            "I'll calculate your actual 2025 premiums straight away."
-        )
-        st.session_state.voice_history.append({"role": "assistant", "content": _greet})
-        st.session_state.hal_last_text = _greet
-        st.session_state.avatar_state  = "speaking"
-        if use_el:
-            _tg = _elevenlabs_tts(_greet, el_key, el_voice)
-            if _tg:
-                st.session_state.voice_tts_pending = _tg
-        st.rerun()   # ← triggers audio playback on next render
-
-    # ── Play pending TTS (Web Audio API — bypasses browser autoplay block) ─
-    if st.session_state.voice_tts_pending:
-        _audio_bytes = st.session_state.voice_tts_pending
-        st.session_state.voice_tts_pending = None
-        st.session_state._is_speaking = True
-        # st.audio with autoplay=True — works in main Streamlit frame after user interaction
-        st.audio(_audio_bytes, format="audio/mp3", autoplay=True)
-
-    # ── Orb + status text ─────────────────────────────────────────────────
-    st.markdown('<div class="hal-orb-wrap">', unsafe_allow_html=True)
-    _render_avatar(st.session_state.avatar_state)
-    st.markdown(f'<div class="hal-transcript">{st.session_state.hal_last_text}</div>',
-                unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # ── Mic recorder ──────────────────────────────────────────────────────
-    user_text = ""
-    if MIC_OK:
-        st.markdown("**🎙️ Record your message**")
-        rec = mic_recorder(start_prompt="● Click to speak", stop_prompt="■ Stop recording",
-                           key="hal_mic", use_container_width=True)
-        if rec and rec.get("bytes"):
-            audio_id = rec.get("id", "")
-            if audio_id != st.session_state._last_audio_id:
-                st.session_state._last_audio_id = audio_id
-                raw_bytes = rec["bytes"]
-                # STT
-                with st.spinner("Transcribing…"):
-                    if use_el:
-                        user_text = _elevenlabs_stt(raw_bytes, el_key,
-                            "el" if el_lang == "el" else "en")
-                    elif use_whisper:
-                        user_text = _whisper_transcribe(raw_bytes, openai_key,
-                            "el" if el_lang == "el" else "en")
-                    user_text = (user_text or "").strip()
-                if user_text:
-                    st.caption(f"📝 *{user_text}*")
-                else:
-                    _sorry = "Συγνώμη, δεν κατάλαβα — παρακαλώ επαναλάβετε ή γράψτε παρακάτω." if el_lang == "el" else "Sorry, didn't catch that — please repeat or type below."
-                    st.warning(_sorry)
-    else:
-        user_text = st.chat_input("Type your message…") or ""
-
-    # Always-visible text fallback (reliability when mic fails)
-    _typed = st.text_input("Type message", key="hal_type_in",
-                           placeholder="Didn't record? Type here…",
-                           label_visibility="collapsed")
-    if _typed and _typed.strip() and _typed != st.session_state.get("_last_typed",""):
-        st.session_state._last_typed = _typed
-        user_text = _typed.strip()
-
-    # ── Reset button ──────────────────────────────────────────────────────
-    rcol1, rcol2 = st.columns([3, 1])
-    with rcol2:
-        if st.button("🔄 Reset HAL", key="hal_reset", use_container_width=True):
-            for k in ["voice_history","hal_last_text","quote_result","quote_ctx",
-                      "quote_client_name","_quote_triggered","avatar_state"]:
-                st.session_state[k] = _DEFAULTS.get(k, None) if k != "avatar_state" else "idle"
-            st.rerun()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # ── CONTEXT EXTRACTOR (pure function, no state side-effects) ─────────
-    # ─────────────────────────────────────────────────────────────────────
-    def extract_ctx(text: str) -> dict:
-        """Pull age, location, coverage_type from any conversation text."""
-        ctx = {}
-        tl  = text.lower()
-        # Name
-        nm = re.search(r"(?:my name is|i am|call me|i'm)\s+([A-Za-z]+)", tl)
-        if nm: ctx["client_name"] = nm.group(1).title()
-        # Age — digits
-        am = re.search(r"\b(\d{2})\s*(?:year|yr|\u03b5\u03c4)", tl)
-        if am:
-            ctx["client_age"] = am.group(1)
-        else:
-            # Written numbers
-            for word, num in [
-                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1 \u03b4\u03cd\u03bf","52"),
-                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1 \u03c4\u03c1\u03b9\u03ce\u03bd","53"),
-                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1 \u03c4\u03ad\u03c3\u03c3\u03b5\u03c1\u03b1","54"),
-                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1 \u03c0\u03ad\u03bd\u03c4\u03b5","55"),
-                ("\u03c0\u03b5\u03bd\u03ae\u03bd\u03c4\u03b1","50"),
-                ("\u03c3\u03b1\u03c1\u03ac\u03bd\u03c4\u03b1 \u03c0\u03ad\u03bd\u03c4\u03b5","45"),
-                ("\u03c3\u03b1\u03c1\u03ac\u03bd\u03c4\u03b1","40"),
-                ("\u03b5\u03be\u03ae\u03bd\u03c4\u03b1 \u03c0\u03ad\u03bd\u03c4\u03b5","65"),
-                ("\u03b5\u03be\u03ae\u03bd\u03c4\u03b1","60"),
-                ("\u03c4\u03c1\u03b9\u03ac\u03bd\u03c4\u03b1 \u03c0\u03ad\u03bd\u03c4\u03b5","35"),
-                ("\u03c4\u03c1\u03b9\u03ac\u03bd\u03c4\u03b1","30"),
-                ("fifty-two","52"),("fifty two","52"),("forty-five","45"),
-                ("sixty","60"),("fifty","50"),("forty","40"),("thirty-five","35"),
-            ]:
-                if word in tl:
-                    ctx["client_age"] = num
-                    break
-            if "client_age" not in ctx:
-                am2 = re.search(r"\b([2-7][0-9])\b", tl)
-                if am2: ctx["client_age"] = am2.group(1)
-        # Location
-        if any(w in tl for w in ["\u03b5\u03bb\u03bb\u03ac\u03b4","\u03b1\u03b8\u03ae\u03bd","greece","athens","greek","\u03b5\u03bb\u03bb\u03b7\u03bd"]):
-            ctx["location"] = "Greece"
-        elif any(w in tl for w in ["\u03ba\u03cd\u03c0\u03c1","cyprus"]): ctx["location"] = "Cyprus"
-        elif any(w in tl for w in ["uk ","united kingdom"]): ctx["location"] = "UK"
-        # Coverage
-        covs = []
-        if any(w in tl for w in ["inpatient","\u03bd\u03bf\u03c3\u03bf\u03ba\u03bf\u03bc","\u03bd\u03bf\u03c3\u03b7\u03bb","hospital","\u03bd\u03bf\u03c3\u03bf\u03ba\u03bf\u03bc\u03b5\u03af\u03bf"]):
-            covs.append("inpatient")
-        if any(w in tl for w in ["outpatient","\u03b5\u03be\u03c9\u03c4\u03b5\u03c1"]): covs.append("outpatient")
-        if any(w in tl for w in ["international","\u03b4\u03b9\u03b5\u03b8\u03bd","worldwide","global"]): covs.append("international")
-        if covs: ctx["coverage_type"] = " + ".join(covs)
-        if any(w in tl for w in ["europe","\u03b5\u03c5\u03c1\u03ce\u03c0"]): ctx.setdefault("priorities","Europe coverage")
-        return ctx
-
-    QUOTE_TRIGGERS = [
-        "\u03c0\u03c1\u03bf\u03c3\u03c6\u03bf\u03c1","\u03b1\u03c3\u03c6\u03ac\u03bb\u03b9\u03c3\u03c4\u03c1",
-        "\u03c4\u03b9\u03bc\u03bf\u03bb\u03cc\u03b3","\u03c3\u03cd\u03b3\u03ba\u03c1\u03b9\u03bd",
-        "\u03c0\u03cc\u03c3\u03bf","\u03b4\u03b5\u03af\u03be\u03b5","\u03c6\u03ad\u03c1\u03b5",
-        "\u03b5\u03c0\u03b9\u03bb\u03bf\u03b3","\u03c0\u03bb\u03ac\u03bd","\u03b5\u03c0\u03b9\u03bb\u03bf\u03b3\u03ad\u03c2",
-        "quot","premium","price","cost","show me","give me","compare","plan","option",
-    ]
-
-    def wants_quote(text: str) -> bool:
-        tl = text.lower()
-        return any(kw in tl for kw in QUOTE_TRIGGERS)
-
-    def can_generate(ctx: dict) -> bool:
-        return ("client_age" in ctx and "location" in ctx and "coverage_type" in ctx)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # ── PROCESS USER INPUT ────────────────────────────────────────────────
-    # ─────────────────────────────────────────────────────────────────────
-    # ── Echo loop guard: discard input captured while HAL was speaking ───
-    if user_text and st.session_state.get("_is_speaking"):
-        st.session_state._is_speaking = False   # reset for next turn
-        user_text = ""                           # discard — it's HAL's own voice
-
-    if user_text and api_key:
-        st.session_state._is_speaking = False
-        st.session_state.voice_history.append({"role": "user", "content": user_text})
-        st.session_state.avatar_state = "thinking"
-
-        # Full conversation text for context extraction
-        full_text = " ".join(m["content"] for m in st.session_state.voice_history)
-        ctx       = extract_ctx(full_text)
-        st.session_state.quote_ctx.update(ctx)
-        ctx       = st.session_state.quote_ctx
-
-        quote_wanted = wants_quote(full_text)
-        ready        = can_generate(ctx)
-        already_done = st.session_state._quote_triggered
-
-        # ── PATH A: Generate quote (once only) ───────────────────────────
-        if quote_wanted and ready and not already_done and not st.session_state.quote_result:
-            st.session_state._quote_triggered = True   # ONE-SHOT GUARD
-            ctx.setdefault("client_name", "Client")
-            ctx.setdefault("priorities",  ctx.get("coverage_type", "inpatient"))
-            ctx.setdefault("budget",      "flexible")
-
-            ack = ("Υπολογίζω τα πραγματικά ασφάλιστρα 2025 για εσάς..."
-                   if el_lang == "el" else "Calculating your actual 2025 premiums...")
-            st.session_state.voice_history.append({"role": "assistant", "content": ack})
-            st.session_state.hal_last_text  = ack
-            st.session_state.avatar_state   = "thinking"
-
-            if use_el:
-                _tts = _elevenlabs_tts(ack, el_key, el_voice)
-                if _tts: st.session_state.voice_tts_pending = _tts
-
-            with st.spinner("Calculating 2025 premiums from carrier rate tables…"):
-                try:
-                    result = _generate_quote_comparison(ctx, api_key, el_lang)
-                    st.session_state.quote_result = result
-                    try:
-                        qj = json.loads(result)
-                        spoken = qj.get("recommendation","")
-                        st.session_state.quote_client_name = qj.get("client_name","")
-                    except Exception:
-                        spoken = ""
-                    if spoken:
-                        st.session_state.voice_history.append({"role":"assistant","content":spoken})
-                        st.session_state.hal_last_text = spoken
-                        st.session_state.avatar_state  = "speaking"
-                        if use_el:
-                            _tts2 = _elevenlabs_tts(spoken, el_key, el_voice)
-                            if _tts2: st.session_state.voice_tts_pending = _tts2
-                except Exception as e:
-                    st.session_state.quote_result     = None
-                    st.session_state._quote_triggered = False  # Allow retry
-                    err_msg = f"Quote generation failed: {e}"
-                    st.session_state.voice_history.append({"role":"assistant","content":err_msg})
-                    st.session_state.hal_last_text = err_msg
-                    st.error(err_msg)
-
-        # ── PATH B: Normal Claude reply ───────────────────────────────────
-        else:
-            try:
-                client_ai = anthropic.Anthropic(api_key=api_key)
-                messages  = [{"role":m["role"],"content":m["content"]}
-                             for m in st.session_state.voice_history[-10:]]
-                resp  = client_ai.messages.create(
-                    model="claude-sonnet-4-6",
-                    max_tokens=300,
-                    system=system,
-                    messages=messages,
-                    timeout=30,
-                )
-                reply = resp.content[0].text.strip()
-                st.session_state.voice_history.append({"role":"assistant","content":reply})
-                st.session_state.hal_last_text = reply
-                st.session_state.avatar_state  = "speaking"
-                if use_el:
-                    _tts3 = _elevenlabs_tts(reply, el_key, el_voice)
-                    if _tts3: st.session_state.voice_tts_pending = _tts3
-
-                # ── Silent post-reply quote check ─────────────────────────
-                # Extract again now that reply is in history
-                full2 = " ".join(m["content"] for m in st.session_state.voice_history)
-                ctx2  = extract_ctx(full2)
-                st.session_state.quote_ctx.update(ctx2)
-                ctx2  = st.session_state.quote_ctx
-
-                if (wants_quote(full2) and can_generate(ctx2)
-                        and not st.session_state._quote_triggered
-                        and not st.session_state.quote_result):
-                    st.session_state._quote_triggered = True
-                    ctx2.setdefault("client_name","Client")
-                    ctx2.setdefault("priorities", ctx2.get("coverage_type",""))
-                    ctx2.setdefault("budget","flexible")
-                    with st.spinner("Calculating premiums…"):
-                        try:
-                            r2 = _generate_quote_comparison(ctx2, api_key, el_lang)
-                            st.session_state.quote_result = r2
-                            try:
-                                qj2    = json.loads(r2)
-                                sp2    = qj2.get("recommendation","")
-                                st.session_state.quote_client_name = qj2.get("client_name","")
-                            except Exception:
-                                sp2 = ""
-                            if sp2:
-                                st.session_state.voice_history.append({"role":"assistant","content":sp2})
-                                st.session_state.hal_last_text = sp2
-                                if use_el:
-                                    _t4 = _elevenlabs_tts(sp2, el_key, el_voice)
-                                    if _t4: st.session_state.voice_tts_pending = _t4
-                        except Exception as eg:
-                            st.session_state._quote_triggered = False
-                            st.warning(f"Quote gen failed: {eg}")
-
-            except Exception as ce:
-                err = f"HAL error: {ce}"
-                st.session_state.voice_history.append({"role":"assistant","content":err})
-                st.session_state.hal_last_text = err
-
-        st.rerun()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # ── QUOTE RESULT DISPLAY ──────────────────────────────────────────────
-    # ─────────────────────────────────────────────────────────────────────
-    if st.session_state.quote_result:
-        st.markdown('<div class="hal-cards-wrap">', unsafe_allow_html=True)
-        st.markdown("### Your plans")
-        try:
-            cards_html = _render_quote_cards_html(st.session_state.quote_result)
-            scrollable = f"""<div style="max-height:560px;overflow-y:auto;padding:4px 0">{cards_html}</div>"""
-            st.html(scrollable)
-        except Exception as e:
-            st.error(f"Display error: {e}")
-            st.json(st.session_state.quote_result)
-
-        # Email + controls
-        ec1, ec2 = st.columns([3,1])
-        with ec1:
-            cemail = st.text_input("Email quote to client", key="hal_cemail",
-                                   placeholder="client@example.com", label_visibility="collapsed")
-        with ec2:
-            if st.button("Send quote", type="primary", use_container_width=True, key="hal_send"):
-                # Try multiple key name variations (Streamlit secrets are case-sensitive)
-                def _get_secret(*keys, default=""):
-                    for k in keys:
-                        try:
-                            v = st.secrets.get(k, "")
-                            if v: return str(v).strip()
-                        except Exception:
-                            pass
-                    return default
-
-                gs = _get_secret("GMAIL_SENDER", "gmail_sender", "GmailSender")
-                gp = _get_secret("GMAIL_APP_PASSWORD", "gmail_app_password", "GmailAppPassword").replace(" ","")
-
-                # Show debug info if missing
-                if not gs or not gp:
-                    try:
-                        _available_keys = list(st.secrets.keys()) if hasattr(st.secrets, "keys") else []
-                    except Exception:
-                        _available_keys = []
-                    st.error(
-                        f"Gmail secrets not found. Keys available in secrets: `{_available_keys}`\n\n"
-                        f"GMAIL_SENDER found: `{bool(gs)}` · GMAIL_APP_PASSWORD found: `{bool(gp)}`\n\n"
-                        "**Fix:** In Streamlit Cloud → Settings → Secrets, make sure you have EXACTLY:\n"
-                        "```toml\n"
-                        "GMAIL_SENDER = \"info@chiinsurancebrokers.com\"\n"
-                        "GMAIL_APP_PASSWORD = \"your 16 char app password\"\n"
-                        "```\n"
-                        "Then click **Reboot app** from the ⋮ menu for secrets to reload."
-                    )
-                else:
-                    with st.spinner("Sending…"):
-                        try:
-                            ok = _send_quote_email(cemail,
-                                                   st.session_state.quote_client_name or "Client",
-                                                   st.session_state.quote_result, gs, gp)
-                            st.success(f"✅ Quote sent to {cemail}")
-                        except Exception as _email_err:
-                            st.error(f"Email failed: **{type(_email_err).__name__}** — {_email_err}")
-                            st.info("Common fixes: 1) Generate a new App Password at myaccount.google.com → Security → App passwords  2) Make sure 2-Step Verification is ON  3) The sender must be a Gmail or Google Workspace account")
-
-        nc1, nc2 = st.columns(2)
-        with nc1:
-            st.download_button("📥 Download", st.session_state.quote_result,
-                               file_name="hal_quote.json", use_container_width=True)
-        with nc2:
-            if st.button("🔄 New quote", use_container_width=True, key="hal_newq"):
-                st.session_state.quote_result     = None
-                st.session_state.quote_ctx        = {}
-                st.session_state.quote_client_name = ""
-                st.session_state._quote_triggered = False
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_quotes():
@@ -2118,9 +639,71 @@ def render_documents():
         st.info("Form filler ready. Point this to your document_filler app.py for full processing.")
 
 
+def _get_gmail_creds():
+    """Return (sender_address, app_password) from secrets, or ('','')."""
+    sender   = st.secrets.get("GMAIL_SENDER", "") or st.secrets.get("gmail_sender", "")
+    password = (
+        st.secrets.get("GMAIL_APP_PASSWORD", "") or
+        st.secrets.get("gmail_app_password", "") or
+        st.secrets.get("GMAIL_PASSWORD", "") or
+        st.secrets.get("gmail_password", "")
+    )
+    return sender, password
+
+
+def send_email_gmail(to_address: str, subject: str, body: str) -> tuple[bool, str]:
+    """
+    Send an email via Gmail SMTP using the App Password stored in secrets.
+    Returns (success: bool, message: str).
+    """
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    sender, password = _get_gmail_creds()
+    if not sender or not password:
+        return False, (
+            "Gmail credentials missing from Streamlit secrets. "
+            "Add GMAIL_SENDER and GMAIL_APP_PASSWORD to your secrets.toml."
+        )
+    if not to_address or "@" not in to_address:
+        return False, "Please enter a valid recipient email address."
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = sender
+    msg["To"]      = to_address
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as server:
+            server.login(sender, password)
+            server.sendmail(sender, to_address, msg.as_string())
+        return True, f"✅ Email sent from {sender} to {to_address}"
+    except smtplib.SMTPAuthenticationError:
+        return False, (
+            "❌ Gmail authentication failed. Make sure you are using a "
+            "**Gmail App Password** (not your normal password). "
+            "Generate one at myaccount.google.com → Security → 2-Step Verification → App passwords."
+        )
+    except Exception as e:
+        return False, f"❌ SMTP error: {e}"
+
+
 def render_comms():
     st.markdown("## ✉️ Communications Centre")
     st.caption("Emails · Appeal letters · Renewal notices · Quotes · Circulars")
+
+    # ── Gmail status indicator ────────────────────────────────────────────────
+    sender, pwd = _get_gmail_creds()
+    if sender and pwd:
+        st.success(f"📧 Gmail connected — sending as **{sender}**", icon="✅")
+    else:
+        st.warning(
+            "⚠️ Gmail not configured. Add `GMAIL_SENDER` and `GMAIL_APP_PASSWORD` "
+            "to your Streamlit secrets to enable actual sending.",
+            icon="⚙️",
+        )
 
     doc_type = st.selectbox("Document type", [
         "Client email (renewal notice)",
@@ -2145,6 +728,22 @@ def render_comms():
     context = st.text_area("Key details to include", height=100,
         placeholder="e.g. Claim denied for EUR 12,999.97. Client member since 1996. Annual premium GBP 66,219...")
 
+    # Recipient email — only shown for email doc types
+    is_email_doc = "email" in doc_type.lower() or "outreach" in doc_type.lower()
+    recipient_email = ""
+    email_subject   = ""
+    if is_email_doc:
+        st.markdown("---")
+        st.markdown("**📤 Send after generating**")
+        rec1, rec2 = st.columns(2)
+        with rec1:
+            recipient_email = st.text_input("Recipient email address", placeholder="client@example.com")
+        with rec2:
+            email_subject = st.text_input("Subject (auto-filled from generated text if blank)", placeholder="Leave blank to auto-detect")
+
+    if "comms_generated_text" not in st.session_state:
+        st.session_state.comms_generated_text = ""
+
     if st.button("✍️ Generate Document", type="primary"):
         if not get_api_key():
             st.error("Add Claude_API_Key to Streamlit secrets first.")
@@ -2160,18 +759,55 @@ Key details: {context}
 
 Produce the full document, ready to send. Include subject line if it's an email."""
                 try:
-                    client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                    ac = anthropic.Anthropic(api_key=get_api_key())
+                    r = ac.messages.create(
+                        model="claude-sonnet-4-20250514",
                         max_tokens=1500,
                         messages=[{"role": "user", "content": prompt}]
                     )
+                    generated = r.content[0].text
+                    st.session_state.comms_generated_text = generated
                     st.markdown("---")
                     st.markdown("### Generated Document")
-                    st.markdown(r.content[0].text)
-                    st.download_button("📥 Download as text", r.content[0].text, file_name="document.txt")
+                    st.markdown(generated)
+                    st.download_button("📥 Download as text", generated, file_name="document.txt")
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+    # ── Send button — shown after text is generated and it is an email doc ──
+    if st.session_state.comms_generated_text and is_email_doc:
+        st.markdown("---")
+        body_text = st.session_state.comms_generated_text
+
+        # Auto-extract subject line from generated text if not provided
+        auto_subject = email_subject
+        if not auto_subject:
+            for line in body_text.splitlines():
+                if line.lower().startswith("subject:"):
+                    auto_subject = line.split(":", 1)[-1].strip()
+                    break
+            if not auto_subject:
+                auto_subject = f"{doc_type} — {client_name or 'Client'}"
+
+        st.info(f"📬 Ready to send  |  **To:** {recipient_email or '(enter address above)'}  |  **Subject:** {auto_subject}")
+
+        col_send, col_clear = st.columns([2, 1])
+        with col_send:
+            if st.button("📤 Send Email via Gmail", type="primary", use_container_width=True):
+                if not recipient_email:
+                    st.error("Enter a recipient email address above before sending.")
+                else:
+                    with st.spinner("Connecting to Gmail..."):
+                        ok, msg = send_email_gmail(recipient_email, auto_subject, body_text)
+                    if ok:
+                        st.success(msg)
+                        st.session_state.comms_generated_text = ""
+                    else:
+                        st.error(msg)
+        with col_clear:
+            if st.button("🗑 Clear", use_container_width=True):
+                st.session_state.comms_generated_text = ""
+                st.rerun()
 
 
 def render_commissions():
@@ -2225,7 +861,7 @@ Be concrete and actionable."""
                 try:
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=2000,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -2276,7 +912,7 @@ Rules:
                 try:
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=1200,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -2343,9 +979,9 @@ def render_finance():
                 with st.spinner("Thinking..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=1000,
-                        system="You are a personal financial adviser for Alex, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
+                        system="You are a personal financial adviser for Pantelis Kourbelas, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
                         messages=[{"role": "user", "content": fin_query}]
                     )
                     st.markdown(r.content[0].text)
@@ -2354,6 +990,34 @@ def render_finance():
 def render_health():
     st.markdown("## 💪 Health & Gym Coach")
     st.caption("Personal trainer · Nutritionist · Health monitor")
+
+    # ── Kira AI Nurse card ────────────────────────────────────────────────────
+    kira_url = st.secrets.get("KIRA_URL", "https://kiraainurse.streamlit.app")
+    facescan_url = st.secrets.get("FACESCAN_URL", "https://kiraainurse.netlify.app")
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#2D3FE7,#7B2FE0);border-radius:16px;
+                padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:20px">
+        <div style="font-size:42px">🩺</div>
+        <div style="flex:1">
+            <div style="color:white;font-size:17px;font-weight:700;margin-bottom:4px">Kira · AI Nurse</div>
+            <div style="color:rgba(255,255,255,0.75);font-size:13px">Full symptom triage · Vitals analysis · Clinical report · PubMed evidence</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-shrink:0">
+            <a href="{facescan_url}" target="_blank"
+               style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+                      color:white;padding:9px 16px;border-radius:8px;font-size:13px;
+                      font-weight:600;text-decoration:none;white-space:nowrap">
+                📷 Face Scan
+            </a>
+            <a href="{kira_url}" target="_blank"
+               style="background:white;color:#2D3FE7;padding:9px 16px;border-radius:8px;
+                      font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap">
+                Open Kira →
+            </a>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.divider()
 
     tab1, tab2 = st.tabs(["🏋️ Workout Plan", "💬 Health Chat"])
 
@@ -2381,7 +1045,7 @@ Limitations: {notes or 'none'}
 Provide a full weekly plan with exercises, sets, reps, and rest periods. Include warm-up and cool-down. Make it progressive over 4 weeks."""
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=1500,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -2395,7 +1059,7 @@ Provide a full weekly plan with exercises, sets, reps, and rest periods. Include
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=800,
                         system="You are a personal health coach and wellness adviser. Provide evidence-based guidance on fitness, nutrition, and general health. Always recommend professional medical consultation for medical conditions.",
                         messages=[{"role": "user", "content": health_q}]
@@ -2432,13 +1096,13 @@ Requirements:
 - Include all imports
 - For Streamlit: include st.set_page_config, proper layout
 - For PDFs: use ReportLab with Greek font support (NotoSans fallback)
-- For APIs: use Anthropic claude-sonnet-4-6, read key from st.secrets
+- For APIs: use Anthropic claude-sonnet-4-20250514, read key from st.secrets
 - Include requirements.txt content at the end as a comment block
 
 Output only the code."""
                 client = anthropic.Anthropic(api_key=get_api_key())
                 r = client.messages.create(
-                    model="claude-sonnet-4-6",
+                    model="claude-sonnet-4-20250514",
                     max_tokens=3000,
                     messages=[{"role": "user", "content": prompt}]
                 )
@@ -2461,7 +1125,7 @@ def render_pets():
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=600,
                         system="You write marketing content for petshealth.gr, a pet insurance broker positioning itself as the trustworthy, human-centred alternative in Greece. Tone: confident, warm, independent, slightly critical of the industry.",
                         messages=[{"role": "user", "content": f"Write a {platform} about: {topic}"}]
@@ -2476,7 +1140,7 @@ def render_pets():
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=800,
                         system="You are a pet insurance specialist for petshealth.gr, Greece. You know the Greek pet insurance market well and currently recommend Safe Pet System as the most reliable option while seeking trustworthy international partners.",
                         messages=[{"role": "user", "content": q}]
@@ -2949,7 +1613,6 @@ if mode == "private" and not st.session_state.private_unlocked:
 elif mode == "business":
     if module == "home":        render_business_home()
     elif module == "hal_chat":  render_hal_chat()
-    elif module == "voice_chat": render_voice_chat()
     elif module == "quotes":    render_quotes()
     elif module == "documents": render_documents()
     elif module == "comms":     render_comms()
@@ -2963,7 +1626,6 @@ elif mode == "business":
 elif mode == "private" and st.session_state.private_unlocked:
     if module == "home":        render_private_home()
     elif module == "hal_chat":  render_hal_chat()
-    elif module == "voice_chat": render_voice_chat()
     elif module == "lodge":     render_lodge()
     elif module == "minutes":   render_placeholder("Minutes & Documents", "📋")
     elif module == "attendance": render_placeholder("Attendance Tracker", "👥")
