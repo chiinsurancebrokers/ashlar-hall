@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Hi I am Hal the Heuristically Programmed Algorithmic Assistant  | Ashlar Insurance
+Hi I am HAL the Heuristically Programmed Algorithmic Assistant | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -488,7 +488,10 @@ def render_hal_chat():
     mode_label = "Private · Lodge & Personal" if is_private else "Business · Ashlar Insurance"
     st.markdown(f"## 💬 HAL Assistant — {mode_label}")
 
-    system_prompt_business = """You are HAL — the AI operating system for Pantelis Kourbelas, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
+    kira_url       = st.secrets.get("KIRA_URL",       "https://kiraainurse.streamlit.app")
+    facescan_url   = st.secrets.get("FACESCAN_URL",   "https://kiraainurse.netlify.app")
+
+    system_prompt_business = f"""You are HAL — the AI operating system for Pantelis Kourbelas, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
 
 You specialise in international health insurance brokerage. Key knowledge:
 - Carriers: Groupama, Generali, Ethniki, Morgan Price, NOW Health, Bupa Global, Safe Pet System
@@ -497,6 +500,13 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Bupa Global claim expertise: formal complaint procedure, FSPO (Dublin), 7-day escalation protocol.
 - Tech stack: Python, Streamlit, Netlify, Claude API, ReportLab, python-pptx, Firebase, Google Sheets.
 - Brand: Ashlar Insurance (ashlar-assurance.com). Pet brand: petshealth.gr.
+
+INTEGRATED TOOLS — you know these apps and their URLs:
+- Kira AI Nurse (health assessments, symptom triage, vitals analysis): {kira_url}
+- Kira Face Scan (camera-based vitals via rPPG): {facescan_url}
+- HAL Dashboard modules: Quote Engine, Communications, Clients, Commissions, Market Intel, App Builder, PetsHealth, Health & Gym (all accessible from the left sidebar).
+
+When the user asks to open, launch, or navigate to Kira or the face scan, respond with the direct URL as a markdown link and invite them to click it. Never say you cannot access external systems — you know the URLs and share them directly.
 
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send."""
 
@@ -544,6 +554,7 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                 "Analyse niche markets for expanding into international health insurance",
                 "Generate a quote comparison PPT outline",
                 "Draft a cold outreach email to a corporate HR manager",
+                "Open Kira AI Nurse",
             ]
         cols = st.columns(2)
         for i, q in enumerate(quick):
@@ -557,7 +568,24 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
 
-        if not api_key:
+        # ── Intent intercept: navigation commands ─────────────────────────────
+        _cmd = user_input.lower().strip()
+        _kira_triggers     = {"kira", "kiraainurse", "nurse", "νοσηλευτής", "νοσηλευτρια"}
+        _scan_triggers     = {"face scan", "facescan", "scan", "σάρωση"}
+        _is_open           = any(w in _cmd for w in ("open", "launch", "go to", "άνοιξε", "ανοιξε", "πήγαινε"))
+        _wants_kira        = any(t in _cmd for t in _kira_triggers)
+        _wants_scan        = any(t in _cmd for t in _scan_triggers)
+
+        if _is_open and _wants_scan:
+            reply = f"📷 **Kira Face Scan** — ανοίγει στο Netlify:\n\n👉 [{facescan_url}]({facescan_url})\n\nΜετά τη σάρωση τα αποτελέσματα σου επιστρέφουν αυτόματα στην Kira."
+            st.session_state.chat_history.append({"role": "assistant", "content": reply})
+            st.rerun()
+        elif _is_open and _wants_kira:
+            reply = f"🩺 **Kira AI Nurse** — ανοίγει εδώ:\n\n👉 [{kira_url}]({kira_url})\n\nΜπορείς επίσης να βρεις το κουμπί **Open Kira →** μέσα στο Health & Gym module."
+            st.session_state.chat_history.append({"role": "assistant", "content": reply})
+            st.rerun()
+        # ── Normal Claude call ────────────────────────────────────────────────
+        elif not api_key:
             st.session_state.chat_history.append({
                 "role": "assistant",
                 "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."
