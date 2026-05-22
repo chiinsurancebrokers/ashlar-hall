@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Hi I am Hal the Heuristically Programmed Algorithmic Assistant  | Ashlar Insurance
+Pantelis Kourbelas | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -292,6 +292,7 @@ with st.sidebar:
             ("🏗️", "apps", "App Builder"),
             ("🐾", "pets", "PetsHealth"),
             ("🩺", "kira", "Kira AI Nurse"),
+            ("🏛️", "chi_portal", "CHI Portal"),
         ]
         for icon, key, label in modules_business:
             active = st.session_state.active_module == key
@@ -371,7 +372,7 @@ def render_pin_screen():
 
 def render_business_home():
     st.markdown("## 🏛 Ashlar Insurance — HAL Dashboard")
-    st.caption("Pantelis Kourbelas · Your AI business operating system")
+    st.caption("HAL · Your AI business operating system")
 
     # KPI row
     col1, col2, col3, col4 = st.columns(4)
@@ -505,7 +506,8 @@ You specialise in international health insurance brokerage. Key knowledge:
 INTEGRATED TOOLS — you know these apps and their URLs:
 - Kira AI Nurse (health assessments, symptom triage, vitals analysis): {kira_url}
 - Kira Face Scan (camera-based vitals via rPPG): {facescan_url}
-- HAL Dashboard modules: Quote Engine, Communications, Clients, Commissions, Market Intel, App Builder, PetsHealth, Health & Gym (all accessible from the left sidebar).
+- HAL Dashboard modules: Quote Engine, Communications, Clients, Commissions, Market Intel, App Builder, PetsHealth, Health & Gym, Kira AI Nurse, CHI Portal (all accessible from the left sidebar).
+- CHI Insurance Portal (client policies, payments, renewals, email queue): https://chi-insurance-portal-production.up.railway.app/admin/dashboard
 
 When the user asks to open, launch, or navigate to Kira or the face scan, respond with the direct URL as a markdown link and invite them to click it. Never say you cannot access external systems — you know the URLs and share them directly.
 
@@ -1682,6 +1684,162 @@ def render_clients():
                     st.rerun()
 
 
+
+def render_chi_portal():
+    import urllib.request, urllib.parse, urllib.error, re, http.cookiejar
+
+    PORTAL_BASE = st.secrets.get("CHI_PORTAL_URL", "https://chi-insurance-portal-production.up.railway.app")
+    PORTAL_USER = st.secrets.get("CHI_PORTAL_USER", "admin")
+    PORTAL_PASS = st.secrets.get("CHI_PORTAL_PASS", "admin2025!")
+
+    st.markdown("## 🏛️ CHI Insurance Portal")
+    st.caption("Live data from chi-insurance-portal-production.up.railway.app")
+
+    # ── Launch buttons ────────────────────────────────────────────────────────
+    b1, b2, b3, b4, b5 = st.columns(5)
+    with b1:
+        st.markdown(f'''<a href="{PORTAL_BASE}/admin/dashboard" target="_blank"
+            style="display:block;text-align:center;padding:10px 8px;background:linear-gradient(135deg,#1e3a5f,#2563EB);
+            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
+            🏠 Dashboard</a>''', unsafe_allow_html=True)
+    with b2:
+        st.markdown(f'''<a href="{PORTAL_BASE}/admin/clients" target="_blank"
+            style="display:block;text-align:center;padding:10px 8px;background:#0F766E;
+            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
+            👥 Clients</a>''', unsafe_allow_html=True)
+    with b3:
+        st.markdown(f'''<a href="{PORTAL_BASE}/admin/policies" target="_blank"
+            style="display:block;text-align:center;padding:10px 8px;background:#7C3AED;
+            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
+            📋 Policies</a>''', unsafe_allow_html=True)
+    with b4:
+        st.markdown(f'''<a href="{PORTAL_BASE}/admin/renewals" target="_blank"
+            style="display:block;text-align:center;padding:10px 8px;background:#B45309;
+            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
+            🔄 Renewals</a>''', unsafe_allow_html=True)
+    with b5:
+        st.markdown(f'''<a href="{PORTAL_BASE}/admin/email-queue" target="_blank"
+            style="display:block;text-align:center;padding:10px 8px;background:#9D174D;
+            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
+            ✉️ Email Queue</a>''', unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Live stats fetch ──────────────────────────────────────────────────────
+    def fetch_portal_stats():
+        """Login to portal and scrape admin dashboard stats."""
+        try:
+            jar = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+            opener.addheaders = [("User-Agent", "HAL-Dashboard/1.0")]
+
+            # POST login
+            login_data = urllib.parse.urlencode({
+                "login": PORTAL_USER,
+                "password": PORTAL_PASS
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"{PORTAL_BASE}/admin-login",
+                data=login_data,
+                method="POST",
+                headers={"Content-Type": "application/x-www-form-urlencoded",
+                         "Referer": f"{PORTAL_BASE}/admin-login"}
+            )
+            resp = opener.open(req, timeout=12)
+            html = resp.read().decode("utf-8", errors="replace")
+
+            # If redirected to dashboard, fetch it
+            if "admin/dashboard" not in resp.geturl():
+                resp2 = opener.open(f"{PORTAL_BASE}/admin/dashboard", timeout=12)
+                html = resp2.read().decode("utf-8", errors="replace")
+
+            # Parse stats from HTML — dashboard has <h3>{{ stats.X }}</h3>
+            def scrape(pattern, default="—"):
+                m = re.search(pattern, html)
+                return m.group(1).strip() if m else default
+
+            # Bootstrap card pattern: <h3>NUMBER</h3>
+            nums = re.findall(r'<h3[^>]*>(\d+)</h3>', html)
+            stats = {
+                "total_clients":    nums[0] if len(nums) > 0 else "—",
+                "active_policies":  nums[1] if len(nums) > 1 else "—",
+                "pending_payments": nums[2] if len(nums) > 2 else "—",
+                "expiring_soon":    nums[3] if len(nums) > 3 else "—",
+            }
+
+            # Scrape upcoming renewals table
+            renewals = []
+            rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL)
+            for row in rows[:20]:
+                cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
+                if len(cells) >= 3:
+                    clean = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
+                    if any(clean) and clean[0] and clean[0] != "—":
+                        renewals.append(clean[:5])
+
+            return stats, renewals[:8], None
+
+        except Exception as e:
+            return None, [], str(e)
+
+    # Cache for 5 mins using session state
+    import time
+    cache_key = "chi_portal_cache"
+    cache_ts   = "chi_portal_ts"
+    now = time.time()
+
+    if cache_key not in st.session_state or (now - st.session_state.get(cache_ts, 0)) > 300:
+        with st.spinner("Connecting to CHI Portal..."):
+            stats, renewals, err = fetch_portal_stats()
+        st.session_state[cache_key] = (stats, renewals, err)
+        st.session_state[cache_ts]  = now
+    else:
+        stats, renewals, err = st.session_state[cache_key]
+
+    col_refresh, _ = st.columns([1, 4])
+    with col_refresh:
+        if st.button("🔄 Refresh", key="chi_refresh"):
+            del st.session_state[cache_key]
+            st.rerun()
+
+    # ── Display stats ─────────────────────────────────────────────────────────
+    if err:
+        st.warning(f"Could not reach portal: {err}. Use the buttons above to open it directly.")
+    elif stats:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("👥 Clients",          stats["total_clients"])
+        m2.metric("📋 Active Policies",  stats["active_policies"])
+        m3.metric("⏳ Pending Payments", stats["pending_payments"])
+        m4.metric("⚠️ Expiring Soon",    stats["expiring_soon"])
+
+    st.divider()
+
+    # ── Quick links grid ──────────────────────────────────────────────────────
+    st.markdown("**Quick Actions**")
+    qa1, qa2, qa3 = st.columns(3)
+    with qa1:
+        st.markdown(f'''<div style="background:white;border:1px solid #E0E5FF;border-radius:10px;padding:14px">
+            <strong>📤 Send Renewals</strong>
+            <p style="font-size:12px;color:#6B7280;margin:6px 0 10px">Queue and send renewal emails via Brevo.</p>
+            <a href="{PORTAL_BASE}/admin/renewals" target="_blank"
+               style="font-size:12px;color:#2563EB;font-weight:600">Open Renewals →</a>
+        </div>''', unsafe_allow_html=True)
+    with qa2:
+        st.markdown(f'''<div style="background:white;border:1px solid #E0E5FF;border-radius:10px;padding:14px">
+            <strong>📥 Upload CSV</strong>
+            <p style="font-size:12px;color:#6B7280;margin:6px 0 10px">Import new policies from 3P, CA or BU CSV files.</p>
+            <a href="{PORTAL_BASE}/admin/csv-upload" target="_blank"
+               style="font-size:12px;color:#2563EB;font-weight:600">Upload CSV →</a>
+        </div>''', unsafe_allow_html=True)
+    with qa3:
+        st.markdown(f'''<div style="background:white;border:1px solid #E0E5FF;border-radius:10px;padding:14px">
+            <strong>✉️ Email Queue</strong>
+            <p style="font-size:12px;color:#6B7280;margin:6px 0 10px">Review, send or clear queued renewal emails.</p>
+            <a href="{PORTAL_BASE}/admin/email-queue" target="_blank"
+               style="font-size:12px;color:#2563EB;font-weight:600">Open Queue →</a>
+        </div>''', unsafe_allow_html=True)
+
+
 def render_placeholder(title, icon):
     st.markdown(f"## {icon} {title}")
     st.info(f"This module is loading. Use the HAL Assistant tab to access {title} functionality right now.")
@@ -1760,6 +1918,7 @@ elif mode == "business":
     elif module == "apps":      render_apps()
     elif module == "pets":      render_pets()
     elif module == "kira":      render_kira_module()
+    elif module == "chi_portal": render_chi_portal()
     else: render_business_home()
 
 elif mode == "private" and st.session_state.private_unlocked:
