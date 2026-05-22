@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Hi I am HAL the Heuristically Programmed Algorithmic Assistant | Ashlar Insurance
+Hi I am Hal the Heuristically Programmed Algorithmic Layer  | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -291,6 +291,7 @@ with st.sidebar:
             ("🤝", "clients", "Clients"),
             ("🏗️", "apps", "App Builder"),
             ("🐾", "pets", "PetsHealth"),
+            ("🩺", "kira", "Kira AI Nurse"),
         ]
         for icon, key, label in modules_business:
             active = st.session_state.active_module == key
@@ -757,7 +758,7 @@ def render_comms():
         placeholder="e.g. Claim denied for EUR 12,999.97. Client member since 1996. Annual premium GBP 66,219...")
 
     # Recipient email — only shown for email doc types
-    is_email_doc = "email" in doc_type.lower() or "outreach" in doc_type.lower()
+    is_email_doc = True  # all document types in Comms can be sent by email
     recipient_email = ""
     email_subject   = ""
     if is_email_doc:
@@ -1629,6 +1630,58 @@ def render_placeholder(title, icon):
     st.info(f"This module is loading. Use the HAL Assistant tab to access {title} functionality right now.")
 
 
+def render_kira_module():
+    kira_url     = st.secrets.get("KIRA_URL",     "https://kiraainurse.streamlit.app")
+    facescan_url = st.secrets.get("FACESCAN_URL", "https://kiraainurse.netlify.app")
+
+    st.markdown("## 🩺 Kira · AI Nurse")
+    st.caption("Symptom triage · Vitals analysis · Clinical report · Face scan")
+
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#2D3FE7,#7B2FE0);border-radius:18px;
+                padding:36px 40px;text-align:center;margin-bottom:24px;color:white">
+        <div style="font-size:56px;margin-bottom:12px">🩺</div>
+        <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;margin-bottom:8px">Kira AI Nurse</div>
+        <div style="font-size:15px;opacity:0.8;margin-bottom:28px">
+            Full symptom triage · Vitals analysis · Clinical report · PubMed evidence
+        </div>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+            <a href="{kira_url}" target="_blank"
+               style="background:white;color:#2D3FE7;padding:14px 32px;border-radius:10px;
+                      font-weight:800;font-size:15px;text-decoration:none">
+                Open Kira →
+            </a>
+            <a href="{facescan_url}" target="_blank"
+               style="background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.4);
+                      color:white;padding:14px 32px;border-radius:10px;
+                      font-weight:700;font-size:15px;text-decoration:none">
+                📷 Face Scan
+            </a>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("""<div style="background:white;border:1px solid #E0E5FF;border-radius:12px;padding:18px">
+            <div style="font-size:28px;margin-bottom:8px">💬</div>
+            <strong>AI Triage Chat</strong>
+            <p style="font-size:13px;color:#6B7280;margin-top:6px">Kira asks targeted questions and builds a structured differential diagnosis.</p>
+        </div>""", unsafe_allow_html=True)
+    with c2:
+        st.markdown("""<div style="background:white;border:1px solid #E0E5FF;border-radius:12px;padding:18px">
+            <div style="font-size:28px;margin-bottom:8px">📊</div>
+            <strong>Vitals Analysis</strong>
+            <p style="font-size:13px;color:#6B7280;margin-top:6px">HR, BP, SpO2, temp, HRV — colour-coded and interpreted by AI instantly.</p>
+        </div>""", unsafe_allow_html=True)
+    with c3:
+        st.markdown("""<div style="background:white;border:1px solid #E0E5FF;border-radius:12px;padding:18px">
+            <div style="font-size:28px;margin-bottom:8px">📄</div>
+            <strong>Clinical Report</strong>
+            <p style="font-size:13px;color:#6B7280;margin-top:6px">Full PDF/HTML report with diagnosis, treatment plan, PubMed refs and WhatsApp share.</p>
+        </div>""", unsafe_allow_html=True)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ROUTER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1649,6 +1702,7 @@ elif mode == "business":
     elif module == "clients":   render_clients()
     elif module == "apps":      render_apps()
     elif module == "pets":      render_pets()
+    elif module == "kira":      render_kira_module()
     else: render_business_home()
 
 elif mode == "private" and st.session_state.private_unlocked:
