@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Hi I am Hal the Heuristically Programmed Algorithmic Layer  | Ashlar Insurance
+Pantelis Kourbelas | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -600,7 +600,7 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                         for m in st.session_state.chat_history
                     ]
                     response = client.messages.create(
-                        model="claude-sonnet-4-20250514",
+                        model="claude-sonnet-4-6",
                         max_tokens=2000,
                         system=system,
                         messages=messages
@@ -790,8 +790,8 @@ Produce the full document, ready to send. Include subject line if it's an email.
                 try:
                     ac = anthropic.Anthropic(api_key=get_api_key())
                     r = ac.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=1500,
+                        model="claude-sonnet-4-6",
+                        max_tokens=3000,
                         messages=[{"role": "user", "content": prompt}]
                     )
                     generated = r.content[0].text
@@ -890,7 +890,7 @@ Be concrete and actionable."""
                 try:
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
+                        model="claude-sonnet-4-6",
                         max_tokens=2000,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -941,7 +941,7 @@ Rules:
                 try:
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
+                        model="claude-sonnet-4-6",
                         max_tokens=1200,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -1008,7 +1008,7 @@ def render_finance():
                 with st.spinner("Thinking..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
+                        model="claude-sonnet-4-6",
                         max_tokens=1000,
                         system="You are a personal financial adviser for Pantelis Kourbelas, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
                         messages=[{"role": "user", "content": fin_query}]
@@ -1074,7 +1074,7 @@ Limitations: {notes or 'none'}
 Provide a full weekly plan with exercises, sets, reps, and rest periods. Include warm-up and cool-down. Make it progressive over 4 weeks."""
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
+                        model="claude-sonnet-4-6",
                         max_tokens=1500,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -1088,7 +1088,7 @@ Provide a full weekly plan with exercises, sets, reps, and rest periods. Include
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
+                        model="claude-sonnet-4-6",
                         max_tokens=800,
                         system="You are a personal health coach and wellness adviser. Provide evidence-based guidance on fitness, nutrition, and general health. Always recommend professional medical consultation for medical conditions.",
                         messages=[{"role": "user", "content": health_q}]
@@ -1125,13 +1125,13 @@ Requirements:
 - Include all imports
 - For Streamlit: include st.set_page_config, proper layout
 - For PDFs: use ReportLab with Greek font support (NotoSans fallback)
-- For APIs: use Anthropic claude-sonnet-4-20250514, read key from st.secrets
+- For APIs: use Anthropic claude-sonnet-4-6, read key from st.secrets
 - Include requirements.txt content at the end as a comment block
 
 Output only the code."""
                 client = anthropic.Anthropic(api_key=get_api_key())
                 r = client.messages.create(
-                    model="claude-sonnet-4-20250514",
+                    model="claude-sonnet-4-6",
                     max_tokens=3000,
                     messages=[{"role": "user", "content": prompt}]
                 )
@@ -1154,7 +1154,7 @@ def render_pets():
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
+                        model="claude-sonnet-4-6",
                         max_tokens=600,
                         system="You write marketing content for petshealth.gr, a pet insurance broker positioning itself as the trustworthy, human-centred alternative in Greece. Tone: confident, warm, independent, slightly critical of the industry.",
                         messages=[{"role": "user", "content": f"Write a {platform} about: {topic}"}]
@@ -1169,7 +1169,7 @@ def render_pets():
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
+                        model="claude-sonnet-4-6",
                         max_tokens=800,
                         system="You are a pet insurance specialist for petshealth.gr, Greece. You know the Greek pet insurance market well and currently recommend Safe Pet System as the most reliable option while seeking trustworthy international partners.",
                         messages=[{"role": "user", "content": q}]
