@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Pantelis Kourbelas | Ashlar Insurance
+Hi I am HAL — Heuristically Programmed Algorithmic Assistant | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -1686,7 +1686,7 @@ def render_clients():
 
 
 def render_chi_portal():
-    import urllib.request, urllib.parse, urllib.error, re, http.cookiejar
+    import re, time
 
     PORTAL_BASE = st.secrets.get("CHI_PORTAL_URL", "https://chi-insurance-portal-production.up.railway.app")
     PORTAL_USER = st.secrets.get("CHI_PORTAL_USER", "admin")
@@ -1727,58 +1727,33 @@ def render_chi_portal():
 
     # ── Live stats fetch ──────────────────────────────────────────────────────
     def fetch_portal_stats():
-        """Login to portal and scrape admin dashboard stats."""
+        """Call the HAL JSON stats endpoint — no session needed, key-authenticated."""
         try:
-            jar = http.cookiejar.CookieJar()
-            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-            opener.addheaders = [("User-Agent", "HAL-Dashboard/1.0")]
-
-            # POST login
-            login_data = urllib.parse.urlencode({
-                "login": PORTAL_USER,
-                "password": PORTAL_PASS
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                f"{PORTAL_BASE}/admin-login",
-                data=login_data,
-                method="POST",
-                headers={"Content-Type": "application/x-www-form-urlencoded",
-                         "Referer": f"{PORTAL_BASE}/admin-login"}
+            import requests as rq
+            key = st.secrets.get("CHI_PORTAL_STATS_KEY", "")
+            if not key:
+                return None, [], "Add CHI_PORTAL_STATS_KEY to Streamlit secrets."
+            resp = rq.get(
+                f"{PORTAL_BASE}/api/hal/stats",
+                params={"key": key},
+                timeout=15,
             )
-            resp = opener.open(req, timeout=12)
-            html = resp.read().decode("utf-8", errors="replace")
-
-            # If redirected to dashboard, fetch it
-            if "admin/dashboard" not in resp.geturl():
-                resp2 = opener.open(f"{PORTAL_BASE}/admin/dashboard", timeout=12)
-                html = resp2.read().decode("utf-8", errors="replace")
-
-            # Parse stats from HTML — dashboard has <h3>{{ stats.X }}</h3>
-            def scrape(pattern, default="—"):
-                m = re.search(pattern, html)
-                return m.group(1).strip() if m else default
-
-            # Bootstrap card pattern: <h3>NUMBER</h3>
-            nums = re.findall(r'<h3[^>]*>(\d+)</h3>', html)
+            if resp.status_code == 401:
+                return None, [], "Stats key invalid — check CHI_PORTAL_STATS_KEY in secrets."
+            if resp.status_code != 200:
+                return None, [], f"Portal returned HTTP {resp.status_code}"
+            data = resp.json()
+            raw = data.get("stats", {})
             stats = {
-                "total_clients":    nums[0] if len(nums) > 0 else "—",
-                "active_policies":  nums[1] if len(nums) > 1 else "—",
-                "pending_payments": nums[2] if len(nums) > 2 else "—",
-                "expiring_soon":    nums[3] if len(nums) > 3 else "—",
+                "total_clients":    str(raw.get("total_clients",    "—")),
+                "active_policies":  str(raw.get("active_policies",  "—")),
+                "pending_payments": str(raw.get("pending_payments", "—")),
+                "expiring_soon":    str(raw.get("expiring_30_days", "—")),
+                "expiring_7_days":  str(raw.get("expiring_7_days",  "—")),
+                "overdue":          str(raw.get("overdue_payments",  "—")),
             }
-
-            # Scrape upcoming renewals table
-            renewals = []
-            rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL)
-            for row in rows[:20]:
-                cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
-                if len(cells) >= 3:
-                    clean = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
-                    if any(clean) and clean[0] and clean[0] != "—":
-                        renewals.append(clean[:5])
-
-            return stats, renewals[:8], None
-
+            urgent = data.get("urgent_renewals", [])
+            return stats, urgent, None
         except Exception as e:
             return None, [], str(e)
 
@@ -1806,11 +1781,27 @@ def render_chi_portal():
     if err:
         st.warning(f"Could not reach portal: {err}. Use the buttons above to open it directly.")
     elif stats:
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("👥 Clients",          stats["total_clients"])
-        m2.metric("📋 Active Policies",  stats["active_policies"])
-        m3.metric("⏳ Pending Payments", stats["pending_payments"])
-        m4.metric("⚠️ Expiring Soon",    stats["expiring_soon"])
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("👥 Clients",           stats["total_clients"])
+        m2.metric("📋 Active Policies",   stats["active_policies"])
+        m3.metric("⏳ Pending",           stats["pending_payments"])
+        m4.metric("🔴 Overdue",           stats["overdue"])
+        m5.metric("⚠️ Expiring 30d",      stats["expiring_soon"])
+        m6.metric("🚨 Expiring 7d",       stats["expiring_7_days"])
+
+        # Urgent renewals table
+        if renewals:
+            st.markdown("**🚨 Urgent Renewals — Next 7 Days**")
+            hdr = st.columns([3,2,2,2,2])
+            for col, lbl in zip(hdr, ["Client","Type","Provider","Expires","Premium"]):
+                col.markdown(f"**{lbl}**")
+            for r in renewals:
+                row = st.columns([3,2,2,2,2])
+                row[0].write(r.get("client","—"))
+                row[1].write(r.get("policy_type","—"))
+                row[2].write(r.get("provider","—"))
+                row[3].write(r.get("expires","—"))
+                row[4].write(f"€{r.get('premium',0):,.2f}")
 
     st.divider()
 
