@@ -291,6 +291,8 @@ with st.sidebar:
             ("🤝", "clients", "Clients"),
             ("🏗️", "apps", "App Builder"),
             ("🐾", "pets", "PetsHealth"),
+            ("🌐", "chi_portal", "Client Portals"),
+            ("🩺", "kira_pet", "Kira Pet"),
         ]
         for icon, key, label in modules_business:
             active = st.session_state.active_module == key
