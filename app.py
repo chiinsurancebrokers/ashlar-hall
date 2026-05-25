@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Hi I am HAL — Heuristically Programmed Algorithmic Assistant | Ashlar Insurance
+Pantelis Kourbelas | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -291,8 +291,6 @@ with st.sidebar:
             ("🤝", "clients", "Clients"),
             ("🏗️", "apps", "App Builder"),
             ("🐾", "pets", "PetsHealth"),
-            ("🩺", "kira", "Kira AI Nurse"),
-            ("🏛️", "chi_portal", "CHI Portal"),
         ]
         for icon, key, label in modules_business:
             active = st.session_state.active_module == key
@@ -372,7 +370,7 @@ def render_pin_screen():
 
 def render_business_home():
     st.markdown("## 🏛 Ashlar Insurance — HAL Dashboard")
-    st.caption("HAL · Your AI business operating system")
+    st.caption("Pantelis Kourbelas · Your AI business operating system")
 
     # KPI row
     col1, col2, col3, col4 = st.columns(4)
@@ -490,10 +488,7 @@ def render_hal_chat():
     mode_label = "Private · Lodge & Personal" if is_private else "Business · Ashlar Insurance"
     st.markdown(f"## 💬 HAL Assistant — {mode_label}")
 
-    kira_url       = st.secrets.get("KIRA_URL",       "https://kiraainurse.streamlit.app")
-    facescan_url   = st.secrets.get("FACESCAN_URL",   "https://kiraainurse.netlify.app")
-
-    system_prompt_business = f"""You are HAL — the AI operating system for Pantelis Kourbelas, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
+    system_prompt_business = """You are HAL — the AI operating system for Pantelis Kourbelas, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
 
 You specialise in international health insurance brokerage. Key knowledge:
 - Carriers: Groupama, Generali, Ethniki, Morgan Price, NOW Health, Bupa Global, Safe Pet System
@@ -502,14 +497,6 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Bupa Global claim expertise: formal complaint procedure, FSPO (Dublin), 7-day escalation protocol.
 - Tech stack: Python, Streamlit, Netlify, Claude API, ReportLab, python-pptx, Firebase, Google Sheets.
 - Brand: Ashlar Insurance (ashlar-assurance.com). Pet brand: petshealth.gr.
-
-INTEGRATED TOOLS — you know these apps and their URLs:
-- Kira AI Nurse (health assessments, symptom triage, vitals analysis): {kira_url}
-- Kira Face Scan (camera-based vitals via rPPG): {facescan_url}
-- HAL Dashboard modules: Quote Engine, Communications, Clients, Commissions, Market Intel, App Builder, PetsHealth, Health & Gym, Kira AI Nurse, CHI Portal (all accessible from the left sidebar).
-- CHI Insurance Portal (client policies, payments, renewals, email queue): https://chi-insurance-portal-production.up.railway.app/admin/dashboard
-
-When the user asks to open, launch, or navigate to Kira or the face scan, respond with the direct URL as a markdown link and invite them to click it. Never say you cannot access external systems — you know the URLs and share them directly.
 
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send."""
 
@@ -557,7 +544,6 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                 "Analyse niche markets for expanding into international health insurance",
                 "Generate a quote comparison PPT outline",
                 "Draft a cold outreach email to a corporate HR manager",
-                "Open Kira AI Nurse",
             ]
         cols = st.columns(2)
         for i, q in enumerate(quick):
@@ -571,24 +557,7 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
 
-        # ── Intent intercept: navigation commands ─────────────────────────────
-        _cmd = user_input.lower().strip()
-        _kira_triggers     = {"kira", "kiraainurse", "nurse", "νοσηλευτής", "νοσηλευτρια"}
-        _scan_triggers     = {"face scan", "facescan", "scan", "σάρωση"}
-        _is_open           = any(w in _cmd for w in ("open", "launch", "go to", "άνοιξε", "ανοιξε", "πήγαινε"))
-        _wants_kira        = any(t in _cmd for t in _kira_triggers)
-        _wants_scan        = any(t in _cmd for t in _scan_triggers)
-
-        if _is_open and _wants_scan:
-            reply = f"📷 **Kira Face Scan** — ανοίγει στο Netlify:\n\n👉 [{facescan_url}]({facescan_url})\n\nΜετά τη σάρωση τα αποτελέσματα σου επιστρέφουν αυτόματα στην Kira."
-            st.session_state.chat_history.append({"role": "assistant", "content": reply})
-            st.rerun()
-        elif _is_open and _wants_kira:
-            reply = f"🩺 **Kira AI Nurse** — ανοίγει εδώ:\n\n👉 [{kira_url}]({kira_url})\n\nΜπορείς επίσης να βρεις το κουμπί **Open Kira →** μέσα στο Health & Gym module."
-            st.session_state.chat_history.append({"role": "assistant", "content": reply})
-            st.rerun()
-        # ── Normal Claude call ────────────────────────────────────────────────
-        elif not api_key:
+        if not api_key:
             st.session_state.chat_history.append({
                 "role": "assistant",
                 "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."
@@ -602,7 +571,7 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                         for m in st.session_state.chat_history
                     ]
                     response = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=2000,
                         system=system,
                         messages=messages
@@ -670,128 +639,9 @@ def render_documents():
         st.info("Form filler ready. Point this to your document_filler app.py for full processing.")
 
 
-def _get_gmail_creds():
-    """Return (sender_address, app_password) from secrets, or ('','')."""
-    sender   = st.secrets.get("GMAIL_SENDER", "") or st.secrets.get("gmail_sender", "")
-    password = (
-        st.secrets.get("GMAIL_APP_PASSWORD", "") or
-        st.secrets.get("gmail_app_password", "") or
-        st.secrets.get("GMAIL_PASSWORD", "") or
-        st.secrets.get("gmail_password", "")
-    )
-    return sender, password
-
-
-def _markdown_to_html_email(text, sender_name="Ashlar Insurance"):
-    import re, html as _h
-    lines = text.splitlines()
-    parts = []
-    i = 0
-    while i < len(lines):
-        s = lines[i].strip()
-        if re.match(r"^-{3,}$", s) or s in ("***","___"):
-            i += 1; continue
-        if s.startswith("## "):
-            t = re.sub(r"\*\*(.*?)\*\*", r"\1", _h.escape(s[3:].strip("*")))
-            parts.append(f'<h2 style="font-size:15px;font-weight:700;color:#2D3FE7;border-bottom:2px solid #E0E5FF;padding-bottom:6px;margin:22px 0 10px">{t}</h2>')
-            i += 1; continue
-        if s.startswith("### "):
-            t = re.sub(r"\*\*(.*?)\*\*", r"\1", _h.escape(s[4:].strip("*")))
-            parts.append(f'<h3 style="font-size:13px;font-weight:700;color:#374151;margin:16px 0 6px">{t}</h3>')
-            i += 1; continue
-        if s.startswith("> "):
-            t = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", _h.escape(s[2:]))
-            parts.append(f'<div style="background:#FFFBEB;border-left:4px solid #F59E0B;padding:10px 14px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13px;color:#92400E">{t}</div>')
-            i += 1; continue
-        if s.startswith("|") and i+1 < len(lines) and lines[i+1].strip().startswith("|---"):
-            hcells = [c.strip() for c in s.strip("|").split("|")]
-            thead = "".join(f'<th style="padding:8px 12px;text-align:left;background:#2D3FE7;color:white;font-size:12px">{_h.escape(c)}</th>' for c in hcells)
-            i += 2; tbody = ""
-            ri = 0
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                rcells = [c.strip() for c in lines[i].strip("|").split("|")]
-                bg = "#F8FAFF" if ri%2==0 else "white"
-                tds = "".join(f'<td style="padding:7px 12px;border-bottom:1px solid #E0E5FF;font-size:12px">{_h.escape(c)}</td>' for c in rcells)
-                tbody += f'<tr style="background:{bg}">{tds}</tr>'
-                i += 1; ri += 1
-            parts.append(f'<table style="width:100%;border-collapse:collapse;margin:10px 0;border:1px solid #E0E5FF">' + f'<thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>')
-            continue
-        if s and s[0] in "-*•":
-            bullets = []
-            while i < len(lines) and lines[i].strip() and lines[i].strip()[0] in "-*•":
-                bt = lines[i].strip()[2:]
-                bt = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", _h.escape(bt))
-                bullets.append(f'<li style="margin:4px 0;line-height:1.6">{bt}</li>')
-                i += 1
-            parts.append(f'<ul style="margin:8px 0 8px 20px;font-size:13px">{"".join(bullets)}</ul>')
-            continue
-        if not s:
-            parts.append('<div style="height:6px"></div>')
-            i += 1; continue
-        t = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", _h.escape(s))
-        t = re.sub(r"\*(.*?)\*", r"<em>\1</em>", t)
-        parts.append(f'<p style="margin:5px 0;font-size:13px;line-height:1.7;color:#374151">{t}</p>')
-        i += 1
-    body_html = "\n".join(parts)
-    sn = _h.escape(sender_name)
-    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:0;background:#F0F4FF;font-family:'Segoe UI',Arial,sans-serif">
-<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 16px">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%">
-<tr><td style="background:linear-gradient(135deg,#2D3FE7,#7B2FE0);border-radius:12px 12px 0 0;padding:24px 32px;color:white">
-<div style="font-size:22px;font-weight:800">Ashlar Insurance</div>
-<div style="font-size:12px;opacity:0.75;margin-top:4px;letter-spacing:1px;text-transform:uppercase">{sn}</div>
-</td></tr>
-<tr><td style="background:white;padding:32px;border-left:1px solid #E0E5FF;border-right:1px solid #E0E5FF">{body_html}</td></tr>
-<tr><td style="background:#F8FAFF;border:1px solid #E0E5FF;border-radius:0 0 12px 12px;padding:16px 32px;font-size:11px;color:#94A3B8;text-align:center">
-Ashlar Insurance · Athens, Greece · ashlar-assurance.com<br>
-<span style="color:#CBD5E1">Generated by HAL · Ashlar AI System</span>
-</td></tr>
-</table></td></tr></table></body></html>"""
-
-
-def send_email_gmail(to_address, subject, body):
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    sender, password = _get_gmail_creds()
-    if not sender or not password:
-        return False, "Gmail credentials missing. Add GMAIL_SENDER and GMAIL_APP_PASSWORD to secrets."
-    if not to_address or "@" not in to_address:
-        return False, "Please enter a valid recipient email address."
-    html_body = _markdown_to_html_email(body)
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = f"Ashlar Insurance <{sender}>"
-    msg["To"]      = to_address
-    msg.attach(MIMEText(body,      "plain", "utf-8"))
-    msg.attach(MIMEText(html_body, "html",  "utf-8"))
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as server:
-            server.login(sender, password)
-            server.sendmail(sender, to_address, msg.as_string())
-        return True, f"Email sent from {sender} to {to_address}"
-    except smtplib.SMTPAuthenticationError:
-        return False, "Gmail authentication failed. Use an App Password, not your normal password."
-    except Exception as e:
-        return False, f"SMTP error: {e}"
-
-
-
 def render_comms():
     st.markdown("## ✉️ Communications Centre")
     st.caption("Emails · Appeal letters · Renewal notices · Quotes · Circulars")
-
-    # ── Gmail status indicator ────────────────────────────────────────────────
-    sender, pwd = _get_gmail_creds()
-    if sender and pwd:
-        st.success(f"📧 Gmail connected — sending as **{sender}**", icon="✅")
-    else:
-        st.warning(
-            "⚠️ Gmail not configured. Add `GMAIL_SENDER` and `GMAIL_APP_PASSWORD` "
-            "to your Streamlit secrets to enable actual sending.",
-            icon="⚙️",
-        )
 
     doc_type = st.selectbox("Document type", [
         "Client email (renewal notice)",
@@ -816,22 +666,6 @@ def render_comms():
     context = st.text_area("Key details to include", height=100,
         placeholder="e.g. Claim denied for EUR 12,999.97. Client member since 1996. Annual premium GBP 66,219...")
 
-    # Recipient email — only shown for email doc types
-    is_email_doc = True  # all document types in Comms can be sent by email
-    recipient_email = ""
-    email_subject   = ""
-    if is_email_doc:
-        st.markdown("---")
-        st.markdown("**📤 Send after generating**")
-        rec1, rec2 = st.columns(2)
-        with rec1:
-            recipient_email = st.text_input("Recipient email address", placeholder="client@example.com")
-        with rec2:
-            email_subject = st.text_input("Subject (auto-filled from generated text if blank)", placeholder="Leave blank to auto-detect")
-
-    if "comms_generated_text" not in st.session_state:
-        st.session_state.comms_generated_text = ""
-
     if st.button("✍️ Generate Document", type="primary"):
         if not get_api_key():
             st.error("Add Claude_API_Key to Streamlit secrets first.")
@@ -847,55 +681,18 @@ Key details: {context}
 
 Produce the full document, ready to send. Include subject line if it's an email."""
                 try:
-                    ac = anthropic.Anthropic(api_key=get_api_key())
-                    r = ac.messages.create(
-                        model="claude-sonnet-4-6",
-                        max_tokens=3000,
+                    client = anthropic.Anthropic(api_key=get_api_key())
+                    r = client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=1500,
                         messages=[{"role": "user", "content": prompt}]
                     )
-                    generated = r.content[0].text
-                    st.session_state.comms_generated_text = generated
                     st.markdown("---")
                     st.markdown("### Generated Document")
-                    st.markdown(generated)
-                    st.download_button("📥 Download as text", generated, file_name="document.txt")
+                    st.markdown(r.content[0].text)
+                    st.download_button("📥 Download as text", r.content[0].text, file_name="document.txt")
                 except Exception as e:
                     st.error(f"Error: {e}")
-
-    # ── Send button — shown after text is generated and it is an email doc ──
-    if st.session_state.comms_generated_text and is_email_doc:
-        st.markdown("---")
-        body_text = st.session_state.comms_generated_text
-
-        # Auto-extract subject line from generated text if not provided
-        auto_subject = email_subject
-        if not auto_subject:
-            for line in body_text.splitlines():
-                if line.lower().startswith("subject:"):
-                    auto_subject = line.split(":", 1)[-1].strip()
-                    break
-            if not auto_subject:
-                auto_subject = f"{doc_type} — {client_name or 'Client'}"
-
-        st.info(f"📬 Ready to send  |  **To:** {recipient_email or '(enter address above)'}  |  **Subject:** {auto_subject}")
-
-        col_send, col_clear = st.columns([2, 1])
-        with col_send:
-            if st.button("📤 Send Email via Gmail", type="primary", use_container_width=True):
-                if not recipient_email:
-                    st.error("Enter a recipient email address above before sending.")
-                else:
-                    with st.spinner("Connecting to Gmail..."):
-                        ok, msg = send_email_gmail(recipient_email, auto_subject, body_text)
-                    if ok:
-                        st.success(msg)
-                        st.session_state.comms_generated_text = ""
-                    else:
-                        st.error(msg)
-        with col_clear:
-            if st.button("🗑 Clear", use_container_width=True):
-                st.session_state.comms_generated_text = ""
-                st.rerun()
 
 
 def render_commissions():
@@ -949,7 +746,7 @@ Be concrete and actionable."""
                 try:
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=2000,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -1000,7 +797,7 @@ Rules:
                 try:
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=1200,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -1067,7 +864,7 @@ def render_finance():
                 with st.spinner("Thinking..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=1000,
                         system="You are a personal financial adviser for Pantelis Kourbelas, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
                         messages=[{"role": "user", "content": fin_query}]
@@ -1078,34 +875,6 @@ def render_finance():
 def render_health():
     st.markdown("## 💪 Health & Gym Coach")
     st.caption("Personal trainer · Nutritionist · Health monitor")
-
-    # ── Kira AI Nurse card ────────────────────────────────────────────────────
-    kira_url = st.secrets.get("KIRA_URL", "https://kiraainurse.streamlit.app")
-    facescan_url = st.secrets.get("FACESCAN_URL", "https://kiraainurse.netlify.app")
-    st.markdown(f"""
-    <div style="background:linear-gradient(135deg,#2D3FE7,#7B2FE0);border-radius:16px;
-                padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:20px">
-        <div style="font-size:42px">🩺</div>
-        <div style="flex:1">
-            <div style="color:white;font-size:17px;font-weight:700;margin-bottom:4px">Kira · AI Nurse</div>
-            <div style="color:rgba(255,255,255,0.75);font-size:13px">Full symptom triage · Vitals analysis · Clinical report · PubMed evidence</div>
-        </div>
-        <div style="display:flex;gap:10px;flex-shrink:0">
-            <a href="{facescan_url}" target="_blank"
-               style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
-                      color:white;padding:9px 16px;border-radius:8px;font-size:13px;
-                      font-weight:600;text-decoration:none;white-space:nowrap">
-                📷 Face Scan
-            </a>
-            <a href="{kira_url}" target="_blank"
-               style="background:white;color:#2D3FE7;padding:9px 16px;border-radius:8px;
-                      font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap">
-                Open Kira →
-            </a>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.divider()
 
     tab1, tab2 = st.tabs(["🏋️ Workout Plan", "💬 Health Chat"])
 
@@ -1133,7 +902,7 @@ Limitations: {notes or 'none'}
 Provide a full weekly plan with exercises, sets, reps, and rest periods. Include warm-up and cool-down. Make it progressive over 4 weeks."""
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=1500,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -1147,7 +916,7 @@ Provide a full weekly plan with exercises, sets, reps, and rest periods. Include
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=800,
                         system="You are a personal health coach and wellness adviser. Provide evidence-based guidance on fitness, nutrition, and general health. Always recommend professional medical consultation for medical conditions.",
                         messages=[{"role": "user", "content": health_q}]
@@ -1184,13 +953,13 @@ Requirements:
 - Include all imports
 - For Streamlit: include st.set_page_config, proper layout
 - For PDFs: use ReportLab with Greek font support (NotoSans fallback)
-- For APIs: use Anthropic claude-sonnet-4-6, read key from st.secrets
+- For APIs: use Anthropic claude-sonnet-4-20250514, read key from st.secrets
 - Include requirements.txt content at the end as a comment block
 
 Output only the code."""
                 client = anthropic.Anthropic(api_key=get_api_key())
                 r = client.messages.create(
-                    model="claude-sonnet-4-6",
+                    model="claude-sonnet-4-20250514",
                     max_tokens=3000,
                     messages=[{"role": "user", "content": prompt}]
                 )
@@ -1213,7 +982,7 @@ def render_pets():
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=600,
                         system="You write marketing content for petshealth.gr, a pet insurance broker positioning itself as the trustworthy, human-centred alternative in Greece. Tone: confident, warm, independent, slightly critical of the industry.",
                         messages=[{"role": "user", "content": f"Write a {platform} about: {topic}"}]
@@ -1228,7 +997,7 @@ def render_pets():
                 with st.spinner("..."):
                     client = anthropic.Anthropic(api_key=get_api_key())
                     r = client.messages.create(
-                        model="claude-sonnet-4-6",
+                        model="claude-sonnet-4-20250514",
                         max_tokens=800,
                         system="You are a pet insurance specialist for petshealth.gr, Greece. You know the Greek pet insurance market well and currently recommend Safe Pet System as the most reliable option while seeking trustworthy international partners.",
                         messages=[{"role": "user", "content": q}]
@@ -1240,7 +1009,8 @@ def render_clients():
     st.markdown("## 🤝 Client Tracker")
     st.caption("Active cases · Policy status · Renewal dates · Full case history")
 
-    CLIENTS = [
+    # ── Session-state backed client list — persists across reruns ───────────
+    DEFAULT_CLIENTS = [
         {
             "name": "Konstantina Alexopoulou",
             "nickname": "Tzina",
@@ -1393,6 +1163,9 @@ def render_clients():
             "documents": "Renewal premium schedule · Year-on-year breakdown",
         },
     ]
+    if "hal_clients" not in st.session_state:
+        st.session_state.hal_clients = DEFAULT_CLIENTS
+    CLIENTS = st.session_state.hal_clients
 
     # ── TICKET STORE — Google Sheets backed ──────────────────────────────
     DEFAULT_TICKETS = [
@@ -1514,11 +1287,10 @@ def render_clients():
                     if st.button("🎫 New ticket", key=f"ticket_{c['name']}", use_container_width=True):
                         st.session_state[f"show_ticket_form_{c['name']}"] = True
                 with b4:
-                    # Status cycle: Pending → Open → Resolved → Pending
                     cur = c["status"]
                     if "Escalated" in cur or "Pending" in cur or "In Progress" in cur:
                         if st.button("✅ Mark resolved", key=f"resolve_{c['name']}", use_container_width=True):
-                            for client in CLIENTS:
+                            for client in st.session_state.hal_clients:
                                 if client["name"] == c["name"]:
                                     client["status"] = "🟢 Completed"
                             st.success(f"{c['name']} marked as resolved.")
@@ -1533,7 +1305,7 @@ def render_clients():
                     cd1, cd2 = st.columns(2)
                     with cd1:
                         if st.button("Yes, delete", key=f"yes_del_{c['name']}", type="primary"):
-                            CLIENTS[:] = [x for x in CLIENTS if x["name"] != c["name"]]
+                            st.session_state.hal_clients = [x for x in st.session_state.hal_clients if x["name"] != c["name"]]
                             st.session_state[f"confirm_del_{c['name']}"] = False
                             st.rerun()
                     with cd2:
@@ -1581,19 +1353,24 @@ def render_clients():
                     new_status  = st.selectbox("Status", ["🟡 Pending", "🔴 Escalated", "🔵 In Progress", "🟢 Completed"])
                 new_summary = st.text_area("Case summary / notes")
                 new_action  = st.text_input("Next action")
-                if st.form_submit_button("Add client"):
+                new_contacts = st.text_input("Contacts (doctor, case handler...)")
+                new_docs     = st.text_input("Documents / files")
+                if st.form_submit_button("Add client", type="primary"):
                     if new_name:
-                        CLIENTS.append({
+                        st.session_state.hal_clients.append({
                             "name": new_name, "nickname": new_name.split()[0],
                             "insurer": new_insurer, "policy": new_policy,
                             "claim_ref": "—", "product": new_product,
                             "premium": new_premium, "member_since": new_since,
                             "status": new_status, "summary": new_summary,
                             "next_action": new_action,
-                            "contacts": "—", "documents": "—",
+                            "contacts": new_contacts or "—",
+                            "documents": new_docs or "—",
                         })
-                        st.success(f"{new_name} added.")
+                        st.success(f"✅ {new_name} added to client tracker.")
                         st.rerun()
+                    else:
+                        st.warning("Full name is required.")
 
     # ══════════════════════════════════════════════════════════════════════
     # TAB 2 — TICKETS
@@ -1686,206 +1463,238 @@ def render_clients():
 
 
 def render_chi_portal():
-    import re, time
+    """CHI Client Portal Generator — creates personalised Netlify portals for each client."""
+    st.markdown("## 🌐 CHI Client Portal Generator")
+    st.caption("Generate personalised client portals · Template: Pantelis Kourbelas portal")
 
-    PORTAL_BASE = st.secrets.get("CHI_PORTAL_URL", "https://chi-insurance-portal-production.up.railway.app")
-    PORTAL_USER = st.secrets.get("CHI_PORTAL_USER", "admin")
-    PORTAL_PASS = st.secrets.get("CHI_PORTAL_PASS", "admin2025!")
+    tab_gen, tab_manage = st.tabs(["🏗️ Generate Portal", "📋 Manage Portals"])
 
-    st.markdown("## 🏛️ CHI Insurance Portal")
-    st.caption("Live data from chi-insurance-portal-production.up.railway.app")
+    with tab_gen:
+        st.markdown("### New Client Portal")
+        st.caption("Generates a complete branded HTML portal ready to deploy on Netlify")
 
-    # ── Launch buttons ────────────────────────────────────────────────────────
-    b1, b2, b3, b4, b5 = st.columns(5)
-    with b1:
-        st.markdown(f'''<a href="{PORTAL_BASE}/admin/dashboard" target="_blank"
-            style="display:block;text-align:center;padding:10px 8px;background:linear-gradient(135deg,#1e3a5f,#2563EB);
-            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
-            🏠 Dashboard</a>''', unsafe_allow_html=True)
-    with b2:
-        st.markdown(f'''<a href="{PORTAL_BASE}/admin/clients" target="_blank"
-            style="display:block;text-align:center;padding:10px 8px;background:#0F766E;
-            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
-            👥 Clients</a>''', unsafe_allow_html=True)
-    with b3:
-        st.markdown(f'''<a href="{PORTAL_BASE}/admin/policies" target="_blank"
-            style="display:block;text-align:center;padding:10px 8px;background:#7C3AED;
-            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
-            📋 Policies</a>''', unsafe_allow_html=True)
-    with b4:
-        st.markdown(f'''<a href="{PORTAL_BASE}/admin/renewals" target="_blank"
-            style="display:block;text-align:center;padding:10px 8px;background:#B45309;
-            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
-            🔄 Renewals</a>''', unsafe_allow_html=True)
-    with b5:
-        st.markdown(f'''<a href="{PORTAL_BASE}/admin/email-queue" target="_blank"
-            style="display:block;text-align:center;padding:10px 8px;background:#9D174D;
-            color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">
-            ✉️ Email Queue</a>''', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            p_name      = st.text_input("Client full name", placeholder="Pantelis Kourbelas")
+            p_insurer   = st.text_input("Insurer", placeholder="Bupa Global")
+            p_policy    = st.text_input("Policy number", placeholder="BI-6000-0113-6189")
+            p_product   = st.text_input("Product", placeholder="International Health — Individual")
+            p_premium   = st.text_input("Annual premium", placeholder="GBP 3,500")
+        with col2:
+            p_renewal   = st.date_input("Renewal / payment date")
+            p_phone     = st.text_input("Ashlar contact phone", value="+30 210 0000000")
+            p_email     = st.text_input("Ashlar contact email", value="info@chiinsurancebrokers.com")
+            p_lang      = st.radio("Portal language", ["Bilingual (el/en)", "Greek only", "English only"], horizontal=True)
+            p_subdomain = st.text_input("Netlify subdomain", placeholder="firstname-lastname-ashlar")
 
-    st.divider()
+        p_notes = st.text_area("Payment / policy notes for client",
+            placeholder="e.g. Annual premium due by 25/05/2026. Bank transfer to: IBAN GR... BIC: ...")
 
-    # ── Live stats fetch ──────────────────────────────────────────────────────
-    def fetch_portal_stats():
-        """Call the HAL JSON stats endpoint — no session needed, key-authenticated."""
-        try:
-            import requests as rq
-            key = st.secrets.get("CHI_PORTAL_STATS_KEY", "")
-            if not key:
-                return None, [], "Add CHI_PORTAL_STATS_KEY to Streamlit secrets."
-            resp = rq.get(
-                f"{PORTAL_BASE}/api/hal/stats",
-                params={"key": key},
-                timeout=15,
+        if st.button("⚡ Generate Portal HTML", type="primary"):
+            from datetime import datetime as _dt
+            renewal_str = p_renewal.strftime("%d/%m/%Y") if p_renewal else "—"
+            days_left = (p_renewal - _dt.now().date()).days if p_renewal else 0
+            portal_html = f"""<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ashlar Insurance · {p_name}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',system-ui,sans-serif}}
+body{{background:#F8F6F2;color:#2C1810}}
+.hero{{background:linear-gradient(135deg,#1C1410,#3A2E24);color:#E8DDD0;padding:40px 24px;text-align:center}}
+.hero .logo{{font-size:28px;font-weight:800;color:#C9A96E;letter-spacing:4px}}
+.hero .name{{font-size:22px;margin-top:12px;opacity:.9}}
+.hero .sub{{font-size:13px;opacity:.6;margin-top:4px;letter-spacing:1px}}
+.container{{max-width:680px;margin:0 auto;padding:24px 16px}}
+.card{{background:white;border-radius:12px;padding:20px 24px;margin-bottom:16px;border:1px solid #E8E0D5;box-shadow:0 1px 3px rgba(0,0,0,.04)}}
+.card h3{{font-size:14px;font-weight:700;color:#7A6A5A;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px}}
+.row{{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F0EBE3}}
+.row:last-child{{border-bottom:none}}
+.row .label{{font-size:13px;color:#7A6A5A}}
+.row .value{{font-size:13px;font-weight:600;color:#2C1810}}
+.countdown{{background:linear-gradient(135deg,#C9A96E,#A0784A);color:white;border-radius:12px;padding:20px;text-align:center;margin-bottom:16px}}
+.countdown .days{{font-size:48px;font-weight:800;letter-spacing:-2px}}
+.countdown .label{{font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:2px}}
+.steps{{counter-reset:step}}
+.step{{display:flex;gap:14px;padding:12px 0;border-bottom:1px solid #F0EBE3}}
+.step:last-child{{border-bottom:none}}
+.step-num{{width:28px;height:28px;border-radius:50%;background:#C9A96E;color:white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}}
+.step-text{{font-size:13px;line-height:1.6;color:#5A4A3A}}
+.contact-bar{{background:#1C1410;color:#E8DDD0;border-radius:12px;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}}
+.contact-bar a{{color:#C9A96E;text-decoration:none;font-weight:600}}
+.disclaimer{{font-size:11px;color:#A09080;text-align:center;padding:12px;line-height:1.6}}
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="logo">ASHLAR</div>
+  <div class="name">{p_name}</div>
+  <div class="sub">Client Portal · Insurance Summary</div>
+</div>
+<div class="container">
+
+<div class="countdown">
+  <div class="days" id="days">{days_left}</div>
+  <div class="label">days until renewal · {renewal_str}</div>
+</div>
+
+<div class="card">
+  <h3>Policy Details</h3>
+  <div class="row"><span class="label">Insurer</span><span class="value">{p_insurer}</span></div>
+  <div class="row"><span class="label">Policy Number</span><span class="value">{p_policy}</span></div>
+  <div class="row"><span class="label">Product</span><span class="value">{p_product}</span></div>
+  <div class="row"><span class="label">Annual Premium</span><span class="value">{p_premium}</span></div>
+  <div class="row"><span class="label">Renewal Date</span><span class="value">{renewal_str}</span></div>
+</div>
+
+<div class="card">
+  <h3>Payment Instructions</h3>
+  <div class="steps">
+    {f'<div class="step"><div class="step-num">1</div><div class="step-text">' + p_notes.replace(chr(10),'<br>') + '</div></div>' if p_notes else '<div class="step"><div class="step-num">1</div><div class="step-text">Contact your Ashlar adviser for payment details.</div></div>'}
+  </div>
+</div>
+
+<div class="contact-bar">
+  <div><div style="font-size:11px;opacity:.6;margin-bottom:2px">Your Ashlar Adviser</div>
+  <div style="font-weight:700;color:#C9A96E">Christos Iatropoulos</div></div>
+  <div><a href="tel:{p_phone}">{p_phone}</a></div>
+  <div><a href="mailto:{p_email}">{p_email}</a></div>
+</div>
+
+<div class="disclaimer">
+  This portal is for {p_name} only · Ashlar Insurance · ashlar-assurance.com<br>
+  Generated {_dt.now().strftime("%d/%m/%Y")}
+</div>
+</div>
+<script>
+// Live countdown
+function updateCountdown(){{
+  const renewal=new Date("{p_renewal.isoformat() if p_renewal else '2026-12-31'}");
+  const now=new Date();
+  const diff=Math.ceil((renewal-now)/(1000*60*60*24));
+  document.getElementById("days").textContent=diff>0?diff:"0";
+}}
+updateCountdown();
+setInterval(updateCountdown,60000);
+</script>
+</body>
+</html>"""
+
+            st.success(f"✅ Portal generated for {p_name}")
+            subdomain = p_subdomain or p_name.lower().replace(" ","-").replace("'","")
+            st.caption(f"Deploy at: **{subdomain}.netlify.app**")
+            st.download_button(
+                "📥 Download index.html",
+                data=portal_html.encode(),
+                file_name="index.html",
+                mime="text/html",
+                type="primary",
+                use_container_width=True,
             )
-            if resp.status_code == 401:
-                return None, [], "Stats key invalid — check CHI_PORTAL_STATS_KEY in secrets."
-            if resp.status_code != 200:
-                return None, [], f"Portal returned HTTP {resp.status_code}"
-            data = resp.json()
-            raw = data.get("stats", {})
-            stats = {
-                "total_clients":    str(raw.get("total_clients",    "—")),
-                "active_policies":  str(raw.get("active_policies",  "—")),
-                "pending_payments": str(raw.get("pending_payments", "—")),
-                "expiring_soon":    str(raw.get("expiring_30_days", "—")),
-                "expiring_7_days":  str(raw.get("expiring_7_days",  "—")),
-                "overdue":          str(raw.get("overdue_payments",  "—")),
-            }
-            urgent = data.get("urgent_renewals", [])
-            return stats, urgent, None
-        except Exception as e:
-            return None, [], str(e)
+            st.markdown("**Next steps:**")
+            st.markdown(f"1. Download `index.html`  \n2. Go to [netlify.com/drop](https://netlify.com/drop)  \n3. Drag `index.html` → set site name to `{subdomain}`  \n4. Share URL with {p_name}")
 
-    # Cache for 5 mins using session state
-    import time
-    cache_key = "chi_portal_cache"
-    cache_ts   = "chi_portal_ts"
-    now = time.time()
+    with tab_manage:
+        st.markdown("### Active Client Portals")
+        portals = [
+            {"client":"Pantelis Kourbelas","url":"panteliskourbelas-chiinsurancebrokers.netlify.app","status":"🟢 Live","insurer":"Active"},
+        ]
+        for p in portals:
+            c1,c2,c3,c4 = st.columns([2,3,1,1])
+            c1.markdown(f"**{p['client']}**")
+            c2.markdown(f"[{p['url']}](https://{p['url']})")
+            c3.markdown(p["status"])
+            c4.link_button("Open", f"https://{p['url']}")
+        st.divider()
+        st.caption("Generated portals will appear here. Add new portals using the Generate tab.")
 
-    if cache_key not in st.session_state or (now - st.session_state.get(cache_ts, 0)) > 300:
-        with st.spinner("Connecting to CHI Portal..."):
-            stats, renewals, err = fetch_portal_stats()
-        st.session_state[cache_key] = (stats, renewals, err)
-        st.session_state[cache_ts]  = now
-    else:
-        stats, renewals, err = st.session_state[cache_key]
 
-    col_refresh, _ = st.columns([1, 4])
-    with col_refresh:
-        if st.button("🔄 Refresh", key="chi_refresh"):
-            del st.session_state[cache_key]
-            st.rerun()
+def render_kira_pet_hal():
+    """Kira Pet module embedded in HAL."""
+    st.markdown("## 🐾 Kira Pet — AI Veterinary Nurse")
+    st.caption("petshealth.gr · AI health assistant for pet insurance clients")
 
-    # ── Display stats ─────────────────────────────────────────────────────────
-    if err:
-        st.warning(f"Could not reach portal: {err}. Use the buttons above to open it directly.")
-    elif stats:
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("👥 Clients",           stats["total_clients"])
-        m2.metric("📋 Active Policies",   stats["active_policies"])
-        m3.metric("⏳ Pending",           stats["pending_payments"])
-        m4.metric("🔴 Overdue",           stats["overdue"])
-        m5.metric("⚠️ Expiring 30d",      stats["expiring_soon"])
-        m6.metric("🚨 Expiring 7d",       stats["expiring_7_days"])
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""<div style="background:linear-gradient(135deg,#059669,#0EA5E9);border-radius:14px;padding:24px;color:white;margin-bottom:16px">
+            <div style="font-size:32px;margin-bottom:8px">🐾</div>
+            <div style="font-size:18px;font-weight:700">Kira Pet App</div>
+            <div style="font-size:13px;opacity:.85;margin:8px 0">AI triage · Photo scan · Vet report · petshealth.gr</div>
+        </div>""", unsafe_allow_html=True)
+        st.link_button("🚀 Open Kira Pet", "https://kiraaipet.streamlit.app", use_container_width=True)
 
-        # Urgent renewals table
-        if renewals:
-            st.markdown("**🚨 Urgent Renewals — Next 7 Days**")
-            hdr = st.columns([3,2,2,2,2])
-            for col, lbl in zip(hdr, ["Client","Type","Provider","Expires","Premium"]):
-                col.markdown(f"**{lbl}**")
-            for r in renewals:
-                row = st.columns([3,2,2,2,2])
-                row[0].write(r.get("client","—"))
-                row[1].write(r.get("policy_type","—"))
-                row[2].write(r.get("provider","—"))
-                row[3].write(r.get("expires","—"))
-                row[4].write(f"€{r.get('premium',0):,.2f}")
+    with col2:
+        st.markdown("""<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);border-radius:14px;padding:24px;color:#E8DDD0;margin-bottom:16px">
+            <div style="font-size:32px;margin-bottom:8px">🌐</div>
+            <div style="font-size:18px;font-weight:700;color:#C9A96E">petshealth.gr</div>
+            <div style="font-size:13px;opacity:.85;margin:8px 0">Pet insurance brand · Safe Pet System · Greece</div>
+        </div>""", unsafe_allow_html=True)
+        st.link_button("🌐 Open petshealth.gr", "https://petshealth.gr", use_container_width=True)
 
     st.divider()
 
-    # ── Quick links grid ──────────────────────────────────────────────────────
-    st.markdown("**Quick Actions**")
-    qa1, qa2, qa3 = st.columns(3)
-    with qa1:
-        st.markdown(f'''<div style="background:white;border:1px solid #E0E5FF;border-radius:10px;padding:14px">
-            <strong>📤 Send Renewals</strong>
-            <p style="font-size:12px;color:#6B7280;margin:6px 0 10px">Queue and send renewal emails via Brevo.</p>
-            <a href="{PORTAL_BASE}/admin/renewals" target="_blank"
-               style="font-size:12px;color:#2563EB;font-weight:600">Open Renewals →</a>
-        </div>''', unsafe_allow_html=True)
-    with qa2:
-        st.markdown(f'''<div style="background:white;border:1px solid #E0E5FF;border-radius:10px;padding:14px">
-            <strong>📥 Upload CSV</strong>
-            <p style="font-size:12px;color:#6B7280;margin:6px 0 10px">Import new policies from 3P, CA or BU CSV files.</p>
-            <a href="{PORTAL_BASE}/admin/csv-upload" target="_blank"
-               style="font-size:12px;color:#2563EB;font-weight:600">Upload CSV →</a>
-        </div>''', unsafe_allow_html=True)
-    with qa3:
-        st.markdown(f'''<div style="background:white;border:1px solid #E0E5FF;border-radius:10px;padding:14px">
-            <strong>✉️ Email Queue</strong>
-            <p style="font-size:12px;color:#6B7280;margin:6px 0 10px">Review, send or clear queued renewal emails.</p>
-            <a href="{PORTAL_BASE}/admin/email-queue" target="_blank"
-               style="font-size:12px;color:#2563EB;font-weight:600">Open Queue →</a>
-        </div>''', unsafe_allow_html=True)
+    tab_content, tab_social = st.tabs(["📢 Pet Insurance Content", "📱 Social Media"])
 
+    with tab_content:
+        content_type = st.selectbox("Content type", [
+            "Email to potential client",
+            "LinkedIn post — pet insurance awareness",
+            "FAQ: What does pet insurance cover?",
+            "Comparison: Safe Pet System vs alternatives",
+            "Why insure your pet in Greece?",
+            "Custom content",
+        ])
+        if content_type == "Custom content":
+            custom = st.text_area("Describe what you need", height=80)
+        else:
+            custom = ""
+        lang = st.radio("Language", ["Greek", "English", "Bilingual"], horizontal=True)
+        if st.button("✍️ Generate Content", type="primary"):
+            api_key = st.secrets.get("Claude_API_Key","") or st.secrets.get("ANTHROPIC_API_KEY","")
+            if not api_key:
+                st.error("Add Claude_API_Key to Streamlit secrets.")
+            else:
+                import urllib.request, json as _json, urllib.error
+                prompt = f"""You are a pet insurance content writer for petshealth.gr, a Greek pet insurance brand by Ashlar Insurance.
+Brand voice: professional, warm, trustworthy. Carrier: Safe Pet System.
+Write: {content_type if not custom else custom}
+Language: {lang}
+Make it specific, genuine, and avoid generic AI-sounding text."""
+                body = _json.dumps({"model":"claude-sonnet-4-6","max_tokens":1500,"messages":[{"role":"user","content":prompt}]}).encode()
+                req = urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,
+                    headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
+                with st.spinner("Writing..."):
+                    try:
+                        with urllib.request.urlopen(req,timeout=30) as r:
+                            result = _json.loads(r.read())["content"][0]["text"]
+                        st.markdown(result)
+                        st.download_button("📥 Download", result, file_name="pet_content.txt", mime="text/plain")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+    with tab_social:
+        platform = st.selectbox("Platform", ["LinkedIn", "Instagram", "Facebook", "Email subject line"])
+        angle    = st.text_input("Angle / topic", placeholder="e.g. Emergency vet bills in Greece, why you need pet insurance")
+        if st.button("📱 Generate Social Post", type="primary"):
+            api_key = st.secrets.get("Claude_API_Key","") or st.secrets.get("ANTHROPIC_API_KEY","")
+            if api_key and angle:
+                import urllib.request, json as _json
+                prompt = f"Write a {platform} post for petshealth.gr (Greek pet insurance brand). Topic: {angle}. Include relevant hashtags. Be authentic and engaging. Use Greek language with English hashtags."
+                body = _json.dumps({"model":"claude-sonnet-4-6","max_tokens":600,"messages":[{"role":"user","content":prompt}]}).encode()
+                req = urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,
+                    headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
+                with st.spinner("Writing..."):
+                    try:
+                        with urllib.request.urlopen(req,timeout=30) as r:
+                            st.markdown(_json.loads(r.read())["content"][0]["text"])
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
 def render_placeholder(title, icon):
     st.markdown(f"## {icon} {title}")
     st.info(f"This module is loading. Use the HAL Assistant tab to access {title} functionality right now.")
-
-
-def render_kira_module():
-    kira_url     = st.secrets.get("KIRA_URL",     "https://kiraainurse.streamlit.app")
-    facescan_url = st.secrets.get("FACESCAN_URL", "https://kiraainurse.netlify.app")
-
-    st.markdown("## 🩺 Kira · AI Nurse")
-    st.caption("Symptom triage · Vitals analysis · Clinical report · Face scan")
-
-    st.markdown(f"""
-    <div style="background:linear-gradient(135deg,#2D3FE7,#7B2FE0);border-radius:18px;
-                padding:36px 40px;text-align:center;margin-bottom:24px;color:white">
-        <div style="font-size:56px;margin-bottom:12px">🩺</div>
-        <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;margin-bottom:8px">Kira AI Nurse</div>
-        <div style="font-size:15px;opacity:0.8;margin-bottom:28px">
-            Full symptom triage · Vitals analysis · Clinical report · PubMed evidence
-        </div>
-        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-            <a href="{kira_url}" target="_blank"
-               style="background:white;color:#2D3FE7;padding:14px 32px;border-radius:10px;
-                      font-weight:800;font-size:15px;text-decoration:none">
-                Open Kira →
-            </a>
-            <a href="{facescan_url}" target="_blank"
-               style="background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.4);
-                      color:white;padding:14px 32px;border-radius:10px;
-                      font-weight:700;font-size:15px;text-decoration:none">
-                📷 Face Scan
-            </a>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("""<div style="background:white;border:1px solid #E0E5FF;border-radius:12px;padding:18px">
-            <div style="font-size:28px;margin-bottom:8px">💬</div>
-            <strong>AI Triage Chat</strong>
-            <p style="font-size:13px;color:#6B7280;margin-top:6px">Kira asks targeted questions and builds a structured differential diagnosis.</p>
-        </div>""", unsafe_allow_html=True)
-    with c2:
-        st.markdown("""<div style="background:white;border:1px solid #E0E5FF;border-radius:12px;padding:18px">
-            <div style="font-size:28px;margin-bottom:8px">📊</div>
-            <strong>Vitals Analysis</strong>
-            <p style="font-size:13px;color:#6B7280;margin-top:6px">HR, BP, SpO2, temp, HRV — colour-coded and interpreted by AI instantly.</p>
-        </div>""", unsafe_allow_html=True)
-    with c3:
-        st.markdown("""<div style="background:white;border:1px solid #E0E5FF;border-radius:12px;padding:18px">
-            <div style="font-size:28px;margin-bottom:8px">📄</div>
-            <strong>Clinical Report</strong>
-            <p style="font-size:13px;color:#6B7280;margin-top:6px">Full PDF/HTML report with diagnosis, treatment plan, PubMed refs and WhatsApp share.</p>
-        </div>""", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1908,8 +1717,8 @@ elif mode == "business":
     elif module == "clients":   render_clients()
     elif module == "apps":      render_apps()
     elif module == "pets":      render_pets()
-    elif module == "kira":      render_kira_module()
-    elif module == "chi_portal": render_chi_portal()
+    elif module == "chi_portal":  render_chi_portal()
+    elif module == "kira_pet":    render_kira_pet_hal()
     else: render_business_home()
 
 elif mode == "private" and st.session_state.private_unlocked:
