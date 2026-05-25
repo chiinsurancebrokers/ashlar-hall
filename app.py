@@ -291,8 +291,9 @@ with st.sidebar:
             ("🤝", "clients", "Clients"),
             ("🏗️", "apps", "App Builder"),
             ("🐾", "pets", "PetsHealth"),
+            ("🩺", "kira_nurse", "Kira AI Nurse"),
             ("🌐", "chi_portal", "Client Portals"),
-            ("🩺", "kira_pet", "Kira Pet"),
+            ("🐱", "kira_pet", "Kira Pet"),
         ]
         for icon, key, label in modules_business:
             active = st.session_state.active_module == key
@@ -1464,6 +1465,100 @@ def render_clients():
 
 
 
+def render_kira_nurse():
+    """Kira AI Nurse — embedded in HAL business mode."""
+    st.markdown("## 🩺 Kira · AI Nurse")
+    st.caption("kiraainurse.streamlit.app · AI health assistant for clients & staff")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""<div style="background:linear-gradient(135deg,#2D3FE7,#7B2FE0);border-radius:14px;padding:24px;color:white;margin-bottom:16px">
+            <div style="font-size:32px;margin-bottom:8px">🩺</div>
+            <div style="font-size:18px;font-weight:700">Kira AI Nurse</div>
+            <div style="font-size:13px;opacity:.85;margin:8px 0">Symptom triage · Vitals · Clinical report · PubMed evidence</div>
+        </div>""", unsafe_allow_html=True)
+        st.link_button("🚀 Open Kira", "https://kiraainurse.streamlit.app", use_container_width=True)
+
+    with col2:
+        st.markdown("""<div style="background:linear-gradient(135deg,#0EA5E9,#2D3FE7);border-radius:14px;padding:24px;color:white;margin-bottom:16px">
+            <div style="font-size:32px;margin-bottom:8px">📷</div>
+            <div style="font-size:18px;font-weight:700">Kira Face Scan</div>
+            <div style="font-size:13px;opacity:.85;margin:8px 0">rPPG · Heart rate · Breathing · HRV · 60-second scan</div>
+        </div>""", unsafe_allow_html=True)
+        st.link_button("📷 Open Face Scan", "https://kiraainurse.netlify.app", use_container_width=True)
+
+    st.divider()
+
+    tab_share, tab_explain, tab_about = st.tabs([
+        "📤 Share with Client",
+        "💬 Explain to Client",
+        "ℹ️ About Kira",
+    ])
+
+    with tab_share:
+        st.markdown("### Share Kira with a client")
+        st.caption("Generate a personalised message to send a client the Kira link")
+        c_name = st.text_input("Client name", placeholder="Katia Totikidou")
+        c_lang = st.radio("Message language", ["Greek", "English"], horizontal=True)
+        if st.button("✍️ Generate message", type="primary"):
+            api_key = st.secrets.get("Claude_API_Key","") or st.secrets.get("ANTHROPIC_API_KEY","")
+            if api_key and c_name:
+                import urllib.request, json as _json
+                prompt = (f"Write a short WhatsApp/SMS message in {'Greek' if c_lang=='Greek' else 'English'} "
+                          f"to send to {c_name}, a client of Ashlar Insurance. "
+                          f"The message introduces Kira (https://kiraainurse.streamlit.app), a free AI health assistant "
+                          f"that can assess symptoms, analyse vitals, and generate a clinical report in Greek. "
+                          f"Tone: warm and professional. Keep it under 4 sentences. Include the link.")
+                body = _json.dumps({"model":"claude-sonnet-4-6","max_tokens":300,
+                                    "messages":[{"role":"user","content":prompt}]}).encode()
+                req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body,
+                    headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
+                import urllib.error
+                try:
+                    with urllib.request.urlopen(req, timeout=20) as r:
+                        msg = _json.loads(r.read())["content"][0]["text"]
+                    st.text_area("Message ready to send:", value=msg, height=120)
+                    import urllib.parse
+                    st.markdown(f'<a href="https://wa.me/?text={urllib.parse.quote(msg)}" target="_blank" style="background:#25D366;color:white;padding:8px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">WhatsApp →</a>', unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    with tab_explain:
+        st.markdown("### What does Kira do?")
+        st.markdown("""
+**Kira** is a bilingual (Greek/English) AI health assistant for the Greek market. It:
+
+- **Triage:** Asks targeted questions about symptoms, gives structured assessment
+- **Vitals:** Interprets heart rate, blood pressure, SpO2, temperature, HRV
+- **Face Scan:** Measures HR and breathing via phone camera (rPPG, 60 seconds)
+- **Clinical Report:** Full differential diagnosis with PubMed evidence + GPT-4o second opinion
+- **Medications:** RxNorm drug interaction check
+- **Export:** PDF report + WhatsApp share
+
+**Use cases for Ashlar clients:**
+- Expat clients far from their GP — get a clinical assessment before seeing a doctor abroad
+- Pre-consultation prep — arrive at the doctor with a structured symptom report
+- Understanding a diagnosis — ask Kira what the doctor told them
+- Insurance claims — document symptoms and timeline for a claim
+        """)
+
+    with tab_about:
+        st.markdown("### Technology")
+        st.markdown("""
+| Component | Technology |
+|---|---|
+| AI Engine | Claude Sonnet (Anthropic) + GPT-4o |
+| Face Scan | rPPG (CHROM algorithm, de Haan & Jeanne 2013) |
+| Medical DB | PubMed / NCBI API |
+| Drug Check | RxNorm (NIH) |
+| BP Model | GPR model trained on PPG-BP Database |
+| Deployment | Streamlit Cloud + Netlify |
+| Language | Bilingual Greek/English |
+
+**Source:** github.com/chiinsurancebrokers/kira
+        """)
+
+
 def render_chi_portal():
     """CHI Client Portal Generator — creates personalised Netlify portals for each client."""
     st.markdown("## 🌐 CHI Client Portal Generator")
@@ -1496,6 +1591,11 @@ def render_chi_portal():
             from datetime import datetime as _dt
             renewal_str = p_renewal.strftime("%d/%m/%Y") if p_renewal else "—"
             days_left = (p_renewal - _dt.now().date()).days if p_renewal else 0
+            newline = "\n"
+            notes_html = ('<div class="step"><div class="step-num">1</div><div class="step-text">'
+                         + p_notes.replace(newline, "<br>") + "</div></div>"
+                         if p_notes else
+                         '<div class="step"><div class="step-num">1</div><div class="step-text">Contact your Ashlar adviser for payment details.</div></div>')
             portal_html = f"""<!DOCTYPE html>
 <html lang="el">
 <head>
@@ -1554,7 +1654,7 @@ body{{background:#F8F6F2;color:#2C1810}}
 <div class="card">
   <h3>Payment Instructions</h3>
   <div class="steps">
-    {f'<div class="step"><div class="step-num">1</div><div class="step-text">' + p_notes.replace(chr(10),'<br>') + '</div></div>' if p_notes else '<div class="step"><div class="step-num">1</div><div class="step-text">Contact your Ashlar adviser for payment details.</div></div>'}
+    {notes_html}
   </div>
 </div>
 
@@ -1719,6 +1819,7 @@ elif mode == "business":
     elif module == "clients":   render_clients()
     elif module == "apps":      render_apps()
     elif module == "pets":      render_pets()
+    elif module == "kira_nurse":  render_kira_nurse()
     elif module == "chi_portal":  render_chi_portal()
     elif module == "kira_pet":    render_kira_pet_hal()
     else: render_business_home()
