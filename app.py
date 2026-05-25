@@ -1560,157 +1560,57 @@ def render_kira_nurse():
 
 
 def render_chi_portal():
-    """CHI Client Portal Generator — creates personalised Netlify portals for each client."""
-    st.markdown("## 🌐 CHI Client Portal Generator")
-    st.caption("Generate personalised client portals · Template: Pantelis Kourbelas portal")
+    """CHI Insurance Portal — launcher and quick-access panel."""
+    portal_url = st.secrets.get("CHI_PORTAL_URL",
+                                "https://chi-insurance-portal-production.up.railway.app")
 
-    tab_gen, tab_manage = st.tabs(["🏗️ Generate Portal", "📋 Manage Portals"])
+    st.markdown("## 🌐 CHI Insurance Portal")
+    st.caption(f"{portal_url}")
 
-    with tab_gen:
-        st.markdown("### New Client Portal")
-        st.caption("Generates a complete branded HTML portal ready to deploy on Netlify")
+    # ── Main launch button ────────────────────────────────────────────────────
+    st.markdown(f"""<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);
+        border-radius:16px;padding:28px;text-align:center;margin-bottom:20px">
+        <div style="font-size:40px;margin-bottom:10px">🛡️</div>
+        <div style="font-size:22px;font-weight:800;color:#C9A96E;margin-bottom:6px">CHI Admin Panel</div>
+        <div style="font-size:13px;color:#A89880;margin-bottom:20px">
+            138 Clients · 222 Active Policies · 171 Pending Payments · 30 Expiring
+        </div>
+        <a href="{portal_url}" target="_blank"
+           style="background:#C9A96E;color:#1C1410;padding:12px 32px;border-radius:8px;
+                  font-weight:800;font-size:15px;text-decoration:none;letter-spacing:.5px">
+            Open Portal →
+        </a>
+    </div>""", unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            p_name      = st.text_input("Client full name", placeholder="Pantelis Kourbelas")
-            p_insurer   = st.text_input("Insurer", placeholder="Bupa Global")
-            p_policy    = st.text_input("Policy number", placeholder="BI-6000-0113-6189")
-            p_product   = st.text_input("Product", placeholder="International Health — Individual")
-            p_premium   = st.text_input("Annual premium", placeholder="GBP 3,500")
-        with col2:
-            p_renewal   = st.date_input("Renewal / payment date")
-            p_phone     = st.text_input("Ashlar contact phone", value="+30 210 0000000")
-            p_email     = st.text_input("Ashlar contact email", value="info@chiinsurancebrokers.com")
-            p_lang      = st.radio("Portal language", ["Bilingual (el/en)", "Greek only", "English only"], horizontal=True)
-            p_subdomain = st.text_input("Netlify subdomain", placeholder="firstname-lastname-ashlar")
+    # ── Quick links to sections ───────────────────────────────────────────────
+    st.markdown("### Quick Access")
+    q1, q2, q3, q4 = st.columns(4)
+    with q1:
+        st.link_button("👥 Clients",       f"{portal_url}/clients",  use_container_width=True, type="primary")
+    with q2:
+        st.link_button("📄 Policies",      f"{portal_url}/policies", use_container_width=True, type="primary")
+    with q3:
+        st.link_button("💳 Payments",      f"{portal_url}/payments", use_container_width=True, type="primary")
+    with q4:
+        st.link_button("📧 Send Renewals", f"{portal_url}/renewals", use_container_width=True)
 
-        p_notes = st.text_area("Payment / policy notes for client",
-            placeholder="e.g. Annual premium due by 25/05/2026. Bank transfer to: IBAN GR... BIC: ...")
+    st.divider()
 
-        if st.button("⚡ Generate Portal HTML", type="primary"):
-            from datetime import datetime as _dt
-            renewal_str = p_renewal.strftime("%d/%m/%Y") if p_renewal else "—"
-            days_left = (p_renewal - _dt.now().date()).days if p_renewal else 0
-            newline = "\n"
-            notes_html = ('<div class="step"><div class="step-num">1</div><div class="step-text">'
-                         + p_notes.replace(newline, "<br>") + "</div></div>"
-                         if p_notes else
-                         '<div class="step"><div class="step-num">1</div><div class="step-text">Contact your Ashlar adviser for payment details.</div></div>')
-            portal_html = f"""<!DOCTYPE html>
-<html lang="el">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ashlar Insurance · {p_name}</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',system-ui,sans-serif}}
-body{{background:#F8F6F2;color:#2C1810}}
-.hero{{background:linear-gradient(135deg,#1C1410,#3A2E24);color:#E8DDD0;padding:40px 24px;text-align:center}}
-.hero .logo{{font-size:28px;font-weight:800;color:#C9A96E;letter-spacing:4px}}
-.hero .name{{font-size:22px;margin-top:12px;opacity:.9}}
-.hero .sub{{font-size:13px;opacity:.6;margin-top:4px;letter-spacing:1px}}
-.container{{max-width:680px;margin:0 auto;padding:24px 16px}}
-.card{{background:white;border-radius:12px;padding:20px 24px;margin-bottom:16px;border:1px solid #E8E0D5;box-shadow:0 1px 3px rgba(0,0,0,.04)}}
-.card h3{{font-size:14px;font-weight:700;color:#7A6A5A;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px}}
-.row{{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F0EBE3}}
-.row:last-child{{border-bottom:none}}
-.row .label{{font-size:13px;color:#7A6A5A}}
-.row .value{{font-size:13px;font-weight:600;color:#2C1810}}
-.countdown{{background:linear-gradient(135deg,#C9A96E,#A0784A);color:white;border-radius:12px;padding:20px;text-align:center;margin-bottom:16px}}
-.countdown .days{{font-size:48px;font-weight:800;letter-spacing:-2px}}
-.countdown .label{{font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:2px}}
-.steps{{counter-reset:step}}
-.step{{display:flex;gap:14px;padding:12px 0;border-bottom:1px solid #F0EBE3}}
-.step:last-child{{border-bottom:none}}
-.step-num{{width:28px;height:28px;border-radius:50%;background:#C9A96E;color:white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}}
-.step-text{{font-size:13px;line-height:1.6;color:#5A4A3A}}
-.contact-bar{{background:#1C1410;color:#E8DDD0;border-radius:12px;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}}
-.contact-bar a{{color:#C9A96E;text-decoration:none;font-weight:600}}
-.disclaimer{{font-size:11px;color:#A09080;text-align:center;padding:12px;line-height:1.6}}
-</style>
-</head>
-<body>
-<div class="hero">
-  <div class="logo">ASHLAR</div>
-  <div class="name">{p_name}</div>
-  <div class="sub">Client Portal · Insurance Summary</div>
-</div>
-<div class="container">
+    # ── Admin credentials ─────────────────────────────────────────────────────
+    with st.expander("🔐 Admin credentials"):
+        st.markdown(f"""
+| Field | Value |
+|---|---|
+| URL | [{portal_url}]({portal_url}) |
+| Username | `admin` |
+| Email | `xiatropoulos@gmail.com` |
+| GitHub | [chiinsurancebrokers/chi-insurance-portal](https://github.com/chiinsurancebrokers/chi-insurance-portal) |
+        """)
 
-<div class="countdown">
-  <div class="days" id="days">{days_left}</div>
-  <div class="label">days until renewal · {renewal_str}</div>
-</div>
-
-<div class="card">
-  <h3>Policy Details</h3>
-  <div class="row"><span class="label">Insurer</span><span class="value">{p_insurer}</span></div>
-  <div class="row"><span class="label">Policy Number</span><span class="value">{p_policy}</span></div>
-  <div class="row"><span class="label">Product</span><span class="value">{p_product}</span></div>
-  <div class="row"><span class="label">Annual Premium</span><span class="value">{p_premium}</span></div>
-  <div class="row"><span class="label">Renewal Date</span><span class="value">{renewal_str}</span></div>
-</div>
-
-<div class="card">
-  <h3>Payment Instructions</h3>
-  <div class="steps">
-    {notes_html}
-  </div>
-</div>
-
-<div class="contact-bar">
-  <div><div style="font-size:11px;opacity:.6;margin-bottom:2px">Your Ashlar Adviser</div>
-  <div style="font-weight:700;color:#C9A96E">Christos Iatropoulos</div></div>
-  <div><a href="tel:{p_phone}">{p_phone}</a></div>
-  <div><a href="mailto:{p_email}">{p_email}</a></div>
-</div>
-
-<div class="disclaimer">
-  This portal is for {p_name} only · Ashlar Insurance · ashlar-assurance.com<br>
-  Generated {_dt.now().strftime("%d/%m/%Y")}
-</div>
-</div>
-<script>
-// Live countdown
-function updateCountdown(){{
-  const renewal=new Date("{p_renewal.isoformat() if p_renewal else '2026-12-31'}");
-  const now=new Date();
-  const diff=Math.ceil((renewal-now)/(1000*60*60*24));
-  document.getElementById("days").textContent=diff>0?diff:"0";
-}}
-updateCountdown();
-setInterval(updateCountdown,60000);
-</script>
-</body>
-</html>"""
-
-            st.success(f"✅ Portal generated for {p_name}")
-            subdomain = p_subdomain or p_name.lower().replace(" ","-").replace("'","")
-            st.caption(f"Deploy at: **{subdomain}.netlify.app**")
-            st.download_button(
-                "📥 Download index.html",
-                data=portal_html.encode(),
-                file_name="index.html",
-                mime="text/html",
-                type="primary",
-                use_container_width=True,
-            )
-            st.markdown("**Next steps:**")
-            st.markdown(f"1. Download `index.html`  \n2. Go to [netlify.com/drop](https://netlify.com/drop)  \n3. Drag `index.html` → set site name to `{subdomain}`  \n4. Share URL with {p_name}")
-
-    with tab_manage:
-        st.markdown("### Active Client Portals")
-        portals = [
-            {"client":"Pantelis Kourbelas","url":"panteliskourbelas-chiinsurancebrokers.netlify.app","status":"🟢 Live","insurer":"Active"},
-        ]
-        for p in portals:
-            c1,c2,c3,c4 = st.columns([2,3,1,1])
-            c1.markdown(f"**{p['client']}**")
-            c2.markdown(f"[{p['url']}](https://{p['url']})")
-            c3.markdown(p["status"])
-            c4.link_button("Open", f"https://{p['url']}")
-        st.divider()
-        st.caption("Generated portals will appear here. Add new portals using the Generate tab.")
+    # ── CSV Upload reminder ───────────────────────────────────────────────────
+    st.info("""📊 **Monthly CSV Upload** — upload directly in the portal:
+- **3P Insurance format:** CLIENT NAME · INSURANCE TYPE · INSURANCE COMPANY · LICENSE PLATE · PREMIUM · EXPIRY DATE
+- **Hellas Direct format:** Ονοματεπώνυμο · Αρ. Κυκλοφορίας · Ασφάλιστρο · Λήξη""")
 
 
 def render_kira_pet_hal():
