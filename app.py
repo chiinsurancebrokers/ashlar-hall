@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-CHRIS  | Ashlar Insurance
+Chris | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -9,6 +9,17 @@ import hashlib
 import os
 import json
 from datetime import datetime
+
+# Rate tables (rate_tables.py in same repo)
+try:
+    from rate_tables import (
+        MORGAN_PRICE_2025, APRIL_2025, IMG_EUROPE_2025,
+        RATE_PLANS, CARRIER_BROCHURES,
+        lookup_premium, get_brochure_info, _mp_band, _apr_band
+    )
+    RATES_LOADED = True
+except ImportError:
+    RATES_LOADED = False
 
 # Google Sheets (tickets persistence)
 try:
@@ -502,7 +513,18 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Tech stack: Python, Streamlit, Netlify, Claude API, ReportLab, python-pptx, Firebase, Google Sheets.
 - Brand: Ashlar Insurance (ashlar-assurance.com). Pet brand: petshealth.gr.
 
-Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send."""
+Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send.
+
+LIVE 2025 RATE TABLES (EUR, annual, Area 1 = Europe excl USA):
+Morgan Price Standard: 30y=1,061 | 40y=1,380 | 45y=1,698 | 50y=2,041 | 55y=2,810 | 60y=3,548 | 65y=4,719
+Morgan Price Comprehensive: 30y=2,247 | 40y=2,921 | 45y=3,690 | 50y=4,104 | 55y=5,656 | 60y=7,849 | 65y=10,647
+April International: 30y=1,940 | 40y=2,501 | 45y=2,869 | 50y=3,700 | 55y=4,913 | 60y=6,670 | 65y=10,011
+April Executive: 30y=4,459 | 40y=5,743 | 45y=6,596 | 50y=8,640 | 55y=10,678 | 60y=13,675 | 65y=20,142
+IMG Silver: 30y=1,813 | 40y=2,339 | 45y=2,872 | 50y=3,764 | 55y=4,993 | 60y=6,366 | 65y=8,427
+IMG Gold: 30y=2,320 | 40y=3,004 | 45y=3,694 | 50y=4,854 | 55y=6,450 | 60y=8,233 | 65y=10,914
+IMG Platinum: 30y=2,912 | 40y=3,797 | 45y=4,686 | 50y=6,178 | 55y=8,238 | 60y=10,535 | 65y=13,987
+Area 2 (Worldwide incl USA): approximately 2.2–2.5x Area 1 rates.
+When asked for a quote, use lookup_premium() mentally or use these tables. Always state plan, area, and annual premium in EUR."""
 
     system_prompt_private = """You are HAL — the private AI assistant for Pantelis Kourbelas. In this private mode you have access to lodge and personal context.
 
@@ -726,31 +748,184 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
 
 def render_quotes():
     st.markdown("## 📊 Quote Engine")
-    st.caption("Upload insurance PDFs · Claude extracts & ranks · Export comparison")
+    st.caption("Live 2025 rates · Morgan Price · April · IMG · Instant comparison")
 
-    tab1, tab2 = st.tabs(["📤 Upload & Analyse", "📋 Results"])
+    tab_live, tab_pdf, tab_results = st.tabs([
+        "⚡ Instant Quote", "📤 Upload & Analyse PDF", "📋 Saved Results"
+    ])
 
-    with tab1:
-        insurer_type = st.radio(
-            "Insurer type",
-            ["Greek domestic", "International", "Mixed comparison"],
-            horizontal=True
+    # ══ TAB 1: INSTANT LIVE QUOTE ══════════════════════════════════════════════
+    with tab_live:
+        if not RATES_LOADED:
+            st.warning("rate_tables.py not found in repo. Add it alongside app.py.")
+            return
+
+        st.markdown("### Client Details")
+        qc1, qc2, qc3 = st.columns(3)
+        with qc1:
+            q_name    = st.text_input("Client name", placeholder="Katia Totikidou")
+            q_age     = st.number_input("Age", min_value=0, max_value=80, value=45)
+        with qc2:
+            q_area    = st.radio("Coverage area",
+                                  ["Area 1 — Europe (excl USA)", "Area 2 — Worldwide incl USA"],
+                                  horizontal=False)
+            area_key  = "area1" if "Area 1" in q_area else "area2"
+        with qc3:
+            q_notes   = st.text_area("Client priorities / notes", height=100,
+                placeholder="e.g. Needs outpatient, travels to USA, cancer history...")
+
+        # Member table
+        st.markdown("### Members")
+        if "quote_members" not in st.session_state:
+            st.session_state.quote_members = [{"name": q_name or "Member 1", "age": q_age}]
+        with st.expander("➕ Add family member"):
+            m_name = st.text_input("Name", key="m_name")
+            m_age  = st.number_input("Age", min_value=0, max_value=80, value=35, key="m_age")
+            if st.button("Add member", key="add_member"):
+                st.session_state.quote_members.append({"name": m_name, "age": m_age})
+                st.rerun()
+        for i, m in enumerate(st.session_state.quote_members):
+            mc1, mc2 = st.columns([4,1])
+            mc1.markdown(f"👤 **{m['name']}** — Age {m['age']}")
+            if mc2.button("✕", key=f"del_m_{i}") and len(st.session_state.quote_members) > 1:
+                st.session_state.quote_members.pop(i); st.rerun()
+
+        # Plan selection
+        st.markdown("### Plans to compare")
+        all_plans = [(c, p, n, cov, ded) for c, p, n, cov, ded in RATE_PLANS]
+        selected_plans = st.multiselect(
+            "Select plans",
+            options=[p[2] for p in all_plans],
+            default=["Morgan Price Standard", "Morgan Price Comprehensive",
+                     "April International", "April Executive",
+                     "IMG Silver", "IMG Gold"],
         )
 
-        uploaded = st.file_uploader(
-            "Upload quote PDFs (one per insurer)",
-            type=["pdf"],
-            accept_multiple_files=True
-        )
+        if st.button("⚡ Generate Comparison", type="primary", use_container_width=True):
+            if not st.session_state.quote_members:
+                st.warning("Add at least one member.")
+            else:
+                results = []
+                plan_map = {p[2]: p for p in all_plans}
 
-        client_age = st.number_input("Client age", min_value=0, max_value=100, value=45)
-        client_notes = st.text_area("Client notes / priorities", placeholder="e.g. Prioritises hospitalisation, travels to Germany, has diabetic history...")
+                for plan_name in selected_plans:
+                    if plan_name not in plan_map: continue
+                    carrier, plan_key, display, coverage, ded_note = plan_map[plan_name]
+                    total = 0
+                    member_rates = []
+                    valid = True
+                    for m in st.session_state.quote_members:
+                        prem = lookup_premium(carrier, plan_key, m["age"], area_key)
+                        if prem is None:
+                            valid = False; break
+                        total += prem
+                        member_rates.append((m["name"], m["age"], prem))
+                    if valid:
+                        results.append({
+                            "plan": display, "carrier": carrier,
+                            "total": total, "members": member_rates,
+                            "coverage": coverage, "deductible": ded_note,
+                        })
 
-        if st.button("🚀 Analyse Quotes", type="primary", disabled=not uploaded):
-            st.info(f"Ready to analyse {len(uploaded)} quotes. Connect to your Quote Engine repo or use the HAL Assistant tab to process these.")
+                results.sort(key=lambda x: x["total"])
+                st.session_state["quote_results"] = results
+                st.session_state["quote_client"]  = q_name
+                st.session_state["quote_notes"]   = q_notes
+                st.session_state["quote_area"]    = q_area
+                st.rerun()
 
-    with tab2:
-        st.info("Analysed quotes will appear here. Upload PDFs in the first tab to begin.")
+        # Display results
+        if st.session_state.get("quote_results"):
+            results   = st.session_state["quote_results"]
+            client    = st.session_state.get("quote_client","Client")
+            area_disp = st.session_state.get("quote_area","Area 1")
+            members   = st.session_state.get("quote_members",[])
+
+            st.markdown("---")
+            st.markdown(f"### 📋 Quote Comparison — {client or 'Client'}")
+            st.caption(f"{area_disp} · {len(members)} member(s) · 2025 rates")
+
+            # Summary table
+            cheapest = results[0]["total"]
+            for i, r in enumerate(results):
+                diff     = r["total"] - cheapest
+                badge    = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "  "
+                diff_str = f"+€{diff:,.0f}/yr" if diff > 0 else "✅ Lowest"
+                color    = "#EDFBF0" if i == 0 else "white"
+
+                with st.container():
+                    st.markdown(f"""<div style="background:{color};border:1px solid #E8E0D5;
+                        border-radius:12px;padding:16px 20px;margin-bottom:10px">
+                        <div style="display:flex;justify-content:space-between;align-items:center">
+                            <div><span style="font-size:18px">{badge}</span>
+                            <strong style="font-size:16px;margin-left:8px">{r["plan"]}</strong>
+                            <span style="font-size:12px;color:#6B7280;margin-left:10px">{r["deductible"]}</span></div>
+                            <div style="text-align:right">
+                            <div style="font-size:22px;font-weight:800;color:#1C1410">€{r["total"]:,.0f}/yr</div>
+                            <div style="font-size:12px;color:#6B7280">{diff_str}</div>
+                            </div>
+                        </div>
+                        <div style="margin-top:10px;font-size:12px;color:#6B7280">
+                        {" · ".join(f"{m[0]}: €{m[2]:,.0f}" for m in r["members"])}
+                        </div>
+                    </div>""", unsafe_allow_html=True)
+
+            # Export
+            st.divider()
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                # Text export
+                lines = [f"ASHLAR INSURANCE — Quote Comparison",
+                         f"Client: {client} | {area_disp} | {datetime.now().strftime('%d/%m/%Y')}",
+                         f"Members: {', '.join(f"{m['name']} ({m['age']}y)" for m in members)}",""]
+                for r in results:
+                    lines.append(f"{r['plan']}: EUR {r['total']:,.0f}/year")
+                    for m in r["members"]:
+                        lines.append(f"  {m[0]} (age {m[1]}): EUR {m[2]:,.0f}")
+                    lines.append("")
+                lines.append("Rates: Morgan Price EU 2025 / April LT 2025 / IMG GPMI Apr-2025")
+                quote_text = "\n".join(lines)
+                st.download_button("📥 Download quote", quote_text,
+                    mime="text/plain", use_container_width=True)
+            with ec2:
+                if st.button("💬 Send to HAL for narrative", use_container_width=True):
+                    qs = "\n".join(f"{r['plan']}: EUR {r['total']:,.0f}/yr" for r in results)
+                    notes_txt = ("Notes: " + q_notes) if q_notes else ""
+                    msg = f"Quote comparison for {client or 'client'} age {q_age}, {area_disp}:\n\n{qs}\n\n{notes_txt}\n\nWrite a professional email presenting these options and recommending the best fit."
+                    st.session_state.chat_history.append({"role":"user","content":msg})
+                    st.session_state.active_module = "hal_chat"
+                    st.rerun()
+            if st.button("🔄 New quote", key="reset_quote"):
+                for k in ["quote_results","quote_client","quote_notes","quote_area","quote_members"]:
+                    if k in st.session_state: del st.session_state[k]
+                st.rerun()
+
+    # ══ TAB 2: PDF UPLOAD ══════════════════════════════════════════════════════
+    with tab_pdf:
+        st.caption("Upload insurer quote PDFs · Claude extracts & compares")
+        uploaded = st.file_uploader("Upload quote PDFs", type=["pdf"], accept_multiple_files=True)
+        client_age   = st.number_input("Client age", min_value=0, max_value=100, value=45, key="pdf_age")
+        client_notes = st.text_area("Client priorities", placeholder="e.g. Prioritises outpatient, travels to Germany...", key="pdf_notes")
+        if st.button("🚀 Analyse PDFs", type="primary", disabled=not uploaded):
+            api_key = get_api_key()
+            if api_key and uploaded:
+                with st.spinner(f"Analysing {len(uploaded)} quotes..."):
+                    pdf_names = [f.name for f in uploaded]
+                    prompt = (f"Compare these {len(uploaded)} insurance quotes for a {client_age}-year-old: "
+                              f"{', '.join(pdf_names)}. "
+                              f"Client priorities: {client_notes or 'standard coverage'}. "
+                              f"Extract: insurer, plan name, annual premium, key coverage, deductibles, exclusions. "
+                              f"Rank from best value to most expensive. Use actual rates from the rate tables if recognisable.")
+                    import anthropic
+                    client = anthropic.Anthropic(api_key=api_key)
+                    r = client.messages.create(model="claude-sonnet-4-6", max_tokens=2000,
+                        system=f"You are an expert insurance broker. Rate tables context: Morgan Price Standard age {client_age}y Area1 = EUR {lookup_premium('morgan_price','standard',client_age,'area1'):,} if RATES_LOADED else 'N/A'.",
+                        messages=[{"role":"user","content":prompt}])
+                    st.markdown(r.content[0].text)
+
+    # ══ TAB 3: SAVED ═══════════════════════════════════════════════════════════
+    with tab_results:
+        st.info("Quotes generated in the Instant Quote tab appear here. Use 'Send to HAL' to draft a client email.")
 
 
 def render_documents():
