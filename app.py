@@ -2177,7 +2177,7 @@ POLICY DOCUMENT:
                 "has_pets": a_pets, "has_children": a_kids,
                 "is_expat": a_expat, "travels_frequently": a_expat,
             }
-            prompt = build_analyzer_prompt(client_data, st.session_state.an_policies, a_lang)
+            prompt = _build_analyzer_prompt(client_data, st.session_state.an_policies, a_lang)
 
             with st.spinner("Claude αναλύει το προφίλ..."):
                 body = _j.dumps({
