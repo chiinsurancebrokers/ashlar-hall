@@ -619,33 +619,18 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                 ab64 = _b64v.b64encode(audio_bytes).decode()
 
                 with st.spinner("🎙️ Transcribing with Whisper..."):
-                    # Detect audio format
-                    mime = "audio/webm"
-                    if audio_bytes[:4] == b"fLaC": mime = "audio/flac"
-                    elif audio_bytes[:4] == b"RIFF": mime = "audio/wav"
-                    elif audio_bytes[:3] in (b"ID3", b"\xff\xfb", b"\xff\xf3"): mime = "audio/mpeg"
-                    ext = {"audio/webm":"webm","audio/flac":"flac","audio/wav":"wav","audio/mpeg":"mp3"}.get(mime,"webm")
-
-                    bnd  = "----WB" + str(abs(hash(ab64)))[:8]
-                    nl   = "\r\n"
-                    hdr  = ("--"+bnd+nl+'Content-Disposition: form-data; name="model"'+nl+nl+"whisper-1"+nl
-                            +"--"+bnd+nl+'Content-Disposition: form-data; name="language"'+nl+nl+"el"+nl
-                            +"--"+bnd+nl+f'Content-Disposition: form-data; name="file"; filename="audio.{ext}"'+nl+f"Content-Type: {mime}"+nl+nl)
-                    ftr  = nl+"--"+bnd+"--"+nl
-                    form = hdr.encode() + audio_bytes + ftr.encode()
-                    req  = _urv.Request("https://api.openai.com/v1/audio/transcriptions",
-                               data=form,
-                               headers={"Authorization":f"Bearer {oai_key}",
-                                        "Content-Type":f"multipart/form-data; boundary={bnd}"})
                     try:
-                        with _urv.urlopen(req, timeout=30) as r:
-                            transcript = _jv.loads(r.read()).get("text","").strip()
+                        from openai import OpenAI as _OAI
+                        _oai_client = _OAI(api_key=oai_key)
+                        transcript = _oai_client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=("audio.webm", audio_bytes, "audio/webm"),
+                            language="el",
+                        ).text.strip()
                     except Exception as e:
                         transcript = ""
                         if "401" in str(e):
                             st.error("❌ Invalid OpenAI key — check OPENAI_API_KEY in Streamlit secrets.")
-                        elif "400" in str(e):
-                            st.error(f"❌ Audio format not supported: {e}")
                         else:
                             st.error(f"Whisper: {e}")
 
@@ -1780,10 +1765,12 @@ def render_chi_analyzer():
                     for pdf_file in uploaded_pdfs:
                         with st.spinner(f"Reading {pdf_file.name}..."):
                             try:
-                                from pypdf import PdfReader
-                                reader=PdfReader(pdf_file)
+                                from PyPDF2 import PdfReader
+                                reader = PdfReader(pdf_file)
                                 pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)[:8000]
-                            except Exception as e: st.warning(f"Could not read {pdf_file.name}: {e}"); continue
+                            except Exception as e:
+                                st.warning(f"Could not read {pdf_file.name}: {e}")
+                                continue
                             if not pdf_text.strip(): st.warning(f"{pdf_file.name}: no text found"); continue
                             extract_prompt=f'''Extract insurance policy details. Return ONLY JSON:
 {{"policy_type":"motor/health/life/home/travel/pet/liability/other","insurer":"","policy_number":"","product":"","premium":"","currency":"EUR","expiry_date":"YYYY-MM-DD","coverage_summary":"","key_exclusions":"","deductible":""}}
