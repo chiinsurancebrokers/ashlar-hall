@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-HAL | Ashlar Insurance
+HAL Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -557,92 +557,89 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                     st.rerun()
 
     # Input
-    # ── VOICE INPUT (Web Speech API) ─────────────────────────────────────────
-    st.markdown("""
-<div id="voice-bar" style="display:flex;align-items:center;gap:10px;
-     background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
-     border-radius:10px;padding:10px 14px;margin-bottom:10px">
-  <button id="mic-btn" onclick="toggleVoice()" title="Voice input"
-     style="background:none;border:2px solid #C9A96E;border-radius:50%;
-     width:38px;height:38px;font-size:18px;cursor:pointer;color:#C9A96E;
-     display:flex;align-items:center;justify-content:center;flex-shrink:0">🎙️</button>
-  <div id="voice-status" style="font-size:12px;color:#A89880;flex:1">
-    Click 🎙️ to speak · Works in Chrome/Safari
-  </div>
-  <div id="voice-result" style="font-size:13px;color:#E8DDD0;display:none;
-       background:rgba(201,169,110,.1);border-radius:6px;padding:6px 10px;
-       flex:2;max-width:400px"></div>
-  <button id="voice-send" onclick="sendVoice()" style="display:none;
-     background:#C9A96E;color:#1C1410;border:none;border-radius:6px;
-     padding:6px 14px;font-weight:700;cursor:pointer;font-size:12px">Send →</button>
+    # ── VOICE INPUT ───────────────────────────────────────────────────────────
+    import streamlit.components.v1 as _components
+
+    _components.html("""
+<!DOCTYPE html>
+<html>
+<head><style>
+  body{margin:0;padding:0;font-family:system-ui,sans-serif;background:transparent}
+  #bar{display:flex;align-items:center;gap:10px;background:rgba(28,20,16,.6);
+       border:1px solid rgba(201,169,110,.3);border-radius:10px;padding:10px 14px}
+  #mic{background:none;border:2px solid #C9A96E;border-radius:50%;width:36px;height:36px;
+       font-size:18px;cursor:pointer;color:#C9A96E;flex-shrink:0}
+  #mic.active{background:#C9A96E;color:#1C1410}
+  #status{font-size:12px;color:#A89880;flex:1}
+  #result{display:none;flex:2;background:rgba(201,169,110,.1);border:1px solid rgba(201,169,110,.3);
+          border-radius:6px;padding:6px 10px;font-size:13px;color:#E8DDD0;word-break:break-word}
+  #copy{display:none;background:#C9A96E;color:#1C1410;border:none;border-radius:6px;
+        padding:6px 14px;font-weight:700;cursor:pointer;font-size:12px;flex-shrink:0}
+  #copy:hover{background:#b8935a}
+</style></head>
+<body>
+<div id="bar">
+  <button id="mic" onclick="toggleVoice()">🎙️</button>
+  <div id="status">Click 🎙️ to speak — Chrome / Safari</div>
+  <div id="result"></div>
+  <button id="copy" onclick="copyText()">📋 Copy</button>
 </div>
 <script>
-var recognition;var listening=false;var transcript="";
-var voiceInput=document.getElementById("stChatInputTextArea")||null;
+var recognition, listening=false, transcript="";
 
 function toggleVoice(){
-  if(!('webkitSpeechRecognition'in window)&&!('SpeechRecognition'in window)){
-    document.getElementById("voice-status").textContent="Speech API not supported in this browser. Use Chrome or Safari.";
+  if(!('webkitSpeechRecognition'in window||'SpeechRecognition'in window)){
+    document.getElementById("status").textContent="Not supported — use Chrome or Safari";
     return;
   }
-  if(listening){stopVoice();return;}
+  if(listening){recognition.stop();return;}
   recognition=new(window.SpeechRecognition||window.webkitSpeechRecognition)();
-  recognition.lang=document.documentElement.lang==="el"?"el-GR":"en-US";
-  recognition.interimResults=true; recognition.continuous=false;
+  recognition.lang="el-GR";
+  recognition.interimResults=true;
   recognition.onstart=function(){
     listening=true;
-    document.getElementById("mic-btn").style.background="#C9A96E";
-    document.getElementById("mic-btn").style.color="#1C1410";
-    document.getElementById("voice-status").textContent="Listening... speak now";
-    document.getElementById("voice-result").style.display="none";
-    document.getElementById("voice-send").style.display="none";
+    document.getElementById("mic").classList.add("active");
+    document.getElementById("status").textContent="🔴 Ηχογράφηση... μιλήστε τώρα";
+    document.getElementById("result").style.display="none";
+    document.getElementById("copy").style.display="none";
   };
   recognition.onresult=function(e){
     transcript=Array.from(e.results).map(r=>r[0].transcript).join("");
-    var res=document.getElementById("voice-result");
-    res.textContent=transcript; res.style.display="block";
+    document.getElementById("result").textContent=transcript;
+    document.getElementById("result").style.display="block";
   };
   recognition.onend=function(){
     listening=false;
-    document.getElementById("mic-btn").style.background="none";
-    document.getElementById("mic-btn").style.color="#C9A96E";
-    document.getElementById("voice-status").textContent="Click Send to submit or 🎙️ to re-record";
-    if(transcript) document.getElementById("voice-send").style.display="block";
+    document.getElementById("mic").classList.remove("active");
+    if(transcript){
+      document.getElementById("status").textContent="✅ Έτοιμο — Αντιγράψτε και επικολλήστε στο chat";
+      document.getElementById("copy").style.display="block";
+    } else {
+      document.getElementById("status").textContent="Click 🎙️ to speak — Chrome / Safari";
+    }
   };
   recognition.onerror=function(e){
-    document.getElementById("voice-status").textContent="Error: "+e.error+". Try Chrome.";
     listening=false;
+    document.getElementById("mic").classList.remove("active");
+    document.getElementById("status").textContent="Error: "+e.error+" — try Chrome";
   };
   recognition.start();
 }
 
-function stopVoice(){if(recognition){recognition.stop();}}
-
-function sendVoice(){
+function copyText(){
   if(!transcript) return;
-  // Find Streamlit chat input and inject text
-  var inputs=document.querySelectorAll("textarea");
-  for(var i=0;i<inputs.length;i++){
-    if(inputs[i].placeholder&&inputs[i].placeholder.toLowerCase().includes("message")){
-      var nativeInputValueSetter=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,"value").set;
-      nativeInputValueSetter.call(inputs[i],transcript);
-      inputs[i].dispatchEvent(new Event("input",{bubbles:true}));
-      inputs[i].focus();
-      // Simulate Enter
-      setTimeout(function(){
-        var enterEvent=new KeyboardEvent("keydown",{key:"Enter",keyCode:13,bubbles:true});
-        document.querySelector("textarea").dispatchEvent(enterEvent);
-      }, 200);
-      document.getElementById("voice-result").style.display="none";
-      document.getElementById("voice-send").style.display="none";
-      document.getElementById("voice-status").textContent="Click 🎙️ to speak · Works in Chrome/Safari";
-      transcript="";
-      break;
-    }
-  }
+  navigator.clipboard.writeText(transcript).then(function(){
+    document.getElementById("copy").textContent="✅ Copied!";
+    document.getElementById("status").textContent="Επικολλήστε στο chat input παρακάτω ↓";
+    setTimeout(function(){document.getElementById("copy").textContent="📋 Copy";},2000);
+  }).catch(function(){
+    document.getElementById("result").select && document.getElementById("result").select();
+  });
 }
 </script>
-""", unsafe_allow_html=True)
+</body></html>
+""", height=60, scrolling=False)
+
 
     user_input = st.chat_input("Message HAL...")
     if user_input:
