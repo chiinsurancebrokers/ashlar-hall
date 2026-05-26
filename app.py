@@ -1705,7 +1705,7 @@ CARRIERS_PER_TYPE = {
     "education":["Interamerican","Eurolife","NN","Allianz"],
 }
 
-def build_analyzer_prompt(client_data, existing_policies, lang="el"):
+def _build_analyzer_prompt(client_data, existing_policies, lang="el"):
     """Build the Claude prompt for insurance needs analysis."""
 
     existing_types = [p.get("type","").lower() for p in existing_policies]
@@ -1856,7 +1856,8 @@ def render_commissions():
     st.markdown("## 📈 Commissions Tracker")
     st.caption("Εκτίμηση προμηθειών βάσει ασφαλίστρων · Default rates per insurer")
 
-    from chi_portal_enhancer import DEFAULT_COMMISSION_RATES, commission_report, calculate_commission
+    # Commission rates inline
+
 
     tab_calc, tab_rates = st.tabs(["📊 Calculate", "⚙️ Commission Rates"])
 
@@ -1880,7 +1881,7 @@ def render_commissions():
             with cp3:
                 cp_pno    = st.text_input("Policy No.", key="cp_pno")
                 cp_rate   = st.number_input("Override rate (%)", min_value=0.0, max_value=50.0,
-                    value=float(DEFAULT_COMMISSION_RATES.get(st.session_state.get("cp_ins",""),0.15)*100),
+                    value=float(_DEFAULT_COMMISSION_RATES.get(st.session_state.get("cp_ins",""),0.15)*100),
                     key="cp_rate", format="%.1f")
             if st.button("Add ✓", key="add_comm_pol"):
                 st.session_state.comm_policies.append({
@@ -1891,7 +1892,7 @@ def render_commissions():
                 st.rerun()
 
         if st.session_state.comm_policies:
-            report = commission_report(st.session_state.comm_policies)
+            report = _commission_report(st.session_state.comm_policies)
             # Stats
             s1,s2,s3,s4 = st.columns(4)
             s1.metric("Policies",      report["policy_count"])
@@ -1910,7 +1911,7 @@ def render_commissions():
 
             st.markdown("#### Policy List")
             for i,p in enumerate(st.session_state.comm_policies):
-                comm = calculate_commission(float(p.get("premium",0)), p.get("insurer",""),
+                comm = _calculate_commission(float(p.get("premium",0)), p.get("insurer",""),
                                             p.get("rate_override"))
                 pl1,pl2,pl3 = st.columns([3,1,1])
                 pl1.markdown(f"**{p.get('client_name','')}** — {p.get('insurer','')} {p.get('policy_number','')}")
@@ -1921,14 +1922,14 @@ def render_commissions():
             # Export
             lines = ["Client,Insurer,Type,Premium,Commission,Policy No"]
             for p in st.session_state.comm_policies:
-                comm = calculate_commission(float(p.get("premium",0)),p.get("insurer",""),p.get("rate_override"))
+                comm = _calculate_commission(float(p.get("premium",0)),p.get("insurer",""),p.get("rate_override"))
                 lines.append(f"{p.get('client_name','')},{p.get('insurer','')},{p.get('policy_category','')},{p.get('premium',0)},{comm},{p.get('policy_number','')}")
             csv_data = "\n".join(lines)
             csv_data = "\n".join(lines)
             st.download_button("Export CSV", csv_data, file_name="commissions.csv", mime="text/csv")
         st.markdown("### Default Commission Rates")
         st.caption("Rates used when no override is specified")
-        for ins, rate in sorted(DEFAULT_COMMISSION_RATES.items()):
+        for ins, rate in sorted(_DEFAULT_COMMISSION_RATES.items()):
             r1,r2 = st.columns([3,1])
             r1.markdown(ins)
             r2.markdown(f"**{rate*100:.0f}%**")
@@ -2176,7 +2177,6 @@ POLICY DOCUMENT:
                 "has_pets": a_pets, "has_children": a_kids,
                 "is_expat": a_expat, "travels_frequently": a_expat,
             }
-            from chi_ai_analyzer import build_analyzer_prompt
             prompt = build_analyzer_prompt(client_data, st.session_state.an_policies, a_lang)
 
             with st.spinner("Claude αναλύει το προφίλ..."):
