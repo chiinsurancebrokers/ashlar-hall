@@ -557,8 +557,12 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                     st.rerun()
 
     # ── VOICE ─────────────────────────────────────────────────────────────────
-    oai_key  = st.secrets.get("OPENAI_API_KEY","")
-    el_key   = st.secrets.get("ELEVENLABS_API_KEY","")
+    # Try multiple key name variants
+    oai_key  = (st.secrets.get("OPENAI_API_KEY","") or
+                st.secrets.get("openai_api_key","") or
+                st.secrets.get("OPENAI_KEY",""))
+    el_key   = (st.secrets.get("ELEVENLABS_API_KEY","") or
+                st.secrets.get("elevenlabs_api_key",""))
     el_voice = st.secrets.get("ELEVENLABS_VOICE_ID","aTP4J5SJLQl74WTSRXKW")
 
     voice_tab1, voice_tab2 = st.tabs([
@@ -615,11 +619,18 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                 ab64 = _b64v.b64encode(audio_bytes).decode()
 
                 with st.spinner("🎙️ Transcribing with Whisper..."):
+                    # Detect audio format
+                    mime = "audio/webm"
+                    if audio_bytes[:4] == b"fLaC": mime = "audio/flac"
+                    elif audio_bytes[:4] == b"RIFF": mime = "audio/wav"
+                    elif audio_bytes[:3] in (b"ID3", b"\xff\xfb", b"\xff\xf3"): mime = "audio/mpeg"
+                    ext = {"audio/webm":"webm","audio/flac":"flac","audio/wav":"wav","audio/mpeg":"mp3"}.get(mime,"webm")
+
                     bnd  = "----WB" + str(abs(hash(ab64)))[:8]
-                    nl = "\r\n"
+                    nl   = "\r\n"
                     hdr  = ("--"+bnd+nl+'Content-Disposition: form-data; name="model"'+nl+nl+"whisper-1"+nl
                             +"--"+bnd+nl+'Content-Disposition: form-data; name="language"'+nl+nl+"el"+nl
-                            +"--"+bnd+nl+'Content-Disposition: form-data; name="file"; filename="audio.webm"'+nl+"Content-Type: audio/webm"+nl+nl)
+                            +"--"+bnd+nl+f'Content-Disposition: form-data; name="file"; filename="audio.{ext}"'+nl+f"Content-Type: {mime}"+nl+nl)
                     ftr  = nl+"--"+bnd+"--"+nl
                     form = hdr.encode() + audio_bytes + ftr.encode()
                     req  = _urv.Request("https://api.openai.com/v1/audio/transcriptions",
@@ -630,7 +641,13 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                         with _urv.urlopen(req, timeout=30) as r:
                             transcript = _jv.loads(r.read()).get("text","").strip()
                     except Exception as e:
-                        transcript = ""; st.error(f"Whisper: {e}")
+                        transcript = ""
+                        if "401" in str(e):
+                            st.error("❌ Invalid OpenAI key — check OPENAI_API_KEY in Streamlit secrets.")
+                        elif "400" in str(e):
+                            st.error(f"❌ Audio format not supported: {e}")
+                        else:
+                            st.error(f"Whisper: {e}")
 
                 if transcript:
                     st.markdown(f"**🗣️ You:** {transcript}")
