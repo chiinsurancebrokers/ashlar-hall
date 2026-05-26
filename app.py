@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Pantelis Kourbelas | Ashlar Insurance
+CHRIS  | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -655,9 +655,11 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                         try:
                             import anthropic as _ant
                             _cl = _ant.Anthropic(api_key=api_key)
+                            # Voice-specific system: formal, no markdown, concise
+                            voice_system = system + "\n\nIMPORTANT FOR VOICE MODE: Respond formally and professionally at all times. No bullet points, no markdown, no asterisks. Speak in complete, clear sentences suitable for audio. Keep responses under 3 sentences unless a longer answer is essential. Address the user formally."
                             _r  = _cl.messages.create(
                                 model="claude-sonnet-4-6", max_tokens=600,
-                                system=system,
+                                system=voice_system,
                                 messages=[{"role":m["role"],"content":m["content"]}
                                           for m in st.session_state.chat_history[-10:]]
                             )
