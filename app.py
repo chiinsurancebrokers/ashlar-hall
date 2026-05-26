@@ -557,17 +557,19 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                     st.rerun()
 
     # ── VOICE ─────────────────────────────────────────────────────────────────
-    # Try multiple key name variants
+    # Voice API keys
+    groq_key = (st.secrets.get("GROQ_API_KEY","") or
+                st.secrets.get("groq_api_key",""))
     oai_key  = (st.secrets.get("OPENAI_API_KEY","") or
-                st.secrets.get("openai_api_key","") or
-                st.secrets.get("OPENAI_KEY",""))
+                st.secrets.get("openai_api_key",""))   # fallback if no Groq
+    stt_key  = groq_key or oai_key                     # prefer Groq (free)
     el_key   = (st.secrets.get("ELEVENLABS_API_KEY","") or
                 st.secrets.get("elevenlabs_api_key",""))
     el_voice = st.secrets.get("ELEVENLABS_VOICE_ID","aTP4J5SJLQl74WTSRXKW")
 
     voice_tab1, voice_tab2 = st.tabs([
         "🎙️ Quick Voice (Web Speech)",
-        "🔊 Full Voice (Whisper + ElevenLabs)" + (" ✓" if oai_key and el_key else " · setup required"),
+        "🔊 Full Voice (Groq/Whisper + ElevenLabs)" + (" ✓" if stt_key and el_key else " · setup required"),
     ])
 
     # ── TAB 1: Web Speech API — instant, free, copy-paste ────────────────────
@@ -607,9 +609,9 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
 
     # ── TAB 2: Whisper + ElevenLabs — accurate, speaks back ──────────────────
     with voice_tab2:
-        if not oai_key or not el_key:
-            st.info("Add **OPENAI_API_KEY** + **ELEVENLABS_API_KEY** to Streamlit secrets.")
-            st.caption("ELEVENLABS_VOICE_ID default: aTP4J5SJLQl74WTSRXKW (Eleni)")
+        if not stt_key or not el_key:
+            st.info("Add **GROQ_API_KEY** (free at console.groq.com) + **ELEVENLABS_API_KEY** to Streamlit secrets.")
+            st.caption("ELEVENLABS_VOICE_ID default: aTP4J5SJLQl74WTSRXKW (Eleni) · Groq is free, faster than OpenAI Whisper")
         else:
             st.caption("Record → Whisper transcribes (Greek 95% accuracy) → Claude responds → ElevenLabs speaks back")
             audio_val = st.audio_input("🎙️ Speak to HAL", key="hal_voice_input")
@@ -618,21 +620,32 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                 audio_bytes = audio_val.read()
                 ab64 = _b64v.b64encode(audio_bytes).decode()
 
-                with st.spinner("🎙️ Transcribing with Whisper..."):
+                with st.spinner("🎙️ Transcribing..."):
                     try:
-                        from openai import OpenAI as _OAI
-                        _oai_client = _OAI(api_key=oai_key)
-                        transcript = _oai_client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=("audio.webm", audio_bytes, "audio/webm"),
-                            language="el",
-                        ).text.strip()
+                        if groq_key:
+                            # Groq Whisper — free, fast, no billing issues
+                            from groq import Groq as _Groq
+                            _gc = _Groq(api_key=groq_key)
+                            transcript = _gc.audio.transcriptions.create(
+                                model="whisper-large-v3",
+                                file=("audio.webm", audio_bytes, "audio/webm"),
+                                language="el",
+                            ).text.strip()
+                        else:
+                            # Fallback: OpenAI Whisper
+                            from openai import OpenAI as _OAI
+                            _oc = _OAI(api_key=oai_key)
+                            transcript = _oc.audio.transcriptions.create(
+                                model="whisper-1",
+                                file=("audio.webm", audio_bytes, "audio/webm"),
+                                language="el",
+                            ).text.strip()
                     except Exception as e:
                         transcript = ""
                         if "401" in str(e):
-                            st.error("❌ Invalid OpenAI key — check OPENAI_API_KEY in Streamlit secrets.")
+                            st.error("❌ API key invalid — check GROQ_API_KEY or OPENAI_API_KEY in secrets.")
                         else:
-                            st.error(f"Whisper: {e}")
+                            st.error(f"Transcription error: {e}")
 
                 if transcript:
                     st.markdown(f"**🗣️ You:** {transcript}")
