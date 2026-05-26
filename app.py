@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Chris | Ashlar Insurance
+Pantelis Kourbelas | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -516,15 +516,25 @@ You specialise in international health insurance brokerage. Key knowledge:
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send.
 
 LIVE 2025 RATE TABLES (EUR, annual, Area 1 = Europe excl USA):
-Morgan Price Standard: 30y=1,061 | 40y=1,380 | 45y=1,698 | 50y=2,041 | 55y=2,810 | 60y=3,548 | 65y=4,719
-Morgan Price Comprehensive: 30y=2,247 | 40y=2,921 | 45y=3,690 | 50y=4,104 | 55y=5,656 | 60y=7,849 | 65y=10,647
-April International: 30y=1,940 | 40y=2,501 | 45y=2,869 | 50y=3,700 | 55y=4,913 | 60y=6,670 | 65y=10,011
-April Executive: 30y=4,459 | 40y=5,743 | 45y=6,596 | 50y=8,640 | 55y=10,678 | 60y=13,675 | 65y=20,142
-IMG Silver: 30y=1,813 | 40y=2,339 | 45y=2,872 | 50y=3,764 | 55y=4,993 | 60y=6,366 | 65y=8,427
-IMG Gold: 30y=2,320 | 40y=3,004 | 45y=3,694 | 50y=4,854 | 55y=6,450 | 60y=8,233 | 65y=10,914
-IMG Platinum: 30y=2,912 | 40y=3,797 | 45y=4,686 | 50y=6,178 | 55y=8,238 | 60y=10,535 | 65y=13,987
-Area 2 (Worldwide incl USA): approximately 2.2–2.5x Area 1 rates.
-When asked for a quote, use lookup_premium() mentally or use these tables. Always state plan, area, and annual premium in EUR."""
+
+MORGAN PRICE (area1):
+- Standard (HOSPITAL ONLY — NO outpatient): 30y=1,061 | 40y=1,380 | 45y=1,698 | 50y=2,041 | 55y=2,810 | 60y=3,548 | 65y=4,719
+- Standard Plus (hospital + outpatient 80% + MRI/CT/PET): 30y=1,322 | 40y=1,719 | 45y=2,136 | 50y=2,495 | 55y=3,436 | 60y=4,338 | 65y=5,810
+- Comprehensive (full: hospital + outpatient + dental + optical + mental health): 30y=2,247 | 40y=2,921 | 45y=3,690 | 50y=4,104 | 55y=5,656 | 60y=7,849 | 65y=10,647
+
+CRITICAL: Morgan Price Standard covers INPATIENT ONLY. For outpatient coverage, recommend Standard Plus minimum.
+
+APRIL (area1):
+- International (hospital + some outpatient): 30y=1,940 | 40y=2,501 | 45y=2,869 | 50y=3,700 | 55y=4,913 | 60y=6,670 | 65y=10,011
+- Executive (full outpatient + maternity option): 30y=4,459 | 40y=5,743 | 45y=6,596 | 50y=8,640 | 55y=10,678 | 60y=13,675 | 65y=20,142
+
+IMG (area1, EUR 150 deductible):
+- Silver: 30y=1,813 | 40y=2,339 | 45y=2,872 | 50y=3,764 | 55y=4,993 | 60y=6,366 | 65y=8,427
+- Gold: 30y=2,320 | 40y=3,004 | 45y=3,694 | 50y=4,854 | 55y=6,450 | 60y=8,233 | 65y=10,914
+- Platinum: 30y=2,912 | 40y=3,797 | 45y=4,686 | 50y=6,178 | 55y=8,238 | 60y=10,535 | 65y=13,987
+
+Area 2 (Worldwide incl USA): ~2.2–2.5x Area 1.
+Always state exact plan name, area, annual premium in EUR, and whether outpatient is included."""
 
     system_prompt_private = """You are HAL — the private AI assistant for Pantelis Kourbelas. In this private mode you have access to lodge and personal context.
 
@@ -692,9 +702,31 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     st.markdown(f"**HAL:** {reply}")
 
                     with st.spinner("🔊 ElevenLabs speaking..."):
+                        # Pronunciation fixes for Greek/English mixed text
+                        tts_text = reply
+                        _pron = {
+                            "Morgan Price":    "Μόργκαν Πράις",
+                            "Standard Plus":   "Στάνταρντ Πλας",
+                            "Standard":        "Στάνταρντ",
+                            "Comprehensive":   "Κόμπριχενσιβ",
+                            "International":   "Ιντερνάσιοναλ",
+                            "Executive":       "Εξέκιουτιβ",
+                            "Platinum":        "Πλάτινουμ",
+                            "IMG":             "Άι Εμ Τζι",
+                            "April":           "Απρίλ",
+                            "Bupa":            "Μπούπα",
+                            "outpatient":      "εξωνοσοκομειακά",
+                            "inpatient":       "νοσοκομειακή κάλυψη",
+                            "deductible":      "απαλλαγή",
+                            "premium":         "ασφάλιστρο",
+                            "HAL":             "Χαλ",
+                            "Ashlar":          "Άσλαρ",
+                        }
+                        for en, el in _pron.items():
+                            tts_text = tts_text.replace(en, el)
                         tts_req = _urv.Request(
                             f"https://api.elevenlabs.io/v1/text-to-speech/{el_voice}",
-                            data=_jv.dumps({"text":reply,"model_id":"eleven_multilingual_v2",
+                            data=_jv.dumps({"text":tts_text,"model_id":"eleven_multilingual_v2",
                                            "voice_settings":{"stability":0.55,"similarity_boost":0.8}}).encode(),
                             headers={"xi-api-key":el_key,"Content-Type":"application/json","Accept":"audio/mpeg"}
                         )
