@@ -292,6 +292,7 @@ with st.sidebar:
             ("🏗️", "apps", "App Builder"),
             ("🐾", "pets", "PetsHealth"),
             ("🩺", "kira_nurse", "Kira AI Nurse"),
+            ("🧠", "chi_analyzer", "Insurance Analyzer"),
             ("🌐", "chi_portal", "Client Portals"),
             ("🐱", "kira_pet", "Kira Pet"),
         ]
@@ -556,6 +557,93 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                     st.rerun()
 
     # Input
+    # ── VOICE INPUT (Web Speech API) ─────────────────────────────────────────
+    st.markdown("""
+<div id="voice-bar" style="display:flex;align-items:center;gap:10px;
+     background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+     border-radius:10px;padding:10px 14px;margin-bottom:10px">
+  <button id="mic-btn" onclick="toggleVoice()" title="Voice input"
+     style="background:none;border:2px solid #C9A96E;border-radius:50%;
+     width:38px;height:38px;font-size:18px;cursor:pointer;color:#C9A96E;
+     display:flex;align-items:center;justify-content:center;flex-shrink:0">🎙️</button>
+  <div id="voice-status" style="font-size:12px;color:#A89880;flex:1">
+    Click 🎙️ to speak · Works in Chrome/Safari
+  </div>
+  <div id="voice-result" style="font-size:13px;color:#E8DDD0;display:none;
+       background:rgba(201,169,110,.1);border-radius:6px;padding:6px 10px;
+       flex:2;max-width:400px"></div>
+  <button id="voice-send" onclick="sendVoice()" style="display:none;
+     background:#C9A96E;color:#1C1410;border:none;border-radius:6px;
+     padding:6px 14px;font-weight:700;cursor:pointer;font-size:12px">Send →</button>
+</div>
+<script>
+var recognition;var listening=false;var transcript="";
+var voiceInput=document.getElementById("stChatInputTextArea")||null;
+
+function toggleVoice(){
+  if(!('webkitSpeechRecognition'in window)&&!('SpeechRecognition'in window)){
+    document.getElementById("voice-status").textContent="Speech API not supported in this browser. Use Chrome or Safari.";
+    return;
+  }
+  if(listening){stopVoice();return;}
+  recognition=new(window.SpeechRecognition||window.webkitSpeechRecognition)();
+  recognition.lang=document.documentElement.lang==="el"?"el-GR":"en-US";
+  recognition.interimResults=true; recognition.continuous=false;
+  recognition.onstart=function(){
+    listening=true;
+    document.getElementById("mic-btn").style.background="#C9A96E";
+    document.getElementById("mic-btn").style.color="#1C1410";
+    document.getElementById("voice-status").textContent="Listening... speak now";
+    document.getElementById("voice-result").style.display="none";
+    document.getElementById("voice-send").style.display="none";
+  };
+  recognition.onresult=function(e){
+    transcript=Array.from(e.results).map(r=>r[0].transcript).join("");
+    var res=document.getElementById("voice-result");
+    res.textContent=transcript; res.style.display="block";
+  };
+  recognition.onend=function(){
+    listening=false;
+    document.getElementById("mic-btn").style.background="none";
+    document.getElementById("mic-btn").style.color="#C9A96E";
+    document.getElementById("voice-status").textContent="Click Send to submit or 🎙️ to re-record";
+    if(transcript) document.getElementById("voice-send").style.display="block";
+  };
+  recognition.onerror=function(e){
+    document.getElementById("voice-status").textContent="Error: "+e.error+". Try Chrome.";
+    listening=false;
+  };
+  recognition.start();
+}
+
+function stopVoice(){if(recognition){recognition.stop();}}
+
+function sendVoice(){
+  if(!transcript) return;
+  // Find Streamlit chat input and inject text
+  var inputs=document.querySelectorAll("textarea");
+  for(var i=0;i<inputs.length;i++){
+    if(inputs[i].placeholder&&inputs[i].placeholder.toLowerCase().includes("message")){
+      var nativeInputValueSetter=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,"value").set;
+      nativeInputValueSetter.call(inputs[i],transcript);
+      inputs[i].dispatchEvent(new Event("input",{bubbles:true}));
+      inputs[i].focus();
+      // Simulate Enter
+      setTimeout(function(){
+        var enterEvent=new KeyboardEvent("keydown",{key:"Enter",keyCode:13,bubbles:true});
+        document.querySelector("textarea").dispatchEvent(enterEvent);
+      }, 200);
+      document.getElementById("voice-result").style.display="none";
+      document.getElementById("voice-send").style.display="none";
+      document.getElementById("voice-status").textContent="Click 🎙️ to speak · Works in Chrome/Safari";
+      transcript="";
+      break;
+    }
+  }
+}
+</script>
+""", unsafe_allow_html=True)
+
     user_input = st.chat_input("Message HAL...")
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
@@ -1559,58 +1647,908 @@ def render_kira_nurse():
         """)
 
 
+# ── AI ANALYZER CONFIG ───────────────────────────────────────────────────────
+"""
+CHI Insurance AI Analyzer
+Analyzes client needs and proposes insurance coverage gaps.
+Integrated into HAL as render_chi_analyzer().
+"""
+
+# ── PROFESSION TRIGGERS ────────────────────────────────────────────────────────
+PROFESSION_TRIGGERS = {
+    "architect":         ["liability","home"],
+    "engineer":          ["liability","home"],
+    "civil engineer":    ["liability","home"],
+    "doctor":            ["liability","health"],
+    "lawyer":            ["liability"],
+    "accountant":        ["liability"],
+    "consultant":        ["liability"],
+    "pharmacist":        ["liability"],
+    "dentist":           ["liability","health"],
+    "psychologist":      ["liability"],
+    "real estate":       ["liability","home"],
+    "business owner":    ["liability","life","health"],
+    "self employed":     ["liability","health","life"],
+    "teacher":           ["life","health"],
+    "driver":            ["motor","life"],
+    "pilot":             ["life","health"],
+    "athlete":           ["health","life"],
+    "expat":             ["health"],
+    "freelancer":        ["liability","health"],
+    "contractor":        ["liability","home"],
+}
+
+COVERAGE_MATRIX = {
+    "motor":     {"label":"Motor Insurance",        "label_el":"Ασφάλεια Οχήματος",   "icon":"🚗", "priority":1},
+    "health":    {"label":"Health Insurance",       "label_el":"Ασφάλεια Υγείας",     "icon":"❤️", "priority":1},
+    "life":      {"label":"Life Insurance",         "label_el":"Ασφάλεια Ζωής",       "icon":"🫀", "priority":2},
+    "home":      {"label":"Home / Property",        "label_el":"Ασφάλεια Κατοικίας",  "icon":"🏠", "priority":2},
+    "liability": {"label":"Professional Liability", "label_el":"Επαγγελματική Ευθύνη","icon":"💼", "priority":1},
+    "travel":    {"label":"Travel Insurance",       "label_el":"Ταξιδιωτική Ασφάλεια","icon":"✈️", "priority":3},
+    "pet":       {"label":"Pet Insurance",          "label_el":"Ασφάλεια Κατοικίδιου","icon":"🐾", "priority":3},
+    "income":    {"label":"Income Protection",      "label_el":"Ασφάλεια Εισοδήματος","icon":"💰", "priority":2},
+    "critical":  {"label":"Critical Illness",       "label_el":"Κρίσιμες Παθήσεις",   "icon":"🏥", "priority":2},
+    "education": {"label":"Education / Savings Plan","label_el":"Εκπαιδευτικό Πρόγραμμα","icon":"🎓","priority":3},
+}
+
+CARRIERS_PER_TYPE = {
+    "motor":    ["3P Insurance","Hellas Direct","Groupama","Generali","Ethniki","AXA"],
+    "health":   {"greek":["Groupama","Generali","Ethniki","Interamerican","Eurolife"],
+                 "international":["Morgan Price","Bupa Global","NOW Health","Cigna"]},
+    "life":     ["Generali","Ethniki","Interamerican","Eurolife","NN","Allianz"],
+    "home":     ["Groupama","Generali","Ethniki","AXA","Interamerican"],
+    "liability":["Groupama","Generali","Ethniki","AXA","Interamerican","Eurolife"],
+    "travel":   ["Groupama","Generali","AXA","Allianz","Eurolife"],
+    "pet":      ["Safe Pet System"],
+    "income":   ["Generali","Ethniki","Interamerican","Eurolife"],
+    "critical": ["Generali","Ethniki","Interamerican","NN"],
+    "education":["Interamerican","Eurolife","NN","Allianz"],
+}
+
+def build_analyzer_prompt(client_data, existing_policies, lang="el"):
+    """Build the Claude prompt for insurance needs analysis."""
+
+    existing_types = [p.get("type","").lower() for p in existing_policies]
+    profession = client_data.get("profession","").lower()
+    age = client_data.get("age", "")
+    family = client_data.get("family","")
+    income = client_data.get("income","")
+    assets = client_data.get("assets","")
+    notes = client_data.get("notes","")
+    is_expat = client_data.get("is_expat", False)
+    has_property = client_data.get("has_property", False)
+    has_pets = client_data.get("has_pets", False)
+    has_children = client_data.get("has_children", False)
+    has_vehicle = client_data.get("has_vehicle", False)
+    travels_frequently = client_data.get("travels_frequently", False)
+
+    existing_str = "\n".join(f"- {p.get('type','').title()}: {p.get('provider','')} {p.get('policy_no','')}" for p in existing_policies) if existing_policies else "No policies on file"
+
+    carriers_info = """
+Available carriers through Ashlar:
+- Motor: 3P Insurance, Hellas Direct, Groupama, Generali, Ethniki, AXA
+- Greek Health: Groupama, Generali, Ethniki, Interamerican, Eurolife
+- International Health: Morgan Price (UK), Bupa Global (UK), NOW Health, Cigna
+- Life: Generali, Ethniki, Interamerican, Eurolife, NN, Allianz
+- Professional Liability: Groupama, Generali, Ethniki, AXA, Interamerican
+- Home: Groupama, Generali, Ethniki, AXA, Interamerican
+- Pet: Safe Pet System (via petshealth.gr)
+- Travel: Groupama, Generali, AXA, Allianz
+
+Key Greek market facts:
+- Greek domestic health plans: NO free-network outpatient, NO dental, NO psychiatric outpatient, NO imaging outside hospitalisation
+- International plans: full outpatient, diagnostics, dental (if selected), psychiatric, physio
+- Professional Liability is LEGALLY REQUIRED for architects, engineers, doctors, lawyers in Greece
+- Greek deductibles: per-hospitalisation OR annual (important to clarify)
+- Expats/frequent travellers need international health (NOT Greek domestic)
+"""
+
+    if lang == "el":
+        prompt = f"""Είσαι σύμβουλος ασφαλίσεων της Ashlar Insurance στην Ελλάδα. Ανάλυσε τις ασφαλιστικές ανάγκες αυτού του πελάτη και προτείνου ασφαλιστικά προγράμματα.
+
+ΣΤΟΙΧΕΙΑ ΠΕΛΑΤΗ:
+- Όνομα: {client_data.get('name','')}
+- Ηλικία: {age}
+- Επάγγελμα: {profession}
+- Οικογένεια: {family}
+- Εισόδημα: {income}
+- Περιουσιακά στοιχεία: {assets}
+- Έχει ακίνητο: {'Ναι' if has_property else 'Όχι'}
+- Έχει όχημα: {'Ναι' if has_vehicle else 'Όχι'}
+- Έχει κατοικίδιο: {'Ναι' if has_pets else 'Όχι'}
+- Έχει παιδιά: {'Ναι' if has_children else 'Όχι'}
+- Expat / Ταξιδεύει συχνά: {'Ναι' if (is_expat or travels_frequently) else 'Όχι'}
+- Επιπλέον σημειώσεις: {notes}
+
+ΥΠΑΡΧΟΥΣΕΣ ΑΣΦΑΛΙΣΕΙΣ:
+{existing_str}
+
+{carriers_info}
+
+Δώσε δομημένη ανάλυση:
+
+## 🔍 ΑΝΑΛΥΣΗ ΠΡΟΦΙΛ
+Σύντομη εκτίμηση του ασφαλιστικού προφίλ (2-3 προτάσεις)
+
+## ✅ ΚΑΛΥΨΕΙΣ ΠΟΥ ΕΧΕΙ
+Τι έχει ήδη και αξιολόγηση
+
+## ⚠️ ΚΕΝΑ ΚΑΛΥΨΕΩΝ
+Για κάθε κενό:
+- **[Είδος ασφάλισης]** — Επείγον 🔴 / Προτεινόμενο 🟡 / Προαιρετικό 🟢
+- Γιατί το χρειάζεται (ειδικά για το επάγγελμα/προφίλ του)
+- Προτεινόμενοι ασφαλιστές από το panel μας
+- Εκτιμώμενο ετήσιο ασφάλιστρο (εύρος)
+
+## 📋 ΠΛΑΝΟ ΔΡΑΣΗΣ
+Προτεραιότητες (1-2-3) με χρονοδιάγραμμα
+
+## 💬 SCRIPT ΕΠΙΚΟΙΝΩΝΙΑΣ
+Ένα έτοιμο μήνυμα WhatsApp/email για να στείλεις στον πελάτη"""
+
+    else:
+        prompt = f"""You are an insurance adviser at Ashlar Insurance, Greece. Analyse this client's insurance needs and recommend coverage.
+
+CLIENT PROFILE:
+- Name: {client_data.get('name','')}
+- Age: {age}
+- Profession: {profession}
+- Family: {family}
+- Income: {income}
+- Assets: {assets}
+- Has property: {'Yes' if has_property else 'No'}
+- Has vehicle: {'Yes' if has_vehicle else 'No'}
+- Has pets: {'Yes' if has_pets else 'No'}
+- Has children: {'Yes' if has_children else 'No'}
+- Expat / Travels frequently: {'Yes' if (is_expat or travels_frequently) else 'No'}
+- Notes: {notes}
+
+EXISTING POLICIES:
+{existing_str}
+
+{carriers_info}
+
+Provide structured analysis:
+
+## 🔍 PROFILE ANALYSIS
+Brief assessment of insurance profile (2-3 sentences)
+
+## ✅ EXISTING COVERAGE
+What they have and assessment
+
+## ⚠️ COVERAGE GAPS
+For each gap:
+- **[Insurance type]** — Urgent 🔴 / Recommended 🟡 / Optional 🟢
+- Why they need it (specific to their profession/profile)
+- Recommended carriers from our panel
+- Estimated annual premium (range)
+
+## 📋 ACTION PLAN
+Priorities (1-2-3) with timeline
+
+## 💬 CLIENT SCRIPT
+Ready WhatsApp/email message to send the client"""
+
+    return prompt
+
+
+# ── PHASE 2: POLICY TYPE CONFIG ───────────────────────────────────────────────
+_POLICY_TYPES = {
+    "motor":     {"label":"Motor Insurance",        "label_el":"Ασφάλεια Οχήματος",   "icon":"🚗","color":"#1E40AF"},
+    "health":    {"label":"Health Insurance",       "label_el":"Ασφάλεια Υγείας",     "icon":"❤️","color":"#DC2626"},
+    "life":      {"label":"Life Insurance",         "label_el":"Ασφάλεια Ζωής",       "icon":"🫀","color":"#7C3AED"},
+    "home":      {"label":"Home / Property",        "label_el":"Ασφάλεια Κατοικίας",  "icon":"🏠","color":"#059669"},
+    "travel":    {"label":"Travel Insurance",       "label_el":"Ταξιδιωτική Ασφάλεια","icon":"✈️","color":"#0EA5E9"},
+    "pet":       {"label":"Pet Insurance",          "label_el":"Ασφάλεια Κατοικίδιου","icon":"🐾","color":"#0D9488"},
+    "liability": {"label":"Professional Liability", "label_el":"Επαγγελματική Ευθύνη","icon":"💼","color":"#D97706"},
+    "other":     {"label":"Other Policy",           "label_el":"Άλλη Ασφάλεια",        "icon":"📋","color":"#6B7280"},
+}
+_PROVIDERS = ["3P Insurance","Hellas Direct","Groupama","Generali","Ethniki",
+              "Morgan Price","NOW Health","Bupa Global","Safe Pet System",
+              "AXA","Interamerican","Eurolife","NN","Allianz","Other"]
+_PAY_STATUS  = ["✅ Paid","🟡 Pending","🔴 Overdue","🔵 Direct Debit"]
+_CLM_STATUS  = ["🟡 Under review","🔴 Disputed","🟢 Approved","✅ Settled","❌ Rejected"]
+
+
+def render_commissions():
+    """Commissions tracker — calculate commissions from policy data."""
+    import urllib.request as _ur, json as _j
+    st.markdown("## 📈 Commissions Tracker")
+    st.caption("Εκτίμηση προμηθειών βάσει ασφαλίστρων · Default rates per insurer")
+
+    from chi_portal_enhancer import DEFAULT_COMMISSION_RATES, commission_report, calculate_commission
+
+    tab_calc, tab_rates = st.tabs(["📊 Calculate", "⚙️ Commission Rates"])
+
+    with tab_calc:
+        st.markdown("### Manual Policy Entry")
+        st.caption("Enter policies to calculate estimated commissions")
+
+        if "comm_policies" not in st.session_state:
+            st.session_state.comm_policies = []
+
+        with st.expander("➕ Add policy"):
+            cp1,cp2,cp3 = st.columns(3)
+            with cp1:
+                cp_client = st.text_input("Client", key="cp_client")
+                cp_insurer= st.selectbox("Insurer", _PROVIDERS, key="cp_ins")
+            with cp2:
+                cp_type   = st.selectbox("Type", list(_POLICY_TYPES.keys()),
+                    format_func=lambda k:f"{_POLICY_TYPES[k]['icon']} {_POLICY_TYPES[k]['label']}",
+                    key="cp_type")
+                cp_prem   = st.number_input("Premium (EUR)", min_value=0.0, key="cp_prem")
+            with cp3:
+                cp_pno    = st.text_input("Policy No.", key="cp_pno")
+                cp_rate   = st.number_input("Override rate (%)", min_value=0.0, max_value=50.0,
+                    value=float(DEFAULT_COMMISSION_RATES.get(st.session_state.get("cp_ins",""),0.15)*100),
+                    key="cp_rate", format="%.1f")
+            if st.button("Add ✓", key="add_comm_pol"):
+                st.session_state.comm_policies.append({
+                    "client_name":cp_client,"insurer":cp_insurer,
+                    "policy_category":cp_type,"premium":cp_prem,
+                    "policy_number":cp_pno,"rate_override":cp_rate/100,
+                })
+                st.rerun()
+
+        if st.session_state.comm_policies:
+            report = commission_report(st.session_state.comm_policies)
+            # Stats
+            s1,s2,s3,s4 = st.columns(4)
+            s1.metric("Policies",      report["policy_count"])
+            s2.metric("Total Premium", f"€{report['total_premium']:,.2f}")
+            s3.metric("Est. Commission",f"€{report['total_commission']:,.2f}")
+            s4.metric("Avg Rate",f"{round(report['total_commission']/report['total_premium']*100,1) if report['total_premium'] else 0}%")
+
+            st.markdown("#### By Insurer")
+            for ins, data in sorted(report["by_insurer"].items(),
+                                    key=lambda x:x[1]["commission"],reverse=True):
+                ci1,ci2,ci3,ci4 = st.columns([2,1,1,1])
+                ci1.markdown(f"**{ins}**")
+                ci2.markdown(f"€{data['premium']:,.0f}")
+                ci3.markdown(f"**€{data['commission']:,.0f}**")
+                ci4.markdown(f"{data['count']} policies")
+
+            st.markdown("#### Policy List")
+            for i,p in enumerate(st.session_state.comm_policies):
+                comm = calculate_commission(float(p.get("premium",0)), p.get("insurer",""),
+                                            p.get("rate_override"))
+                pl1,pl2,pl3 = st.columns([3,1,1])
+                pl1.markdown(f"**{p.get('client_name','')}** — {p.get('insurer','')} {p.get('policy_number','')}")
+                pl2.markdown(f"€{comm:,.2f}")
+                if pl3.button("✕",key=f"del_cp_{i}"):
+                    st.session_state.comm_policies.pop(i); st.rerun()
+
+            # Export
+            lines = ["Client,Insurer,Type,Premium,Commission,Policy No"]
+            for p in st.session_state.comm_policies:
+                comm = calculate_commission(float(p.get("premium",0)),p.get("insurer",""),p.get("rate_override"))
+                lines.append(f"{p.get('client_name','')},{p.get('insurer','')},{p.get('policy_category','')},{p.get('premium',0)},{comm},{p.get('policy_number','')}")
+            csv_data = "\n".join(lines)
+            csv_data = "\n".join(lines)
+            st.download_button("Export CSV", csv_data, file_name="commissions.csv", mime="text/csv")
+        st.markdown("### Default Commission Rates")
+        st.caption("Rates used when no override is specified")
+        for ins, rate in sorted(DEFAULT_COMMISSION_RATES.items()):
+            r1,r2 = st.columns([3,1])
+            r1.markdown(ins)
+            r2.markdown(f"**{rate*100:.0f}%**")
+        st.info("To override a rate for a specific policy, use the 'Override rate' field when adding.")
+
+
+def chi_api(endpoint: str, params: dict = None) -> dict | list | None:
+    """Call the CHI Insurance Portal REST API from HAL."""
+    import urllib.request as _ur, json as _j, urllib.parse as _up
+    portal_url = st.secrets.get("CHI_PORTAL_URL","https://chi-insurance-portal-production.up.railway.app")
+    api_key    = st.secrets.get("CHI_API_KEY","")
+    if not api_key: return None
+    url = f"{portal_url.rstrip('/')}/api/{endpoint.lstrip('/')}"
+    if params:
+        url += "?" + _up.urlencode(params)
+    req = _ur.Request(url, headers={"X-API-Key": api_key, "Accept":"application/json"})
+    try:
+        with _ur.urlopen(req, timeout=10) as r:
+            return _j.loads(r.read())
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def render_chi_analyzer():
+    """AI Insurance Needs Analyzer — profile client and identify coverage gaps."""
+    import urllib.request as _ur, json as _j
+
+    st.markdown("## 🧠 AI Insurance Analyzer")
+    st.caption("Αναλύει το προφίλ του πελάτη · Εντοπίζει κενά κάλυψης · Προτείνει ασφαλιστικά προγράμματα")
+
+    api_key = st.secrets.get("Claude_API_Key","") or st.secrets.get("ANTHROPIC_API_KEY","")
+
+    # ── Client profile ─────────────────────────────────────────────────────────
+    st.markdown("### 👤 Προφίλ Πελάτη")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        a_name  = st.text_input("Όνομα πελάτη *", key="an_name", placeholder="Μαρία Παπαδοπούλου")
+        a_age   = st.number_input("Ηλικία", min_value=18, max_value=90, value=35, key="an_age")
+        a_prof  = st.text_input("Επάγγελμα *", key="an_prof",
+                                placeholder="Αρχιτέκτονας, Ιατρός, Δικηγόρος, Έμπορος...")
+    with col2:
+        a_family = st.selectbox("Οικογενειακή κατάσταση",
+            ["Άγαμος/η","Έγγαμος/η χωρίς παιδιά","Έγγαμος/η με παιδιά","Διαζευγμένος/η"],
+            key="an_family")
+        a_income = st.selectbox("Εισόδημα (ετήσιο)",
+            ["< €20k","€20k–€40k","€40k–€80k","€80k–€150k","> €150k"],
+            key="an_income")
+        a_notes  = st.text_area("Επιπλέον στοιχεία", height=80, key="an_notes",
+                                placeholder="π.χ. Ιδιόκτητο γραφείο, σκύλος, ταξιδεύει για δουλειά...")
+    with col3:
+        a_prop    = st.checkbox("🏠 Ιδιοκτήτης ακινήτου", key="an_prop")
+        a_vehicle = st.checkbox("🚗 Έχει όχημα", key="an_veh", value=True)
+        a_pets    = st.checkbox("🐾 Έχει κατοικίδιο", key="an_pet")
+        a_kids    = st.checkbox("👶 Έχει παιδιά", key="an_kids")
+        a_expat   = st.checkbox("✈️ Expat / Ταξιδεύει συχνά", key="an_expat")
+        a_lang    = st.radio("Γλώσσα ανάλυσης", ["el","en"], horizontal=True,
+                             format_func=lambda x: "🇬🇷 Ελληνικά" if x=="el" else "🇬🇧 English",
+                             key="an_lang")
+        a_children = "Ναι" if a_kids else "Όχι"
+
+    # ── Existing policies — PDF upload / Railway pull / manual ────────────────
+    st.markdown("### 📋 Υπάρχουσες Ασφαλίσεις")
+    st.caption("Ανεβάστε PDF ασφαλιστηρίων · ή συνδεθείτε με CHI Portal · ή προσθέστε χειροκίνητα")
+
+    if "an_policies" not in st.session_state:
+        st.session_state.an_policies = []
+
+    # ── PDF UPLOAD ────────────────────────────────────────────────────────────
+    with st.expander("📄 Upload Policy PDFs — AI extracts details automatically", expanded=True):
+        uploaded_pdfs = st.file_uploader(
+            "Upload one or more insurance policy PDFs",
+            type=["pdf"], accept_multiple_files=True, key="pdf_policies"
+        )
+        if uploaded_pdfs:
+            if st.button("🤖 Extract Policies with AI", type="primary",
+                         key="extract_pdfs", use_container_width=True):
+                api_key = st.secrets.get("Claude_API_Key","") or st.secrets.get("ANTHROPIC_API_KEY","")
+                if not api_key:
+                    st.error("Add Claude_API_Key to secrets.")
+                else:
+                    import urllib.request as _ur2, json as _j2
+                    extracted = []
+                    for pdf_file in uploaded_pdfs:
+                        with st.spinner(f"Reading {pdf_file.name}..."):
+                            # Extract text from PDF using pypdf
+                            try:
+                                from pypdf import PdfReader
+                                reader = PdfReader(pdf_file)
+                                pdf_text = "\n".join(
+                                    page.extract_text() or "" for page in reader.pages
+                                )[:8000]  # limit to 8k chars
+                            except Exception as e:
+                                st.warning(f"Could not read {pdf_file.name}: {e}")
+                                continue
+
+                            if not pdf_text.strip():
+                                st.warning(f"{pdf_file.name}: no text found (scanned PDF?)")
+                                continue
+
+                            # Ask Claude to extract structured policy data
+                            extract_prompt = f"""Extract insurance policy details from this document.
+Return ONLY a JSON object with these exact fields:
+{{
+  "policy_type": one of: motor/health/life/home/travel/pet/liability/other,
+  "insurer": "company name",
+  "policy_number": "policy number or empty string",
+  "product": "product/plan name",
+  "premium": "annual premium amount as number string",
+  "currency": "EUR or GBP or USD",
+  "expiry_date": "YYYY-MM-DD or empty string",
+  "coverage_summary": "2-3 sentence summary of main coverage",
+  "key_exclusions": "main exclusions or empty string",
+  "deductible": "excess/deductible amount or empty string"
+}}
+
+If a field is not found, use empty string. Return ONLY the JSON, no other text.
+
+POLICY DOCUMENT:
+{pdf_text}"""
+
+                            body = _j2.dumps({
+                                "model":"claude-sonnet-4-6","max_tokens":800,
+                                "messages":[{"role":"user","content":extract_prompt}]
+                            }).encode()
+                            req = _ur2.Request("https://api.anthropic.com/v1/messages",data=body,
+                                headers={"x-api-key":api_key,"anthropic-version":"2023-06-01",
+                                         "content-type":"application/json"})
+                            try:
+                                with _ur2.urlopen(req, timeout=30) as r:
+                                    result = _j2.loads(r.read())["content"][0]["text"].strip()
+                                # Clean JSON
+                                if result.startswith("```"):
+                                    result = result.split("```")[1]
+                                    if result.startswith("json"):
+                                        result = result[4:]
+                                policy_data = _j2.loads(result.strip())
+                                policy_data["source_file"] = pdf_file.name
+                                policy_data["color"] = _POLICY_TYPES.get(
+                                    policy_data.get("policy_type","other"),
+                                    _POLICY_TYPES["other"])["color"]
+                                # Map to our policy format
+                                extracted.append({
+                                    "type":       policy_data.get("policy_type","other"),
+                                    "provider":   policy_data.get("insurer",""),
+                                    "policy_no":  policy_data.get("policy_number",""),
+                                    "product":    policy_data.get("product",""),
+                                    "premium":    policy_data.get("premium",""),
+                                    "currency":   policy_data.get("currency","EUR"),
+                                    "renewal_date":policy_data.get("expiry_date",""),
+                                    "coverage":   policy_data.get("coverage_summary",""),
+                                    "exclusions": policy_data.get("key_exclusions",""),
+                                    "deductible": policy_data.get("deductible",""),
+                                    "source_file":pdf_file.name,
+                                    "color":      _POLICY_TYPES.get(policy_data.get("policy_type","other"),_POLICY_TYPES["other"])["color"],
+                                })
+                                st.success(f"✅ {pdf_file.name} → {_POLICY_TYPES.get(policy_data.get('policy_type','other'),_POLICY_TYPES['other'])['icon']} {policy_data.get('insurer','')} {policy_data.get('product','')}")
+                            except _j2.JSONDecodeError:
+                                st.warning(f"Could not parse {pdf_file.name} — try manual entry")
+                            except Exception as e:
+                                st.error(f"{pdf_file.name}: {e}")
+
+                    if extracted:
+                        # Merge with existing (avoid duplicates by policy_no)
+                        existing_nos = {p.get("policy_no","") for p in st.session_state.an_policies}
+                        new_ones = [p for p in extracted if p.get("policy_no","") not in existing_nos]
+                        st.session_state.an_policies.extend(new_ones)
+                        st.success(f"✅ Added {len(new_ones)} policies from PDFs")
+                        st.rerun()
+
+    # ── Live pull from CHI Portal ────────────────────────────────────────────
+    chi_api_key = st.secrets.get("CHI_API_KEY","")
+    if chi_api_key and a_name and len(a_name) >= 3:
+        if st.button("🔗 Pull from CHI Portal", key="pull_chi", use_container_width=False):
+            with st.spinner("Fetching from Railway..."):
+                # Search clients
+                clients_data = chi_api("clients", {"search": a_name})
+                if clients_data and isinstance(clients_data, list) and len(clients_data) > 0:
+                    # Find best match
+                    match = next((c for c in clients_data
+                                  if a_name.lower() in c.get("name","").lower()), clients_data[0])
+                    client_detail = chi_api(f"clients/{match['id']}")
+                    if client_detail and "policies" in client_detail:
+                        st.session_state.an_policies = [
+                            {"type":    p.get("type","other"),
+                             "provider":p.get("insurer",""),
+                             "policy_no":p.get("policy_number",""),
+                             "premium": p.get("premium",""),
+                             "renewal_date": p.get("expiry_date",""),
+                             "color":   _POLICY_TYPES.get(p.get("type","other"),_POLICY_TYPES["other"])["color"]}
+                            for p in client_detail["policies"]
+                        ]
+                        st.success(f"✅ Pulled {len(st.session_state.an_policies)} policies for {match['name']}")
+                        st.rerun()
+                    else:
+                        st.warning("Client found but no policies. Add manually below.")
+                elif isinstance(clients_data, dict) and "error" in clients_data:
+                    st.error(f"API error: {clients_data['error']}")
+                else:
+                    st.warning(f"No client found matching '{a_name}' in CHI Portal.")
+    elif not chi_api_key:
+        st.caption("💡 Add CHI_API_KEY to Streamlit secrets + add chi_api_routes.py to Railway for auto-pull")
+
+    with st.expander("➕ Προσθήκη υπάρχουσας ασφάλισης"):
+        ep1, ep2, ep3 = st.columns(3)
+        with ep1:
+            ep_type = st.selectbox("Τύπος", list(_POLICY_TYPES.keys()),
+                format_func=lambda k: f"{_POLICY_TYPES[k]['icon']} {_POLICY_TYPES[k]['label_el']}",
+                key="ep_type")
+        with ep2:
+            ep_prov = st.selectbox("Ασφαλιστής", _PROVIDERS, key="ep_prov")
+        with ep3:
+            ep_no   = st.text_input("Αρ. ασφαλιστηρίου", key="ep_no")
+        if st.button("Προσθήκη ✓", key="add_an_pol"):
+            st.session_state.an_policies.append(
+                {"type":ep_type,"provider":ep_prov,"policy_no":ep_no})
+            st.rerun()
+
+    for i, p in enumerate(st.session_state.an_policies):
+        cfg  = _POLICY_TYPES.get(p.get("type","other"), _POLICY_TYPES["other"])
+        ac1, ac2 = st.columns([5,1])
+        src  = f" · 📄 {p['source_file']}" if p.get("source_file") else ""
+        prem = f" · {p.get('currency','EUR')} {p['premium']}" if p.get("premium") else ""
+        ren  = f" · Λήξη {p['renewal_date']}" if p.get("renewal_date") else ""
+        pno  = f" `{p['policy_no']}`" if p.get("policy_no") else ""
+        ac1.markdown(f"{cfg['icon']} **{p.get('provider','')}** {p.get('product','')}{pno}{prem}{ren}{src}")
+        if p.get("coverage"):
+            ac1.caption(p["coverage"][:120])
+        if ac2.button("✕", key=f"del_an_{i}"):
+            st.session_state.an_policies.pop(i); st.rerun()
+
+    st.divider()
+
+    # ── Analyse button ─────────────────────────────────────────────────────────
+    if st.button("🧠 Ανάλυση Ασφαλιστικών Αναγκών", type="primary",
+                 use_container_width=True, key="run_analysis"):
+        if not a_name or not a_prof:
+            st.warning("Συμπληρώστε όνομα και επάγγελμα.")
+        elif not api_key:
+            st.error("Προσθέστε Claude_API_Key στα Streamlit secrets.")
+        else:
+            client_data = {
+                "name": a_name, "age": a_age, "profession": a_prof,
+                "family": a_family, "income": a_income, "notes": a_notes,
+                "has_property": a_prop, "has_vehicle": a_vehicle,
+                "has_pets": a_pets, "has_children": a_kids,
+                "is_expat": a_expat, "travels_frequently": a_expat,
+            }
+            from chi_ai_analyzer import build_analyzer_prompt
+            prompt = build_analyzer_prompt(client_data, st.session_state.an_policies, a_lang)
+
+            with st.spinner("Claude αναλύει το προφίλ..."):
+                body = _j.dumps({
+                    "model":"claude-sonnet-4-6","max_tokens":3000,
+                    "system":("Είσαι έμπειρος ασφαλιστικός σύμβουλος στην Ελλάδα με βαθιά γνώση "
+                              "της ελληνικής και διεθνούς ασφαλιστικής αγοράς."),
+                    "messages":[{"role":"user","content":prompt}]
+                }).encode()
+                req = _ur.Request("https://api.anthropic.com/v1/messages", data=body,
+                    headers={"x-api-key":api_key,"anthropic-version":"2023-06-01",
+                             "content-type":"application/json"})
+                try:
+                    with _ur.urlopen(req, timeout=60) as r:
+                        result = _j.loads(r.read())["content"][0]["text"]
+                    st.session_state["an_result"]  = result
+                    st.session_state["an_client"]  = a_name
+                    st.session_state["an_prof_val"]= a_prof
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # ── Display results ────────────────────────────────────────────────────────
+    if st.session_state.get("an_result"):
+        result = st.session_state["an_result"]
+        cname  = st.session_state["an_client"]
+
+        st.markdown("---")
+        st.markdown(f"### 📊 Ανάλυση: {cname}")
+        st.markdown(f'<div style="background:white;border-radius:14px;padding:24px;'
+                    f'border:1px solid #E8E0D5;box-shadow:0 2px 8px rgba(0,0,0,.04)">', unsafe_allow_html=True)
+        st.markdown(result)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # ── Action buttons ─────────────────────────────────────────────────────
+        ab1, ab2, ab3 = st.columns(3)
+        with ab1:
+            st.download_button("📥 Λήψη ανάλυσης",
+                               data=f"ASHLAR INSURANCE — Ανάλυση Αναγκών\n{cname}\n\n{result}",
+                               file_name=f"analysis_{cname.replace(' ','_')}.txt",
+                               mime="text/plain", use_container_width=True)
+        with ab2:
+            # Generate proposal HTML
+            from datetime import datetime as _dt
+            html_proposal = f"""<!DOCTYPE html>
+<html lang="el"><head><meta charset="UTF-8">
+<title>Ashlar Insurance · Ανάλυση Αναγκών · {cname}</title>
+<style>body{{font-family:'DM Sans',system-ui,sans-serif;max-width:800px;margin:0 auto;padding:32px;color:#1C1410}}
+.header{{background:linear-gradient(135deg,#1C1410,#3A2E24);color:#E8DDD0;padding:32px;border-radius:12px;margin-bottom:24px}}
+.logo{{font-size:13px;color:#C9A96E;letter-spacing:4px;margin-bottom:8px}}
+.title{{font-size:24px;font-weight:700}}
+.content{{background:white;border:1px solid #E8E0D5;border-radius:12px;padding:24px}}
+h2{{color:#C9A96E;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin-top:20px}}
+.footer{{text-align:center;font-size:11px;color:#A09080;margin-top:20px}}
+</style></head><body>
+<div class="header"><div class="logo">ASHLAR INSURANCE</div>
+<div class="title">Ανάλυση Ασφαλιστικών Αναγκών</div>
+<div style="font-size:13px;opacity:.7;margin-top:8px">{cname} · {_dt.now().strftime("%d/%m/%Y")}</div></div>
+<div class="content">{"<br>".join(result.split(chr(10)))}</div>
+<div class="footer">Ashlar Insurance · info@chiinsurancebrokers.com · ashlar-assurance.com<br>
+Εμπιστευτικό έγγραφο</div></body></html>"""
+            st.download_button("📄 Πρόταση HTML",
+                               data=html_proposal.encode(),
+                               file_name=f"proposal_{cname.replace(' ','_')}.html",
+                               mime="text/html", use_container_width=True)
+        with ab3:
+            if st.button("🔄 Νέα Ανάλυση", use_container_width=True, key="reset_an"):
+                for k in ["an_result","an_client","an_prof_val","an_policies"]:
+                    if k in st.session_state: del st.session_state[k]
+                st.rerun()
+
+
+
 def render_chi_portal():
-    """CHI Insurance Portal — launcher and quick-access panel."""
     portal_url = st.secrets.get("CHI_PORTAL_URL",
                                 "https://chi-insurance-portal-production.up.railway.app")
+    gh_token   = st.secrets.get("GITHUB_TOKEN","")
+    repo       = "chiinsurancebrokers/chi-insurance-portal"
 
     st.markdown("## 🌐 CHI Insurance Portal")
     st.caption(f"{portal_url}")
 
-    # ── Main launch button ────────────────────────────────────────────────────
-    st.markdown(f"""<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);
-        border-radius:16px;padding:28px;text-align:center;margin-bottom:20px">
-        <div style="font-size:40px;margin-bottom:10px">🛡️</div>
-        <div style="font-size:22px;font-weight:800;color:#C9A96E;margin-bottom:6px">CHI Admin Panel</div>
-        <div style="font-size:13px;color:#A89880;margin-bottom:20px">
-            138 Clients · 222 Active Policies · 171 Pending Payments · 30 Expiring
-        </div>
-        <a href="{portal_url}" target="_blank"
-           style="background:#C9A96E;color:#1C1410;padding:12px 32px;border-radius:8px;
-                  font-weight:800;font-size:15px;text-decoration:none;letter-spacing:.5px">
-            Open Portal →
-        </a>
-    </div>""", unsafe_allow_html=True)
-
-    # ── Quick links to sections ───────────────────────────────────────────────
-    st.markdown("### Quick Access")
-    q1, q2, q3, q4 = st.columns(4)
-    with q1:
-        st.link_button("👥 Clients",       f"{portal_url}/clients",  use_container_width=True, type="primary")
-    with q2:
-        st.link_button("📄 Policies",      f"{portal_url}/policies", use_container_width=True, type="primary")
-    with q3:
-        st.link_button("💳 Payments",      f"{portal_url}/payments", use_container_width=True, type="primary")
-    with q4:
-        st.link_button("📧 Send Renewals", f"{portal_url}/renewals", use_container_width=True)
+    qa1,qa2,qa3 = st.columns(3)
+    with qa1: st.link_button("🌐 Open Portal",   portal_url,            use_container_width=True, type="primary")
+    with qa2: st.link_button("🔐 Admin Login",   f"{portal_url}/login", use_container_width=True)
+    with qa3: st.link_button("📂 GitHub Repo",   f"https://github.com/{repo}", use_container_width=True)
 
     st.divider()
+    tab_op, tab_gen, tab_manage = st.tabs(["🚀 Operate","🏗️ Generate Client Portal","📋 Manage Portals"])
 
-    # ── Admin credentials ─────────────────────────────────────────────────────
-    with st.expander("🔐 Admin credentials"):
-        st.markdown(f"""
-| Field | Value |
-|---|---|
-| URL | [{portal_url}]({portal_url}) |
-| Username | `admin` |
-| Email | `xiatropoulos@gmail.com` |
-| GitHub | [chiinsurancebrokers/chi-insurance-portal](https://github.com/chiinsurancebrokers/chi-insurance-portal) |
-        """)
+    # ══ TAB: OPERATE ══════════════════════════════════════════════════════════
+    with tab_op:
+        st.markdown(f"""<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);
+            border-radius:16px;padding:28px;text-align:center;margin-bottom:20px">
+            <div style="font-size:40px;margin-bottom:10px">🛡️</div>
+            <div style="font-size:22px;font-weight:800;color:#C9A96E;margin-bottom:6px">CHI Admin Panel</div>
+            <div style="font-size:13px;color:#A89880;margin-bottom:20px">
+                138 Clients · 222 Active Policies · 171 Pending Payments · 30 Expiring
+            </div>
+            <a href="{portal_url}" target="_blank"
+               style="background:#C9A96E;color:#1C1410;padding:12px 32px;border-radius:8px;
+                      font-weight:800;font-size:15px;text-decoration:none">
+                Open Admin Panel →
+            </a>
+        </div>""", unsafe_allow_html=True)
+        q1,q2,q3,q4 = st.columns(4)
+        with q1: st.link_button("👥 Clients",       f"{portal_url}/clients",  use_container_width=True, type="primary")
+        with q2: st.link_button("📄 Policies",      f"{portal_url}/policies", use_container_width=True, type="primary")
+        with q3: st.link_button("💳 Payments",      f"{portal_url}/payments", use_container_width=True, type="primary")
+        with q4: st.link_button("📧 Send Renewals", f"{portal_url}/renewals", use_container_width=True)
 
-    # ── CSV Upload reminder ───────────────────────────────────────────────────
-    st.info("""📊 **Monthly CSV Upload** — upload directly in the portal:
-- **3P Insurance format:** CLIENT NAME · INSURANCE TYPE · INSURANCE COMPANY · LICENSE PLATE · PREMIUM · EXPIRY DATE
-- **Hellas Direct format:** Ονοματεπώνυμο · Αρ. Κυκλοφορίας · Ασφάλιστρο · Λήξη""")
+        # Live renewal queue from API
+        if st.secrets.get("CHI_API_KEY",""):
+            st.divider()
+            st.markdown("#### ⏰ Upcoming Renewals (Live from Railway)")
+            if st.button("🔄 Refresh renewal queue", key="refresh_renewals"):
+                st.session_state["_renewals_data"] = chi_api("renewals")
+                st.rerun()
+            renewals_data = st.session_state.get("_renewals_data")
+            if renewals_data and "error" not in (renewals_data or {}):
+                urgent   = renewals_data.get("urgent",[])
+                soon     = renewals_data.get("soon",[])
+                upcoming = renewals_data.get("upcoming",[])
+                if urgent:
+                    st.markdown(f"**🔴 Urgent ({len(urgent)}) — within 7 days:**")
+                    for r in urgent[:5]:
+                        st.markdown(f"• **{r.get('client_name','')}** — {r.get('insurer','')} {r.get('type','')} · expires {r.get('expiry_date','')} · **{r.get('days_left','')} days**")
+                if soon:
+                    st.markdown(f"**🟡 Soon ({len(soon)}) — within 30 days:**")
+                    for r in soon[:5]:
+                        st.markdown(f"• **{r.get('client_name','')}** — {r.get('insurer','')} · {r.get('days_left','')} days")
+            elif renewals_data:
+                st.error(f"API error: {renewals_data.get('error')}")
+            else:
+                st.caption("Click Refresh to load renewal queue from Railway.")
+        st.divider()
+        with st.expander("🔐 Admin credentials"):
+            st.markdown(f"""| | |\n|---|---|\n| URL | [{portal_url}]({portal_url}) |\n| Username | `admin` |\n| Email | `xiatropoulos@gmail.com` |""")
+        st.info("📊 **Monthly CSV Upload** — 3P format: CLIENT NAME · INSURANCE TYPE · COMPANY · LICENSE PLATE · PREMIUM · EXPIRY DATE  ·  Hellas Direct: Ονοματεπώνυμο · Αρ. Κυκλοφορίας · Ασφάλιστρο · Λήξη")
+
+    # ══ TAB: GENERATE ═════════════════════════════════════════════════════════
+    with tab_gen:
+        st.caption("Multi-policy personalised portal · All insurance types · Push to GitHub")
+
+        if "p2_policies" not in st.session_state:
+            st.session_state.p2_policies  = []
+            st.session_state.p2_payments  = []
+            st.session_state.p2_documents = []
+            st.session_state.p2_claims    = []
+
+        # Client info
+        st.markdown("#### 👤 Client")
+        ci1,ci2,ci3 = st.columns(3)
+        with ci1: p2_name = st.text_input("Full name *", key="p2_name")
+        with ci2: p2_email= st.text_input("Email",       key="p2_email")
+        with ci3: p2_lang = st.radio("Language",["el","en"],horizontal=True,key="p2_lang")
+
+        # ── Policies ──────────────────────────────────────────────────────────
+        st.markdown("#### 📋 Policies")
+        with st.expander("➕ Add policy", expanded=len(st.session_state.p2_policies)==0):
+            np1,np2,np3 = st.columns(3)
+            with np1:
+                npt = st.selectbox("Type", list(_POLICY_TYPES.keys()),
+                                   format_func=lambda k:f"{_POLICY_TYPES[k]['icon']} {_POLICY_TYPES[k]['label']}",
+                                   key="np_type")
+                npp = st.selectbox("Provider", _PROVIDERS, key="np_prov")
+            with np2:
+                npn = st.text_input("Policy number", key="np_no")
+                nppr= st.text_input("Product / coverage", key="np_prod")
+            with np3:
+                npm = st.text_input("Premium", key="np_prem")
+                npc = st.selectbox("Currency",["EUR","GBP","USD"],key="np_cur")
+                npd = st.date_input("Renewal date", key="np_date")
+            npo = st.text_input("Notes (optional)", key="np_notes")
+            if st.button("Add Policy ✓", type="primary", key="add_pol"):
+                st.session_state.p2_policies.append({
+                    "type":npt,"provider":npp,"policy_no":npn,"product":nppr,
+                    "premium":npm,"currency":npc,
+                    "renewal_date":str(npd),"status":"Active",
+                    "notes":npo,"color":_POLICY_TYPES[npt]["color"]
+                })
+                st.success(f"Policy added: {_POLICY_TYPES[npt]['icon']} {npp}")
+                st.rerun()
+
+        for i,p in enumerate(st.session_state.p2_policies):
+            cfg = _POLICY_TYPES.get(p["type"],_POLICY_TYPES["other"])
+            pc1,pc2 = st.columns([5,1])
+            pc1.markdown(f"{cfg['icon']} **{p['provider']}** — {p['product']} · {p['currency']} {p['premium']} · Renewal {p['renewal_date']}")
+            if pc2.button("✕",key=f"del_pol_{i}"):
+                st.session_state.p2_policies.pop(i); st.rerun()
+
+        # ── Payments ──────────────────────────────────────────────────────────
+        st.markdown("#### 💳 Payment History")
+        with st.expander("➕ Add payment"):
+            pp1,pp2,pp3 = st.columns(3)
+            with pp1:
+                ppd = st.text_input("Date (dd/mm/yyyy)", key="pp_date")
+                ppa = st.text_input("Amount", key="pp_amt")
+            with pp2:
+                ppdesc= st.text_input("Description", key="pp_desc")
+                ppc   = st.selectbox("Currency",["EUR","GBP","USD"],key="pp_cur")
+            with pp3:
+                ppm = st.text_input("Payment method", key="pp_meth", placeholder="Bank transfer, credit card...")
+                pps = st.selectbox("Status", _PAY_STATUS, key="pp_stat")
+            if st.button("Add Payment ✓", key="add_pay"):
+                st.session_state.p2_payments.append(
+                    {"date":ppd,"description":ppdesc,"amount":ppa,"currency":ppc,"method":ppm,"status":pps})
+                st.rerun()
+        for i,pay in enumerate(st.session_state.p2_payments):
+            pc1,pc2 = st.columns([5,1])
+            pc1.markdown(f"{pay['status']} **{pay['date']}** — {pay['description']} · {pay['currency']} {pay['amount']}")
+            if pc2.button("✕",key=f"del_pay_{i}"):
+                st.session_state.p2_payments.pop(i); st.rerun()
+
+        # ── Documents ─────────────────────────────────────────────────────────
+        st.markdown("#### 📂 Documents")
+        with st.expander("➕ Add document link"):
+            dd1,dd2,dd3 = st.columns(3)
+            with dd1: ddn = st.text_input("Document name", key="dd_name")
+            with dd2: ddu = st.text_input("URL (Google Drive, Dropbox...)", key="dd_url")
+            with dd3: ddt = st.selectbox("Type",["pdf","word","image","other"],key="dd_type")
+            if st.button("Add Document ✓", key="add_doc"):
+                st.session_state.p2_documents.append({"name":ddn,"url":ddu,"type":ddt})
+                st.rerun()
+        for i,doc in enumerate(st.session_state.p2_documents):
+            dc1,dc2 = st.columns([5,1])
+            dc1.markdown(f"📄 **{doc['name']}** · {doc['url'][:50]}...")
+            if dc2.button("✕",key=f"del_doc_{i}"):
+                st.session_state.p2_documents.pop(i); st.rerun()
+
+        # ── Claims ────────────────────────────────────────────────────────────
+        st.markdown("#### 🔍 Claims")
+        with st.expander("➕ Add claim"):
+            cl1,cl2,cl3 = st.columns(3)
+            with cl1:
+                clr = st.text_input("Reference", key="cl_ref")
+                clt = st.selectbox("Policy type",list(_POLICY_TYPES.keys()),
+                                   format_func=lambda k:f"{_POLICY_TYPES[k]['icon']} {_POLICY_TYPES[k]['label']}",
+                                   key="cl_type")
+            with cl2:
+                cld = st.text_input("Date", key="cl_date")
+                cla = st.text_input("Amount", key="cl_amt")
+                clc = st.selectbox("Currency",["EUR","GBP","USD"],key="cl_cur")
+            with cl3:
+                cls_ = st.selectbox("Status", _CLM_STATUS, key="cl_stat")
+                cln  = st.text_area("Description", height=68, key="cl_notes")
+            if st.button("Add Claim ✓", key="add_clm"):
+                st.session_state.p2_claims.append(
+                    {"ref":clr,"policy_type":clt,"date":cld,"amount":cla,
+                     "currency":clc,"status":cls_,"description":cln})
+                st.rerun()
+        for i,cl in enumerate(st.session_state.p2_claims):
+            cc1,cc2 = st.columns([5,1])
+            cc1.markdown(f"{cl['status']} **{cl['ref']}** — {_POLICY_TYPES.get(cl['policy_type'],_POLICY_TYPES['other'])['icon']} {cl['description'][:60]}")
+            if cc2.button("✕",key=f"del_cl_{i}"):
+                st.session_state.p2_claims.pop(i); st.rerun()
+
+        st.divider()
+
+        # ── Generate button ───────────────────────────────────────────────────
+        if st.button("⚡ Generate Client Portal", type="primary",
+                     use_container_width=True, key="gen_p2"):
+            if not p2_name:
+                st.warning("Client name is required.")
+            elif not st.session_state.p2_policies:
+                st.warning("Add at least one policy.")
+            else:
+                from chi_portal_phase2 import generate_client_portal
+                client_data = {"name":p2_name,"email":p2_email,"lang":p2_lang}
+                html = generate_client_portal(
+                    client_data,
+                    st.session_state.p2_policies,
+                    st.session_state.p2_payments,
+                    st.session_state.p2_documents,
+                    st.session_state.p2_claims,
+                )
+                st.session_state["p2_html"]   = html
+                st.session_state["p2_client"] = p2_name
+                st.session_state["p2_folder"] = p2_name.lower().replace(" ","-").replace("'","")
+                st.success(f"✅ Portal generated for {p2_name} — {len(st.session_state.p2_policies)} policies")
+
+        # Show result
+        if st.session_state.get("p2_html"):
+            html   = st.session_state["p2_html"]
+            cname  = st.session_state["p2_client"]
+            folder = st.session_state["p2_folder"]
+            st.download_button("📥 Download index.html", data=html.encode(),
+                               file_name="index.html", mime="text/html",
+                               use_container_width=True)
+            if gh_token:
+                if st.button("🚀 Push to GitHub → auto-deploy", use_container_width=True, key="push_p2"):
+                    import base64 as _b64, urllib.request as _ur, json as _j, urllib.error as _ue
+                    path = f"clients/{folder}/index.html"
+                    api  = f"https://api.github.com/repos/{repo}/contents/{path}"
+                    hdrs = {"Authorization":f"token {gh_token}","Accept":"application/vnd.github.v3+json",
+                            "Content-Type":"application/json","User-Agent":"HAL"}
+                    sha = None
+                    try:
+                        req = _ur.Request(api, headers=hdrs)
+                        with _ur.urlopen(req,timeout=8) as r: sha = _j.loads(r.read()).get("sha")
+                    except _ue.HTTPError: pass
+                    payload = {"message":f"{'Update' if sha else 'Add'} portal: {cname}",
+                               "content":_b64.b64encode(html.encode()).decode(),"branch":"main"}
+                    if sha: payload["sha"] = sha
+                    req = _ur.Request(api,data=_j.dumps(payload).encode(),headers=hdrs,method="PUT")
+                    try:
+                        with _ur.urlopen(req,timeout=15) as r: _j.loads(r.read())
+                        st.success(f"✅ Pushed → clients/{folder}/index.html")
+                        st.info("Auto-deploys within 30 seconds.")
+                    except Exception as e:
+                        st.error(f"Push failed: {e}")
+            else:
+                st.caption("Add GITHUB_TOKEN to secrets to enable one-click push.")
+
+            if st.button("🔄 New portal", key="reset_p2"):
+                for k in ["p2_html","p2_client","p2_folder","p2_policies",
+                          "p2_payments","p2_documents","p2_claims"]:
+                    if k in st.session_state: del st.session_state[k]
+                st.rerun()
+
+    # ══ TAB: MANAGE ═══════════════════════════════════════════════════════════
+    with tab_manage:
+        # Live stats from API
+        live_stats = chi_api("stats") if st.secrets.get("CHI_API_KEY","") else None
+
+        mc1,mc2 = st.columns(2)
+        with mc1:
+            clients_count  = live_stats.get("total_clients","—")  if live_stats and "error" not in live_stats else "138"
+            policies_count = live_stats.get("total_policies","—") if live_stats and "error" not in live_stats else "222"
+            expiring_count = live_stats.get("expiring_30_days","—") if live_stats and "error" not in live_stats else "30"
+            st.markdown(f"""<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);
+                border-radius:12px;padding:18px 20px;color:#E8DDD0;margin-bottom:12px">
+                <div style="font-size:11px;color:#7A6A5A;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Railway · Live</div>
+                <div style="font-size:15px;font-weight:700;color:#C9A96E">chi-insurance-portal</div>
+                <div style="font-size:12px;color:#A89880;margin-top:6px;line-height:1.8">
+                    👥 {clients_count} Clients · 📋 {policies_count} Policies<br>
+                    ⏰ {expiring_count} Expiring in 30 days
+                </div>
+                <a href="{portal_url}" target="_blank" style="display:inline-block;margin-top:10px;
+                   background:#C9A96E;color:#1C1410;padding:5px 14px;border-radius:6px;
+                   text-decoration:none;font-weight:700;font-size:12px">Open →</a>
+            </div>""", unsafe_allow_html=True)
+        with mc2:
+            st.markdown("""<div style="background:white;border:1px solid #E8E0D5;border-radius:12px;padding:18px 20px;margin-bottom:12px">
+                <div style="font-size:11px;color:#7A6A5A;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Admin</div>
+                <div style="font-size:13px;color:#2C1810;line-height:2">Username: <code>admin</code><br>Email: <code>xiatropoulos@gmail.com</code></div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("### Client Portals")
+        portals = [{"client":"Pantelis Kourbelas","url":"panteliskourbelas-chiinsurancebrokers.netlify.app","status":"🟢 Live"}]
+        if gh_token:
+            try:
+                import urllib.request as _ur, json as _j
+                req = _ur.Request(f"https://api.github.com/repos/{repo}/contents/clients",
+                    headers={"Authorization":f"token {gh_token}","Accept":"application/vnd.github.v3+json","User-Agent":"HAL"})
+                with _ur.urlopen(req,timeout=8) as r:
+                    for item in _j.loads(r.read()):
+                        if item.get("type")=="dir":
+                            n = item["name"].replace("-"," ").title()
+                            if not any(p["client"].lower().replace(" ","")==n.lower().replace(" ","") for p in portals):
+                                portals.append({"client":n,"url":"","status":"🔵 GitHub"})
+            except: pass
+
+        for p in portals:
+            pc1,pc2,pc3,pc4 = st.columns([2,3,1,1])
+            pc1.markdown(f"**{p['client']}**")
+            if p["url"]: pc2.markdown(f"[{p['url']}](https://{p['url']})")
+            else: pc2.caption("Deployed via GitHub")
+            pc3.markdown(p["status"])
+            if p["url"]: pc4.link_button("Open",f"https://{p['url']}",use_container_width=True)
+
+        st.divider()
+        st.link_button("📂 View on GitHub",f"https://github.com/{repo}/tree/main/clients",use_container_width=True)
 
 
 def render_kira_pet_hal():
@@ -1720,6 +2658,7 @@ elif mode == "business":
     elif module == "apps":      render_apps()
     elif module == "pets":      render_pets()
     elif module == "kira_nurse":  render_kira_nurse()
+    elif module == "chi_analyzer": render_chi_analyzer()
     elif module == "chi_portal":  render_chi_portal()
     elif module == "kira_pet":    render_kira_pet_hal()
     else: render_business_home()
