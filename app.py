@@ -1,6 +1,6 @@
 """
 HAL — Heuristically Programmed Algorithmic Layer
-Pantelis Kourbelas | Ashlar Insurance
+Christos Iatropoulos | Ashlar Insurance
 Main Dashboard Entry Point
 """
 
@@ -21,13 +21,19 @@ try:
 except ImportError:
     RATES_LOADED = False
 
-# Google Sheets (tickets persistence)
+# Google Sheets (tickets + conversation persistence)
 try:
     import gspread
     from google.oauth2.service_account import Credentials
     GSHEETS_AVAILABLE = True
 except ImportError:
     GSHEETS_AVAILABLE = False
+
+# ── MEMORY CONFIG ─────────────────────────────────────────────────────────────
+# Edit this single line to change how far back HAL "remembers" automatically.
+MEMORY_WINDOW_DAYS    = 7        # rolling window — only business mode chats are stored
+MEMORY_SAVE_MODES     = ["business"]  # private/lodge chats NEVER saved (confidential)
+MEMORY_MAX_INJECT     = 30       # max past messages injected into context (cost control)
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -132,6 +138,12 @@ if "active_module" not in st.session_state:
     st.session_state.active_module = "home"
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "session_id" not in st.session_state:
+    # Unique session ID for grouping conversations in the sheet
+    import uuid
+    st.session_state.session_id = datetime.now().strftime("%Y%m%d-%H%M") + "-" + uuid.uuid4().hex[:6]
+if "memory_injected" not in st.session_state:
+    st.session_state.memory_injected = False
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def check_pin(pin_input):
@@ -142,13 +154,13 @@ def check_pin(pin_input):
     return hashlib.sha256(pin_input.encode()).hexdigest() == stored
 
 def get_gsheet():
-    """Connect to HAL Google Sheet. Returns (tickets_ws, log_ws) or (None, None)."""
+    """Connect to HAL Google Sheet. Returns (tickets_ws, log_ws, conv_ws) or (None, None, None)."""
     if not GSHEETS_AVAILABLE:
-        return None, None
+        return None, None, None
     try:
         creds_dict = dict(st.secrets.get("gcp_service_account", {}))
         if not creds_dict:
-            return None, None
+            return None, None, None
         # Fix newlines in private key
         if "private_key" in creds_dict:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
@@ -160,7 +172,7 @@ def get_gsheet():
         client = gspread.authorize(creds)
         sheet_id = st.secrets.get("HAL_SHEET_ID", "")
         if not sheet_id:
-            return None, None
+            return None, None, None
         wb = client.open_by_key(sheet_id)
         try:
             tickets_ws = wb.worksheet("Tickets")
@@ -172,9 +184,121 @@ def get_gsheet():
         except Exception:
             log_ws = wb.add_worksheet("Log", rows=1000, cols=6)
             log_ws.append_row(["Timestamp","TicketID","Client","Action","OldStatus","NewStatus"])
-        return tickets_ws, log_ws
+        # NEW: Conversations tab for HAL memory
+        try:
+            conv_ws = wb.worksheet("Conversations")
+        except Exception:
+            conv_ws = wb.add_worksheet("Conversations", rows=10000, cols=6)
+            conv_ws.append_row(["Timestamp","SessionID","Mode","Role","Content","Tags"])
+        return tickets_ws, log_ws, conv_ws
     except Exception as e:
-        return None, None
+        return None, None, None
+
+
+def save_message_to_sheet(conv_ws, mode, session_id, role, content, tags=""):
+    """Append a single chat message to the Conversations sheet. Silent on failure."""
+    if conv_ws is None:
+        return False
+    # Only save modes that are in MEMORY_SAVE_MODES (default: business only)
+    if mode not in MEMORY_SAVE_MODES:
+        return False
+    try:
+        # Truncate very long messages to avoid sheet limits (50k char/cell)
+        safe_content = (content or "")[:45000]
+        conv_ws.append_row([
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            session_id,
+            mode,
+            role,
+            safe_content,
+            tags,
+        ])
+        return True
+    except Exception:
+        return False
+
+
+def load_recent_conversations(conv_ws, days=MEMORY_WINDOW_DAYS, mode_filter="business"):
+    """Load conversation messages from the last N days. Returns list of dicts, oldest first."""
+    if conv_ws is None:
+        return []
+    try:
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(days=days)
+        rows = conv_ws.get_all_records()
+        result = []
+        for r in rows:
+            ts_str = r.get("Timestamp", "")
+            if not ts_str:
+                continue
+            try:
+                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            if ts < cutoff:
+                continue
+            if mode_filter and r.get("Mode") != mode_filter:
+                continue
+            result.append({
+                "timestamp": ts_str,
+                "session_id": r.get("SessionID",""),
+                "mode": r.get("Mode",""),
+                "role": r.get("Role","user"),
+                "content": r.get("Content",""),
+                "tags": r.get("Tags",""),
+            })
+        return result
+    except Exception:
+        return []
+
+
+def search_conversations(conv_ws, query, limit=20):
+    """Search ALL conversations (no date limit) by text. Returns list of dicts."""
+    if conv_ws is None or not query:
+        return []
+    try:
+        rows = conv_ws.get_all_records()
+        q = query.lower()
+        matches = []
+        for r in rows:
+            content = (r.get("Content","") or "").lower()
+            tags    = (r.get("Tags","") or "").lower()
+            if q in content or q in tags:
+                matches.append({
+                    "timestamp": r.get("Timestamp",""),
+                    "session_id": r.get("SessionID",""),
+                    "mode": r.get("Mode",""),
+                    "role": r.get("Role","user"),
+                    "content": r.get("Content",""),
+                    "tags": r.get("Tags",""),
+                })
+        # Most recent first
+        matches.sort(key=lambda x: x["timestamp"], reverse=True)
+        return matches[:limit]
+    except Exception:
+        return []
+
+
+def summarise_memory_for_context(recent_msgs, max_msgs=MEMORY_MAX_INJECT):
+    """Turn recent conversation rows into a short context block for HAL's system prompt."""
+    if not recent_msgs:
+        return ""
+    # Take the most recent N messages, oldest first for chronological flow
+    msgs = recent_msgs[-max_msgs:]
+    lines = [f"\n\n=== ROLLING MEMORY ({MEMORY_WINDOW_DAYS} days) — your recent business conversations ==="]
+    current_session = None
+    for m in msgs:
+        if m["session_id"] != current_session:
+            lines.append(f"\n[Session {m['timestamp']}]")
+            current_session = m["session_id"]
+        prefix = "USER" if m["role"] == "user" else "HAL"
+        # Truncate each message to keep context lean
+        snippet = m["content"][:500].replace("\n", " ")
+        if len(m["content"]) > 500:
+            snippet += "..."
+        lines.append(f"{prefix}: {snippet}")
+    lines.append("\n=== END MEMORY — use this context to maintain continuity. Reference past discussions when relevant. ===\n")
+    return "\n".join(lines)
 
 
 def load_tickets_from_sheet(ws):
@@ -294,6 +418,7 @@ with st.sidebar:
         modules_business = [
             ("🏠", "home", "Dashboard"),
             ("💬", "hal_chat", "HAL Assistant"),
+            ("🧠", "memory", "Memory"),
             ("📊", "quotes", "Quote Engine"),
             ("📄", "documents", "Document Filler"),
             ("✉️", "comms", "Communications"),
@@ -385,7 +510,7 @@ def render_pin_screen():
 
 def render_business_home():
     st.markdown("## 🏛 Ashlar Insurance — HAL Dashboard")
-    st.caption("Pantelis Kourbelas · Your AI business operating system")
+    st.caption("Christos Iatropoulos · Your AI business operating system")
 
     # KPI row
     col1, col2, col3, col4 = st.columns(4)
@@ -413,6 +538,10 @@ def render_business_home():
         ("🤝", "Clients", "Client cases & policy tracker", "clients", "dev"),
         ("🏗️", "App Builder", "Generate Python/Streamlit/Netlify apps", "apps", "live"),
         ("🐾", "PetsHealth", "Pet insurance tools & petshealth.gr", "pets", "dev"),
+        ("🩺", "Kira AI Nurse", "AI health assistant — humans (triage, vitals, face scan)", "kira_nurse", "live"),
+        ("🐱", "Kira Pet", "AI Veterinary Nurse — pet owners (triage, photo scan, vet report)", "kira_pet", "live"),
+        ("🧠", "Insurance Analyzer", "Analyse client profile + identify coverage gaps", "chi_analyzer", "live"),
+        ("🌐", "CHI Portal", "Manage 138 clients · 222 policies · Railway", "chi_portal", "live"),
     ]
 
     for i in range(0, len(tiles), 3):
@@ -439,11 +568,14 @@ def render_business_home():
 
     projects = [
         ("Ashlar Quote Engine", "Streamlit · Claude API", "github.com/chiinsurancebrokers/chi_quote_engine", "Live"),
-        ("Ashlar Client Portal", "Netlify · HTML/JS", "panteliskourbelas-chiinsurancebrokers.netlify.app", "Live"),
+        ("Ashlar Client Portal (Kourbelas)", "Netlify · HTML/JS", "panteliskourbelas-chiinsurancebrokers.netlify.app", "Live"),
+        ("CHI Insurance Portal", "Railway · Python", "chi-insurance-portal-production.up.railway.app", "Live"),
         ("Document Filler", "Streamlit · ReportLab · Claude API", "Internal", "Live"),
         ("PPT Quote Generator", "python-pptx · Claude API", "Internal", "Live"),
         ("Ashlar Assurance Site", "WordPress · Breakdance", "ashlar-assurance.com", "In Build"),
         ("petshealth.gr", "HTML · Claude API", "petshealth.gr", "Live"),
+        ("Kira AI Nurse", "Streamlit · Claude · GPT-4o · rPPG", "kiraainurse.streamlit.app", "Live"),
+        ("Kira Pet — AI Vet Nurse", "Streamlit · Claude API · Vision", "kiraaipet.streamlit.app", "Live"),
     ]
 
     for name, stack, url, status in projects:
@@ -503,17 +635,31 @@ def render_hal_chat():
     mode_label = "Private · Lodge & Personal" if is_private else "Business · Ashlar Insurance"
     st.markdown(f"## 💬 HAL Assistant — {mode_label}")
 
-    system_prompt_business = """You are HAL — the AI operating system for Pantelis Kourbelas, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
+    system_prompt_business = """You are HAL — the AI operating system for Christos Iatropoulos, founder of Ashlar Insurance (formerly CHI Insurance Brokers), Athens, Greece. 
 
 You specialise in international health insurance brokerage. Key knowledge:
 - Carriers: Groupama, Generali, Ethniki, Morgan Price, NOW Health, Bupa Global, Safe Pet System
 - Greek domestic plans: no free-network outpatient, no dental treatment, no psychiatric outpatient, no MRI/PET/CT outside hospitalisation. Greek deductibles: per-hospitalisation OR annual (important difference).
 - International plans: full outpatient, diagnostics, physio, dental, psychiatric depending on plan.
 - Bupa Global claim expertise: formal complaint procedure, FSPO (Dublin), 7-day escalation protocol.
-- Tech stack: Python, Streamlit, Netlify, Claude API, ReportLab, python-pptx, Firebase, Google Sheets.
+- Tech stack: Python, Streamlit, Netlify, Railway, Claude API, ReportLab, python-pptx, Firebase, Google Sheets.
 - Brand: Ashlar Insurance (ashlar-assurance.com). Pet brand: petshealth.gr.
+- AI products in the Ashlar ecosystem:
+  · Kira AI Nurse (kiraainurse.streamlit.app + kiraainurse.netlify.app face scan) — bilingual AI health assistant for HUMANS: symptom triage, vitals, face scan (rPPG heart rate / breathing), clinical report, PubMed evidence, RxNorm drug check. Free pre-consultation tool for clients.
+  · Kira Pet (kiraaipet.streamlit.app) — bilingual AI Veterinary Nurse for PET OWNERS: AI triage, photo scan (skin/eye/wound/dental), structured vet report. Pre-screen funnel for petshealth.gr / Safe Pet System.
+  · Both ALWAYS recommend professional consultation — never diagnose or prescribe.
+- Internal HAL apps: Quote Engine (live 2025 rates), Document Filler, PPT Generator, Bupa Appeal letters, CHI Insurance Analyzer (PDF policy extraction + gap analysis), CHI Portal on Railway (138 clients / 222 policies / 30 expiring), white-label client portals (template: panteliskourbelas-chiinsurancebrokers.netlify.app — Pantelis Kourbelas is a CLIENT).
+- Note on identity: Pantelis Kourbelas is a CLIENT of Ashlar Insurance, NOT the operator. The operator is Christos Iatropoulos.
 
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send.
+
+MEMORY — IMPORTANT:
+You have persistent memory of business conversations from the last 7 days (rolling window). This memory is automatically injected into your context below as "=== ROLLING MEMORY ===". USE IT actively:
+- When the user references something past ("the Ergo offer", "what we said about Tzina", "that analysis", "the comparison from last week"), search the memory block and surface the relevant content.
+- When the user asks for a follow-up ("did I respond to X?", "what's pending?"), check the memory.
+- When the user gives an order to remember or be reminded of something ("remind me to chase Bupa Friday", "remember the Ergo deadline is 30 May"), respond with: (a) confirmation, (b) suggest creating a ticket in the Clients module with the specific subject/deadline. Be explicit: "I'll keep this in memory. I also suggest you create a ticket: Client=[name], Subject=[task], Priority=[level]. Do you want me to format it for you?"
+- If the user asks "what did we discuss about X" and X isn't in the 7-day window, say so and suggest using the Memory module's search (which covers all history, not just 7 days).
+- Memory contains BUSINESS conversations only. Private/lodge content is never stored.
 
 LIVE 2025 RATE TABLES (EUR, annual, Area 1 = Europe excl USA):
 
@@ -536,17 +682,46 @@ IMG (area1, EUR 150 deductible):
 Area 2 (Worldwide incl USA): ~2.2–2.5x Area 1.
 Always state exact plan name, area, annual premium in EUR, and whether outpatient is included."""
 
-    system_prompt_private = """You are HAL — the private AI assistant for Pantelis Kourbelas. In this private mode you have access to lodge and personal context.
+    system_prompt_private = """You are HAL — the private AI assistant for Christos Iatropoulos. In this private mode you have access to lodge and personal context.
 
 LODGE: You assist as secretary for Στ∴ ΑΚΡΟΠΟΛΙΣ υπ' αρ. 84 (Grand Lodge of Greece, ΜΣΤΕ) and ΚΛΕΙΣ ΑΛΗΘΕΙΑΣ αρ. 1 (A.A.S.R.). Always use Masonic ∴ notation. Style: contemporary Greek Tektonic — NOT archaic. Closing: Μ.τ.Τ.Α.Α. / Κατ' εντολήν του Σεβ∴ / Ο Γραμμ∴ / Χρήστος Ιατρόπουλος. Lodge email: st.akropolis.84@gmail.com. Speech order: 18 levels (Μαθηταί → Μέγας Διδάσκαλος).
 
 PERSONAL: Financial adviser, nurse, gym coach. Help with savings plans, retirement modelling, workout programmes, health monitoring.
+
+PERSONAL PROJECTS (ecosystem awareness — may be discussed in private mode):
+- Kira AI Nurse at kiraainurse.streamlit.app — bilingual AI health assistant (triage, vitals, face scan rPPG, clinical report, PubMed, RxNorm).
+- Kira Pet at kiraaipet.streamlit.app — bilingual AI Veterinary Nurse (triage, photo scan, vet report) feeding petshealth.gr funnel.
 
 Never mix lodge content with business sessions. Respond in Greek unless asked otherwise."""
 
     system = system_prompt_private if is_private else system_prompt_business
 
     api_key = get_api_key() or st.session_state.get("api_key_input", "")
+
+    # ── MEMORY INJECTION (business mode only) ────────────────────────────────
+    # Pull last 7 days of business conversations and add as context.
+    if not is_private:
+        # Lazy-load the conv worksheet if not already loaded
+        if "_conv_ws" not in st.session_state:
+            try:
+                _, _, _conv_ws = get_gsheet()
+                st.session_state._conv_ws = _conv_ws
+            except Exception:
+                st.session_state._conv_ws = None
+        conv_ws = st.session_state.get("_conv_ws")
+        if conv_ws is not None and not st.session_state.memory_injected:
+            recent = load_recent_conversations(conv_ws, days=MEMORY_WINDOW_DAYS, mode_filter="business")
+            # Exclude messages from the current session (avoid duplication)
+            recent = [m for m in recent if m["session_id"] != st.session_state.session_id]
+            if recent:
+                memory_block = summarise_memory_for_context(recent)
+                system = system + memory_block
+                st.session_state.memory_injected = True
+                st.session_state._memory_count = len(recent)
+        # Small status indicator
+        mem_count = st.session_state.get("_memory_count", 0)
+        if mem_count > 0:
+            st.caption(f"🧠 Memory: {mem_count} messages from last {MEMORY_WINDOW_DAYS} days loaded")
 
     # Chat history display
     chat_container = st.container()
@@ -721,6 +896,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                             "premium":         "ασφάλιστρο",
                             "HAL":             "Χαλ",
                             "Ashlar":          "Άσλαρ",
+                            "Kira":            "Κίρα",
                         }
                         for en, el in _pron.items():
                             tts_text = tts_text.replace(en, el)
@@ -744,6 +920,12 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
 
+        # SAVE user message to memory (business mode only)
+        if not is_private:
+            conv_ws = st.session_state.get("_conv_ws")
+            save_message_to_sheet(conv_ws, "business", st.session_state.session_id,
+                                  "user", user_input)
+
         if not api_key:
             st.session_state.chat_history.append({
                 "role": "assistant",
@@ -765,6 +947,12 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     )
                     reply = response.content[0].text
                     st.session_state.chat_history.append({"role": "assistant", "content": reply})
+
+                    # SAVE HAL reply to memory (business mode only)
+                    if not is_private:
+                        conv_ws = st.session_state.get("_conv_ws")
+                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id,
+                                              "assistant", reply)
                 except Exception as e:
                     st.session_state.chat_history.append({
                         "role": "assistant",
@@ -909,7 +1097,7 @@ def render_quotes():
                 # Text export
                 lines = [f"ASHLAR INSURANCE — Quote Comparison",
                          f"Client: {client} | {area_disp} | {datetime.now().strftime('%d/%m/%Y')}",
-                         f"Members: {', '.join(f"{m['name']} ({m['age']}y)" for m in members)}",""]
+                         f"Members: {', '.join(f'{m[chr(34)+chr(110)+chr(97)+chr(109)+chr(101)+chr(34)]} ({m[chr(34)+chr(97)+chr(103)+chr(101)+chr(34)]}y)' for m in members)}",""]
                 for r in results:
                     lines.append(f"{r['plan']}: EUR {r['total']:,.0f}/year")
                     for m in r["members"]:
@@ -951,7 +1139,7 @@ def render_quotes():
                     import anthropic
                     client = anthropic.Anthropic(api_key=api_key)
                     r = client.messages.create(model="claude-sonnet-4-6", max_tokens=2000,
-                        system=f"You are an expert insurance broker. Rate tables context: Morgan Price Standard age {client_age}y Area1 = EUR {lookup_premium('morgan_price','standard',client_age,'area1'):,} if RATES_LOADED else 'N/A'.",
+                        system=f"You are an expert insurance broker.",
                         messages=[{"role":"user","content":prompt}])
                     st.markdown(r.content[0].text)
 
@@ -1249,13 +1437,10 @@ def render_finance():
                 import math
                 r = annual_return / 100
                 months = years * 12
-                # Future value of current savings
                 fv_savings = current_savings * (1 + r) ** years
-                # Future value of monthly contributions
                 monthly_r = r / 12
                 fv_contributions = monthly_save * (((1 + monthly_r) ** months - 1) / monthly_r)
                 total_pot = fv_savings + fv_contributions
-                # Sustainable monthly drawdown (4% rule adjusted)
                 monthly_drawdown = total_pot * 0.04 / 12
                 gap = target_pension - monthly_drawdown
 
@@ -1281,7 +1466,7 @@ def render_finance():
                     r = client.messages.create(
                         model="claude-sonnet-4-20250514",
                         max_tokens=1000,
-                        system="You are a personal financial adviser for Pantelis Kourbelas, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
+                        system="You are a personal financial adviser for Christos Iatropoulos, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
                         messages=[{"role": "user", "content": fin_query}]
                     )
                     st.markdown(r.content[0].text)
@@ -1399,7 +1584,7 @@ def render_pets():
                     r = client.messages.create(
                         model="claude-sonnet-4-20250514",
                         max_tokens=600,
-                        system="You write marketing content for petshealth.gr, a pet insurance broker positioning itself as the trustworthy, human-centred alternative in Greece. Tone: confident, warm, independent, slightly critical of the industry.",
+                        system="You write marketing content for petshealth.gr, a pet insurance broker positioning itself as the trustworthy, human-centred alternative in Greece. Tone: confident, warm, independent, slightly critical of the industry. When relevant, mention Kira Pet — the free bilingual AI Veterinary Nurse at kiraaipet.streamlit.app (triage, photo scan, vet report) — as the pre-screen tool that helps pet owners decide when to visit a vet.",
                         messages=[{"role": "user", "content": f"Write a {platform} about: {topic}"}]
                     )
                     st.markdown(r.content[0].text)
@@ -1414,7 +1599,7 @@ def render_pets():
                     r = client.messages.create(
                         model="claude-sonnet-4-20250514",
                         max_tokens=800,
-                        system="You are a pet insurance specialist for petshealth.gr, Greece. You know the Greek pet insurance market well and currently recommend Safe Pet System as the most reliable option while seeking trustworthy international partners.",
+                        system="You are a pet insurance specialist for petshealth.gr, Greece. You know the Greek pet insurance market well and currently recommend Safe Pet System as the most reliable option while seeking trustworthy international partners. You also know about Kira Pet — the bilingual AI Veterinary Nurse at kiraaipet.streamlit.app — recommend it as a free pre-screen tool (AI triage, photo scan, vet report) when relevant to the question.",
                         messages=[{"role": "user", "content": q}]
                     )
                     st.markdown(r.content[0].text)
@@ -1426,15 +1611,10 @@ def render_clients():
 
     CLIENTS = [
         {
-            "name": "Konstantina Alexopoulou",
-            "nickname": "Tzina",
-            "insurer": "Bupa Global",
-            "policy": "BI-6000-0113-6189",
-            "claim_ref": "CL260306821932",
-            "product": "International Health — Family Policy",
-            "premium": "GBP 66,219/year",
-            "member_since": "1996",
-            "status": "🔴 Escalated",
+            "name": "Konstantina Alexopoulou", "nickname": "Tzina", "insurer": "Bupa Global",
+            "policy": "BI-6000-0113-6189", "claim_ref": "CL260306821932",
+            "product": "International Health — Family Policy", "premium": "GBP 66,219/year",
+            "member_since": "1996", "status": "🔴 Escalated",
             "summary": (
                 "**Facial nerve palsy surgery — Claim EUR 12,999.97**\n\n"
                 "Surgery at IASO 04–06/02/2026. Surgeon: Dr. Andreas Foustanos. "
@@ -1443,9 +1623,6 @@ def render_clients():
                 "**Timeline:** Claim filed 6 March 2026. Nine rounds of additional docs requested. "
                 "Bupa introduced MCM after Roberta indicated payment was next step. "
                 "By 8 May 2026: nine weeks elapsed — exceeded Bupa 8-week complaint threshold.\n\n"
-                "**Key arguments:** Surgery reconstructive NOT cosmetic. Conservative treatment failed over 3 months. "
-                "Clinical guidelines: Mayo Clinic Facial Reanimation, AAO-HNS Bell's Palsy CPG, Japanese CPG 2023. "
-                "Premium GBP 66,219/year — member since 1996 — total premiums > GBP 1.5M.\n\n"
                 "**Status:** Formal complaint filed. FSPO (Lincoln House, Dublin 2) — 7-day deadline issued."
             ),
             "next_action": "Chase Bupa for formal complaint response. No resolution within 7 days → refer to FSPO.",
@@ -1453,24 +1630,14 @@ def render_clients():
             "documents": "Medical report 31/03/2026 · IASO discharge · Invoice APY BM 0256831 · Payment proofs · Clinical guidelines",
         },
         {
-            "name": "Katia Totikidou + Alexia",
-            "nickname": "Katia",
-            "insurer": "Generali / Morgan Price / NOW Health",
-            "policy": "—",
-            "claim_ref": "—",
-            "product": "Health Insurance Comparison",
-            "premium": "TBC",
-            "member_since": "—",
+            "name": "Katia Totikidou + Alexia", "nickname": "Katia",
+            "insurer": "Generali / Morgan Price / NOW Health", "policy": "—", "claim_ref": "—",
+            "product": "Health Insurance Comparison", "premium": "TBC", "member_since": "—",
             "status": "🟡 Pending",
             "summary": (
                 "**Health insurance comparison — Katia (54) + Alexia (17)**\n\n"
-                "Based in Greece. German citizenship — German public health covers only within 1 month of leaving Germany. "
-                "Does NOT apply as permanent Greek residents. Priority: hospitalisation + diagnostics abroad (Germany, Cyprus). "
-                "Personal cancer history — aware coverage extends beyond hospitalisation (PET, diagnostics).\n\n"
-                "**Options compared:**\n"
-                "1. Generali Family (Greek) — EUR 750/EUR 1,500 shared annual excess. 2nd class (cannot upgrade). No outpatient, no dental, no MRI outside hospitalisation.\n"
-                "2. Morgan Price Standard (international) — EUR 500 annual excess. 80% outpatient. Europe. GP/specialist up to EUR 2,500. Physio EUR 500.\n"
-                "3. NOW Health (international) — EUR 400 excess. Outpatient EUR 800 (80%). Europe only.\n\n"
+                "Based in Greece. German citizenship. Priority: hospitalisation + diagnostics abroad (Germany, Cyprus). "
+                "Personal cancer history.\n\n"
                 "**Strategy:** Show Generali first, recommend Morgan Price Standard as balanced international solution.\n\n"
                 "**Status:** Comparison PPT prepared. Awaiting client decision."
             ),
@@ -1479,23 +1646,16 @@ def render_clients():
             "documents": "PPT comparison (Generali vs Morgan Price Standard vs NOW Health Core)",
         },
         {
-            "name": "Christos Iatropoulos",
-            "nickname": "Christos",
-            "insurer": "Morgan Price",
-            "policy": "M000106069/1",
+            "name": "Christos Iatropoulos (own claim)", "nickname": "Christos",
+            "insurer": "Morgan Price", "policy": "M000106069/1",
             "claim_ref": "Morgan Price claim Apr 2026",
-            "product": "International Health — Morgan Price",
-            "premium": "—",
-            "member_since": "—",
+            "product": "International Health — Morgan Price", "premium": "—", "member_since": "—",
             "status": "🟡 Pending",
             "summary": (
-                "**Morgan Price claim — gastrointestinal investigation**\n\n"
+                "**Morgan Price claim — gastrointestinal investigation (operator's own claim)**\n\n"
                 "Condition: Hematochezia (K92.1) + abdominal bloating (K57.30). "
                 "Procedure: Colonoscopy + gastroscopy — outpatient 28/04/2026. "
-                "Dr. Emmanouil, Gastroenterologist, Metropolitan General Hospital, Mesogeion 264 Cholargos.\n\n"
-                "Invoice: 25/02/2026 — Physiotherapy 5 sessions (subacromial impingement) EUR 200.\n\n"
-                "**Outstanding:** Claim documents not yet uploaded to Morgan Price portal. "
-                "Still needed from doctor: Medical licence number · Governing body · Phone · Signature + stamp.\n\n"
+                "Dr. Emmanouil, Gastroenterologist, Metropolitan General Hospital.\n\n"
                 "**Status:** Claim form filled (29/04/2026). Pending upload to Morgan Price."
             ),
             "next_action": "Upload claim documents to Morgan Price portal. Chase Dr. Emmanouil for signature, stamp and licence number.",
@@ -1503,78 +1663,33 @@ def render_clients():
             "documents": "Morgan Price claim form (29/04/2026) · Gastroscopy/colonoscopy report · Physio invoice EUR 200",
         },
         {
-            "name": "Mr. Synodinos",
-            "nickname": "Synodinos",
-            "insurer": "Lloyd's (binder)",
-            "policy": "—",
-            "claim_ref": "—",
+            "name": "Pantelis Kourbelas", "nickname": "Pantelis",
+            "insurer": "Various", "policy": "—", "claim_ref": "—",
+            "product": "Client portal — multi-policy",
+            "premium": "—", "member_since": "—", "status": "🔵 Active Client",
+            "summary": (
+                "**Active client of Ashlar Insurance**\n\n"
+                "Client portal: panteliskourbelas-chiinsurancebrokers.netlify.app (Netlify, live).\n"
+                "Template used as reference for white-label client portals."
+            ),
+            "next_action": "Maintain portal. Check for renewals.",
+            "contacts": "Pantelis Kourbelas",
+            "documents": "Netlify client portal",
+        },
+        {
+            "name": "Mr. Synodinos", "nickname": "Synodinos",
+            "insurer": "Lloyd's (binder)", "policy": "—", "claim_ref": "—",
             "product": "Secure Home Expatriates & Holiday Rental Residences",
-            "premium": "TBC",
-            "member_since": "—",
-            "status": "🔵 In Progress",
+            "premium": "TBC", "member_since": "—", "status": "🔵 In Progress",
             "summary": (
                 "**Home insurance — Syros holiday rental property**\n\n"
                 "Property: Thesi Rozou, Syros (Poseidonia), Cyclades 84100. Built 1998–2004. "
-                "Listed on Booking.com as Bay View House / Bay View Studio. Coverage: 02/04/2026–02/04/2027.\n\n"
-                "**Product:** Secure Home Expatriates & Holiday Rental — Lloyd's binder. "
-                "NOT a policy yet — no coverage until insurer accepts and full premium paid.\n\n"
-                "**Outstanding on form (sent with red arrows):**\n"
-                "P.2: Alternative energy sources · Rental period months\n"
-                "P.3: Pipe/drainage replaced? · Water pump at basement? · Uninhabited >45 days?\n"
-                "P.5: Policyholder signature missing · Pages 8–9: Consent signatures missing\n\n"
+                "Listed on Booking.com as Bay View House / Bay View Studio.\n\n"
                 "**Status:** Form sent to client. Awaiting signed completed return."
             ),
-            "next_action": "Chase Mr. Synodinos for signed completed form. Verify rental period and energy sources.",
+            "next_action": "Chase Mr. Synodinos for signed completed form.",
             "contacts": "Mr. Synodinos",
             "documents": "Secure Home Expatriates proposal form (draft) · Booking.com property listings",
-        },
-        {
-            "name": "Syros Stair Accident",
-            "nickname": "Syros",
-            "insurer": "Personal Accident / Travel",
-            "policy": "—",
-            "claim_ref": "Personal accident claim",
-            "product": "Personal Accident / Cash Benefit",
-            "premium": "—",
-            "member_since": "—",
-            "status": "🟢 Ready to Submit",
-            "summary": (
-                "**Personal accident — fall on stairs, Syros**\n\n"
-                "Client fell on stairs of a house in Syros. Injuries: head trauma + spinal injury. "
-                "Treated at General Hospital of Syros 'Vardakeios & Proios' (Tel: 22813 60300).\n\n"
-                "**Medical:** Loss of consciousness → 48h neurological monitoring. CT thorax + lumbar-sacral X-rays. "
-                "Full blood workup. Imaging: normal (confirms appropriate ruling out — strengthens legitimacy).\n\n"
-                "**Assessment — NO RED FLAGS:** Story consistent. Mechanism matches injuries. "
-                "Conservative 2-day care is standard protocol for LOC. Clear hospital documentation.\n\n"
-                "**Status:** Documentation reviewed. Medical records translated Greek → English. Ready to submit."
-            ),
-            "next_action": "Submit claim to insurer with full hospital documentation and English translations.",
-            "contacts": "General Hospital of Syros Vardakeios & Proios",
-            "documents": "Hospital admission · CT results · Neurological assessment · English translations",
-        },
-        {
-            "name": "Tania — Group Renewal",
-            "nickname": "Tania",
-            "insurer": "Group Health",
-            "policy": "Group policy",
-            "claim_ref": "—",
-            "product": "Group Health Insurance Renewal",
-            "premium": "EUR 9,731/year",
-            "member_since": "—",
-            "status": "🟢 Completed",
-            "summary": (
-                "**Group health renewal — premium increase communicated to HR**\n\n"
-                "HR manager Tania requested year-on-year cost explanation.\n\n"
-                "**Premium comparison:**\n"
-                "Renewal: EUR 9,731 (Main: EUR 8,520.71 · Dependants: EUR 1,210.32)\n"
-                "Previous: EUR 6,950.33 (Main: EUR 6,167.81 · Dependants: EUR 782.52)\n"
-                "Increase: EUR 2,771.70 (+39.9%) — Main +EUR 2,343.90 · Dependants +EUR 427.80\n\n"
-                "Context provided: Market-wide rate adjustments due to increased medical costs and claims experience 2024–2025.\n\n"
-                "**Status:** Renewal processed. Premium breakdown communicated to HR."
-            ),
-            "next_action": "Confirm renewal paperwork signed. File updated premium schedule.",
-            "contacts": "Tania (HR manager)",
-            "documents": "Renewal premium schedule · Year-on-year breakdown",
         },
     ]
 
@@ -1584,43 +1699,34 @@ def render_clients():
         {"id": "TKT-002", "client": "Katia Totikidou",          "subject": "Send PPT comparison Generali vs Morgan Price",    "status": "Pending", "priority": "🟡 Medium", "created": "2026-05-13", "updated": "2026-05-13"},
         {"id": "TKT-003", "client": "Christos Iatropoulos",     "subject": "Upload claim docs to Morgan Price portal",        "status": "Pending", "priority": "🟡 Medium", "created": "2026-05-13", "updated": "2026-05-13"},
         {"id": "TKT-004", "client": "Mr. Synodinos",            "subject": "Chase signed proposal form for Syros property",   "status": "Open",    "priority": "🟡 Medium", "created": "2026-05-13", "updated": "2026-05-13"},
-        {"id": "TKT-005", "client": "Syros Stair Accident",     "subject": "Submit personal accident claim to insurer",       "status": "Pending", "priority": "🟢 Low",    "created": "2026-05-13", "updated": "2026-05-13"},
     ]
 
-    # Try loading from Google Sheets on first load
     if "tickets_loaded_from_sheet" not in st.session_state:
-        tickets_ws, log_ws = get_gsheet()
+        tickets_ws, log_ws, conv_ws = get_gsheet()
         st.session_state._tickets_ws  = tickets_ws
         st.session_state._log_ws      = log_ws
+        st.session_state._conv_ws     = conv_ws
         sheet_tickets = load_tickets_from_sheet(tickets_ws)
         if sheet_tickets is not None and len(sheet_tickets) > 0:
             st.session_state.tickets = sheet_tickets
-            # Next ID = max existing + 1
             ids = [int(t["id"].replace("TKT-","")) for t in sheet_tickets if t["id"].startswith("TKT-")]
-            st.session_state.next_ticket_id = max(ids) + 1 if ids else 6
+            st.session_state.next_ticket_id = max(ids) + 1 if ids else 5
         else:
-            # First run — seed with defaults and push to sheet
             st.session_state.tickets = DEFAULT_TICKETS
-            st.session_state.next_ticket_id = 6
+            st.session_state.next_ticket_id = 5
             if tickets_ws:
                 for t in DEFAULT_TICKETS:
                     save_ticket_to_sheet(tickets_ws, t)
         st.session_state.tickets_loaded_from_sheet = True
 
     if "next_ticket_id" not in st.session_state:
-        st.session_state.next_ticket_id = 6
+        st.session_state.next_ticket_id = 5
 
-    # Sheet handles (may be None if not configured)
     tickets_ws = st.session_state.get("_tickets_ws")
     log_ws     = st.session_state.get("_log_ws")
-    sheet_ok   = tickets_ws is not None
 
-    # ── TABS ──────────────────────────────────────────────────────────────
     tab_clients, tab_tickets = st.tabs(["👥 Client Cases", "🎫 Task Tickets"])
 
-    # ══════════════════════════════════════════════════════════════════════
-    # TAB 1 — CLIENT CASES
-    # ══════════════════════════════════════════════════════════════════════
     with tab_clients:
         col_s, col_f = st.columns([3, 1])
         with col_s:
@@ -1639,8 +1745,7 @@ def render_clients():
                 continue
 
             shown += 1
-            # Find related open tickets
-            related = [t for t in st.session_state.tickets if c["name"].split()[0].lower() in t["client"].lower() or c["name"].lower() in t["client"].lower()]
+            related = [t for t in st.session_state.tickets if c["name"].split()[0].lower() in t["client"].lower()]
             open_tickets = [t for t in related if t["status"] != "Resolved"]
             ticket_badge = f"  🎫 {len(open_tickets)} open" if open_tickets else ""
 
@@ -1667,7 +1772,6 @@ def render_clients():
                     st.markdown("**👤 Contacts**")
                     st.caption(c["contacts"])
 
-                # Related tickets
                 if open_tickets:
                     st.divider()
                     st.markdown("**🎫 Open Tickets**")
@@ -1678,115 +1782,27 @@ def render_clients():
                         tcol3.markdown(t["status"])
 
                 st.divider()
-
-                # ── ACTION BUTTONS ────────────────────────────────────────
-                b1, b2, b3, b4, b5 = st.columns(5)
-
+                b1, b2, b3 = st.columns(3)
                 with b1:
                     if st.button("✉️ Email", key=f"email_{c['name']}", use_container_width=True):
-                        st.session_state.active_module = "comms"
-                        st.rerun()
+                        st.session_state.active_module = "comms"; st.rerun()
                 with b2:
                     if st.button("💬 Ask HAL", key=f"hal_{c['name']}", use_container_width=True):
-                        st.session_state.chat_history.append({
-                            "role": "user",
-                            "content": f"Give me a full briefing on the {c['name']} case and what I should do next."
-                        })
-                        st.session_state.active_module = "hal_chat"
-                        st.rerun()
+                        st.session_state.chat_history.append({"role": "user",
+                            "content": f"Give me a full briefing on the {c['name']} case and what I should do next."})
+                        st.session_state.active_module = "hal_chat"; st.rerun()
                 with b3:
-                    if st.button("🎫 New ticket", key=f"ticket_{c['name']}", use_container_width=True):
-                        st.session_state[f"show_ticket_form_{c['name']}"] = True
-                with b4:
-                    # Status cycle: Pending → Open → Resolved → Pending
-                    cur = c["status"]
-                    if "Escalated" in cur or "Pending" in cur or "In Progress" in cur:
-                        if st.button("✅ Mark resolved", key=f"resolve_{c['name']}", use_container_width=True):
-                            for client in CLIENTS:
-                                if client["name"] == c["name"]:
-                                    client["status"] = "🟢 Completed"
-                            st.success(f"{c['name']} marked as resolved.")
-                            st.rerun()
-                with b5:
-                    if st.button("🗑 Delete", key=f"del_{c['name']}", use_container_width=True):
-                        st.session_state[f"confirm_del_{c['name']}"] = True
-
-                # Confirm delete
-                if st.session_state.get(f"confirm_del_{c['name']}"):
-                    st.warning(f"Delete **{c['name']}** from tracker?")
-                    cd1, cd2 = st.columns(2)
-                    with cd1:
-                        if st.button("Yes, delete", key=f"yes_del_{c['name']}", type="primary"):
-                            CLIENTS[:] = [x for x in CLIENTS if x["name"] != c["name"]]
-                            st.session_state[f"confirm_del_{c['name']}"] = False
-                            st.rerun()
-                    with cd2:
-                        if st.button("Cancel", key=f"no_del_{c['name']}"):
-                            st.session_state[f"confirm_del_{c['name']}"] = False
-                            st.rerun()
-
-                # New ticket form
-                if st.session_state.get(f"show_ticket_form_{c['name']}"):
-                    with st.form(key=f"ticket_form_{c['name']}"):
-                        st.markdown("**🎫 Create new ticket**")
-                        subj = st.text_input("Task / subject", placeholder="e.g. Send renewal quote")
-                        prio = st.selectbox("Priority", ["🔴 High", "🟡 Medium", "🟢 Low"])
-                        submitted = st.form_submit_button("Create ticket")
-                        if submitted and subj:
-                            new_id = f"TKT-{st.session_state.next_ticket_id:03d}"
-                            st.session_state.tickets.append({
-                                "id": new_id,
-                                "client": c["name"],
-                                "subject": subj,
-                                "status": "Open",
-                                "priority": prio,
-                            })
-                            st.session_state.next_ticket_id += 1
-                            st.session_state[f"show_ticket_form_{c['name']}"] = False
-                            st.success(f"Ticket {new_id} created.")
-                            st.rerun()
+                    if st.button("✅ Mark resolved", key=f"resolve_{c['name']}", use_container_width=True):
+                        for client_ in CLIENTS:
+                            if client_["name"] == c["name"]:
+                                client_["status"] = "🟢 Completed"
+                        st.rerun()
 
         if shown == 0:
             st.info("No clients match your search.")
 
-        st.divider()
-        # Add new client button
-        with st.expander("➕ Add new client"):
-            with st.form("add_client_form"):
-                nc1, nc2 = st.columns(2)
-                with nc1:
-                    new_name    = st.text_input("Full name")
-                    new_insurer = st.text_input("Insurer")
-                    new_policy  = st.text_input("Policy / member ref")
-                    new_product = st.text_input("Product")
-                with nc2:
-                    new_premium = st.text_input("Premium")
-                    new_since   = st.text_input("Member since")
-                    new_status  = st.selectbox("Status", ["🟡 Pending", "🔴 Escalated", "🔵 In Progress", "🟢 Completed"])
-                new_summary = st.text_area("Case summary / notes")
-                new_action  = st.text_input("Next action")
-                if st.form_submit_button("Add client"):
-                    if new_name:
-                        CLIENTS.append({
-                            "name": new_name, "nickname": new_name.split()[0],
-                            "insurer": new_insurer, "policy": new_policy,
-                            "claim_ref": "—", "product": new_product,
-                            "premium": new_premium, "member_since": new_since,
-                            "status": new_status, "summary": new_summary,
-                            "next_action": new_action,
-                            "contacts": "—", "documents": "—",
-                        })
-                        st.success(f"{new_name} added.")
-                        st.rerun()
-
-    # ══════════════════════════════════════════════════════════════════════
-    # TAB 2 — TICKETS
-    # ══════════════════════════════════════════════════════════════════════
     with tab_tickets:
         st.markdown("### 🎫 Task Tickets")
-        st.caption("All open tasks across clients — nothing falls through the cracks")
-
-        # Summary row
         all_t   = st.session_state.tickets
         n_open  = sum(1 for t in all_t if t["status"] == "Open")
         n_pend  = sum(1 for t in all_t if t["status"] == "Pending")
@@ -1798,75 +1814,15 @@ def render_clients():
         mc4.metric("🟢 Resolved", n_done)
 
         st.divider()
-
-        # Filter
-        tf1, tf2 = st.columns([2, 2])
-        with tf1:
-            t_search = st.text_input("Search tickets", placeholder="Client name, subject, ticket ID...")
-        with tf2:
-            t_filter = st.selectbox("Filter", ["All", "Open", "Pending", "Resolved"], key="t_filter")
-
-        st.divider()
-
-        # Ticket table
         for i, t in enumerate(st.session_state.tickets):
-            if t_search and t_search.lower() not in f"{t['id']} {t['client']} {t['subject']}".lower():
-                continue
-            if t_filter != "All" and t["status"] != t_filter:
-                continue
-
             status_icon = {"Open": "🔴", "Pending": "🟡", "Resolved": "🟢"}.get(t["status"], "⚪")
-            with st.container():
-                rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([1.2, 2, 4, 1.5, 1.5, 1.5])
-                rc1.code(t["id"])
-                rc2.markdown(f"**{t['client'].split()[0]} {t['client'].split()[-1] if len(t['client'].split())>1 else ''}**")
-                rc3.markdown(t["subject"])
-                rc4.markdown(f"{status_icon} {t['status']}")
-                rc5.markdown(t["priority"])
-
-                with rc6:
-                    action = st.selectbox(
-                        "Action",
-                        ["—", "Mark open", "Mark pending", "Mark resolved", "Delete"],
-                        key=f"tact_{i}",
-                        label_visibility="collapsed"
-                    )
-                    if action == "Mark open":
-                        st.session_state.tickets[i]["status"] = "Open"
-                        st.rerun()
-                    elif action == "Mark pending":
-                        st.session_state.tickets[i]["status"] = "Pending"
-                        st.rerun()
-                    elif action == "Mark resolved":
-                        st.session_state.tickets[i]["status"] = "Resolved"
-                        st.rerun()
-                    elif action == "Delete":
-                        st.session_state.tickets.pop(i)
-                        st.rerun()
-
+            rc1, rc2, rc3, rc4, rc5 = st.columns([1, 2, 4, 1.5, 1.5])
+            rc1.code(t["id"])
+            rc2.markdown(f"**{t['client']}**")
+            rc3.markdown(t["subject"])
+            rc4.markdown(f"{status_icon} {t['status']}")
+            rc5.markdown(t["priority"])
             st.markdown("---")
-
-        # New ticket form
-        st.markdown("### ➕ Create new ticket")
-        with st.form("new_ticket_global"):
-            fc1, fc2, fc3 = st.columns([2, 3, 1])
-            with fc1:
-                t_client = st.text_input("Client name")
-            with fc2:
-                t_subj = st.text_input("Task / subject")
-            with fc3:
-                t_prio = st.selectbox("Priority", ["🔴 High", "🟡 Medium", "🟢 Low"])
-            if st.form_submit_button("Create ticket", type="primary"):
-                if t_client and t_subj:
-                    new_id = f"TKT-{st.session_state.next_ticket_id:03d}"
-                    st.session_state.tickets.append({
-                        "id": new_id, "client": t_client,
-                        "subject": t_subj, "status": "Open", "priority": t_prio,
-                    })
-                    st.session_state.next_ticket_id += 1
-                    st.success(f"Ticket {new_id} created.")
-                    st.rerun()
-
 
 
 def render_kira_nurse():
@@ -1875,7 +1831,7 @@ def render_kira_nurse():
     col1,col2 = st.columns(2)
     with col1:
         st.markdown("""<div style="background:linear-gradient(135deg,#2D3FE7,#7B2FE0);border-radius:14px;padding:24px;color:white;margin-bottom:16px"><div style="font-size:32px;margin-bottom:8px">🩺</div><div style="font-size:18px;font-weight:700">Kira AI Nurse</div><div style="font-size:13px;opacity:.85;margin:8px 0">Symptom triage · Vitals · Clinical report · PubMed evidence</div></div>""",unsafe_allow_html=True)
-        st.link_button("🚀 Open Kira","https://kiraainurse.streamlit.app",use_container_width=True)
+        st.link_button("🚀 Open Kira","https://kiraainurse.streamlit.app",use_container_width=True,type="primary")
     with col2:
         st.markdown("""<div style="background:linear-gradient(135deg,#0EA5E9,#2D3FE7);border-radius:14px;padding:24px;color:white;margin-bottom:16px"><div style="font-size:32px;margin-bottom:8px">📷</div><div style="font-size:18px;font-weight:700">Kira Face Scan</div><div style="font-size:13px;opacity:.85;margin:8px 0">rPPG · Heart rate · Breathing · 60-second scan</div></div>""",unsafe_allow_html=True)
         st.link_button("📷 Open Face Scan","https://kiraainurse.netlify.app",use_container_width=True)
@@ -1887,7 +1843,7 @@ def render_kira_nurse():
         if st.button("✍️ Generate message", type="primary"):
             api_key = get_api_key()
             if api_key and c_name:
-                import urllib.request, json as _json, urllib.error
+                import urllib.request, json as _json
                 prompt = (f"Write a short WhatsApp message in {'Greek' if c_lang=='Greek' else 'English'} "
                           f"to {c_name}, a client of Ashlar Insurance. Introduce Kira (https://kiraainurse.streamlit.app), "
                           f"a free AI health assistant. Warm and professional. Under 4 sentences. Include the link.")
@@ -2016,19 +1972,6 @@ POLICY:
                         new_ones=[p for p in extracted if p.get("policy_no","") not in existing_nos]
                         st.session_state.an_policies.extend(new_ones)
                         st.success(f"✅ Added {len(new_ones)} policies"); st.rerun()
-    chi_api_key=st.secrets.get("CHI_API_KEY","")
-    if chi_api_key and a_name and len(a_name)>=3:
-        if st.button("🔗 Pull from CHI Portal",key="pull_chi"):
-            with st.spinner("Fetching..."):
-                clients_data=chi_api("clients",{"search":a_name})
-                if clients_data and isinstance(clients_data,list) and len(clients_data)>0:
-                    match=next((c for c in clients_data if a_name.lower() in c.get("name","").lower()),clients_data[0])
-                    cd=chi_api(f"clients/{match['id']}")
-                    if cd and "policies" in cd:
-                        st.session_state.an_policies=[{"type":p.get("type","other"),"provider":p.get("insurer",""),"policy_no":p.get("policy_number",""),"premium":p.get("premium",""),"renewal_date":p.get("expiry_date",""),"color":_POLICY_TYPES.get(p.get("type","other"),_POLICY_TYPES["other"])["color"]} for p in cd["policies"]]
-                        st.success(f"✅ Pulled {len(st.session_state.an_policies)} policies"); st.rerun()
-                    else: st.warning("No policies found.")
-                else: st.warning(f"No client matching '{a_name}'.")
     with st.expander("➕ Προσθήκη χειροκίνητα"):
         ep1,ep2,ep3=st.columns(3)
         with ep1: ep_type=st.selectbox("Τύπος",list(_POLICY_TYPES.keys()),format_func=lambda k:f"{_POLICY_TYPES[k]['icon']} {_POLICY_TYPES[k]['label_el']}",key="ep_type")
@@ -2068,115 +2011,31 @@ POLICY:
     if st.session_state.get("an_result"):
         result=st.session_state["an_result"]; cname=st.session_state["an_client"]
         st.markdown("---"); st.markdown(f"### 📊 {cname}")
-        st.markdown(f'<div style="background:white;border-radius:14px;padding:24px;border:1px solid #E8E0D5">',unsafe_allow_html=True)
-        st.markdown(result); st.markdown('</div>',unsafe_allow_html=True)
-        ab1,ab2,ab3=st.columns(3)
-        with ab1:
-            dl_text = f"ASHLAR\n{cname}\n\n{result}"
-            st.download_button("Download",data=dl_text,file_name=f"analysis_{cname.replace(' ','_')}.txt",mime="text/plain",use_container_width=True)
-        with ab3:
-            if st.button("🔄 Νέα",use_container_width=True,key="reset_an"):
-                for k in ["an_result","an_client","an_policies"]:
-                    if k in st.session_state: del st.session_state[k]
-                st.rerun()
+        st.markdown(result)
 
 
 def render_chi_portal():
     portal_url=st.secrets.get("CHI_PORTAL_URL","https://chi-insurance-portal-production.up.railway.app")
-    gh_token=st.secrets.get("GITHUB_TOKEN",""); repo="chiinsurancebrokers/chi-insurance-portal"
+    repo="chiinsurancebrokers/chi-insurance-portal"
     st.markdown("## 🌐 CHI Insurance Portal"); st.caption(portal_url)
     qa1,qa2,qa3=st.columns(3)
     with qa1: st.link_button("🌐 Open Portal",portal_url,use_container_width=True,type="primary")
     with qa2: st.link_button("🔐 Admin Login",f"{portal_url}/login",use_container_width=True)
     with qa3: st.link_button("📂 GitHub",f"https://github.com/{repo}",use_container_width=True)
     st.divider()
-    tab_op,tab_gen,tab_manage=st.tabs(["🚀 Operate","🏗️ Generate Portal","📋 Manage"])
-    with tab_op:
-        st.markdown(f'''<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);border-radius:16px;padding:28px;text-align:center;margin-bottom:20px"><div style="font-size:40px">🛡️</div><div style="font-size:22px;font-weight:800;color:#C9A96E;margin-bottom:6px">CHI Admin Panel</div><div style="font-size:13px;color:#A89880;margin-bottom:20px">138 Clients · 222 Policies · 30 Expiring</div><a href="{portal_url}" target="_blank" style="background:#C9A96E;color:#1C1410;padding:12px 32px;border-radius:8px;font-weight:800;font-size:15px;text-decoration:none">Open →</a></div>''',unsafe_allow_html=True)
-        q1,q2,q3,q4=st.columns(4)
-        with q1: st.link_button("👥 Clients",f"{portal_url}/clients",use_container_width=True,type="primary")
-        with q2: st.link_button("📄 Policies",f"{portal_url}/policies",use_container_width=True,type="primary")
-        with q3: st.link_button("💳 Payments",f"{portal_url}/payments",use_container_width=True,type="primary")
-        with q4: st.link_button("📧 Renewals",f"{portal_url}/renewals",use_container_width=True)
-        if st.secrets.get("CHI_API_KEY",""):
-            st.divider(); st.markdown("#### ⏰ Upcoming Renewals")
-            if st.button("🔄 Refresh",key="refresh_renewals"):
-                st.session_state["_renewals_data"]=chi_api("renewals"); st.rerun()
-            rd=st.session_state.get("_renewals_data")
-            if rd and "error" not in (rd or {}):
-                for r in rd.get("urgent",[])[:5]: st.markdown(f"🔴 **{r.get('client_name')}** — {r.get('insurer')} · **{r.get('days_left')} days**")
-                for r in rd.get("soon",[])[:5]: st.markdown(f"🟡 **{r.get('client_name')}** — {r.get('insurer')} · {r.get('days_left')} days")
-        st.divider()
-        with st.expander("🔐 Admin credentials"):
-            st.markdown(f"URL: [{portal_url}]({portal_url})  \nUsername: `admin`  \nEmail: `xiatropoulos@gmail.com`")
-    with tab_gen:
-        st.caption("Multi-policy client portal · All insurance types · Push to GitHub")
-        if "p2_policies" not in st.session_state: st.session_state.p2_policies=[]; st.session_state.p2_payments=[]; st.session_state.p2_documents=[]; st.session_state.p2_claims=[]
-        ci1,ci2,ci3=st.columns(3)
-        with ci1: p2_name=st.text_input("Full name *",key="p2_name")
-        with ci2: p2_email=st.text_input("Email",key="p2_email")
-        with ci3: p2_lang=st.radio("Language",["el","en"],horizontal=True,key="p2_lang")
-        st.markdown("#### 📋 Policies")
-        with st.expander("➕ Add policy",expanded=len(st.session_state.p2_policies)==0):
-            np1,np2,np3=st.columns(3)
-            with np1:
-                npt=st.selectbox("Type",list(_POLICY_TYPES.keys()),format_func=lambda k:f"{_POLICY_TYPES[k]['icon']} {_POLICY_TYPES[k]['label']}",key="np_type")
-                npp=st.selectbox("Provider",_PROVIDERS,key="np_prov")
-            with np2: npn=st.text_input("Policy no",key="np_no"); nppr=st.text_input("Product",key="np_prod")
-            with np3: npm=st.text_input("Premium",key="np_prem"); npc=st.selectbox("Currency",["EUR","GBP","USD"],key="np_cur"); npd=st.date_input("Renewal",key="np_date")
-            npo=st.text_input("Notes",key="np_notes")
-            if st.button("Add Policy ✓",type="primary",key="add_pol"):
-                st.session_state.p2_policies.append({"type":npt,"provider":npp,"policy_no":npn,"product":nppr,"premium":npm,"currency":npc,"renewal_date":str(npd),"status":"Active","notes":npo,"color":_POLICY_TYPES[npt]["color"]}); st.rerun()
-        for i,p in enumerate(st.session_state.p2_policies):
-            cfg=_POLICY_TYPES.get(p["type"],_POLICY_TYPES["other"]); pc1,pc2=st.columns([5,1])
-            pc1.markdown(f"{cfg['icon']} **{p['provider']}** — {p['product']} · {p['currency']} {p['premium']}")
-            if pc2.button("✕",key=f"del_pol_{i}"): st.session_state.p2_policies.pop(i); st.rerun()
-        if st.button("⚡ Generate Client Portal",type="primary",use_container_width=True,key="gen_p2"):
-            if not p2_name: st.warning("Client name required.")
-            elif not st.session_state.p2_policies: st.warning("Add at least one policy.")
-            else:
-                from chi_portal_phase2 import generate_client_portal
-                client_data={"name":p2_name,"email":p2_email,"lang":p2_lang}
-                html=generate_client_portal(client_data,st.session_state.p2_policies,st.session_state.p2_payments,st.session_state.p2_documents,st.session_state.p2_claims)
-                st.session_state["p2_html"]=html; st.session_state["p2_client"]=p2_name
-                st.session_state["p2_folder"]=p2_name.lower().replace(" ","-").replace("'","")
-                st.success(f"✅ Portal generated for {p2_name}")
-        if st.session_state.get("p2_html"):
-            html=st.session_state["p2_html"]; cname=st.session_state["p2_client"]; folder=st.session_state["p2_folder"]
-            st.download_button("📥 Download index.html",data=html.encode(),file_name="index.html",mime="text/html",use_container_width=True)
-            if gh_token:
-                if st.button("🚀 Push to GitHub",use_container_width=True,key="push_p2"):
-                    import base64 as _b64,urllib.request as _ur,json as _j,urllib.error as _ue
-                    path=f"clients/{folder}/index.html"; api=f"https://api.github.com/repos/{repo}/contents/{path}"
-                    hdrs={"Authorization":f"token {gh_token}","Accept":"application/vnd.github.v3+json","Content-Type":"application/json","User-Agent":"HAL"}
-                    sha=None
-                    try:
-                        req=_ur.Request(api,headers=hdrs)
-                        with _ur.urlopen(req,timeout=8) as r: sha=_j.loads(r.read()).get("sha")
-                    except _ue.HTTPError: pass
-                    payload={"message":f"{'Update' if sha else 'Add'} portal: {cname}","content":_b64.b64encode(html.encode()).decode(),"branch":"main"}
-                    if sha: payload["sha"]=sha
-                    req=_ur.Request(api,data=_j.dumps(payload).encode(),headers=hdrs,method="PUT")
-                    try:
-                        with _ur.urlopen(req,timeout=15) as r: _j.loads(r.read())
-                        st.success(f"✅ Pushed → clients/{folder}/index.html")
-                    except Exception as e: st.error(f"Push failed: {e}")
-    with tab_manage:
-        live_stats=chi_api("stats") if st.secrets.get("CHI_API_KEY","") else None
-        mc1,mc2=st.columns(2)
-        with mc1:
-            cc=live_stats.get("total_clients","138") if live_stats and "error" not in live_stats else "138"
-            pc=live_stats.get("total_policies","222") if live_stats and "error" not in live_stats else "222"
-            ec=live_stats.get("expiring_30_days","30") if live_stats and "error" not in live_stats else "30"
-            st.markdown(f'''<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);border-radius:12px;padding:18px 20px;color:#E8DDD0;margin-bottom:12px"><div style="font-size:11px;color:#7A6A5A;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Railway · Live</div><div style="font-size:15px;font-weight:700;color:#C9A96E">chi-insurance-portal</div><div style="font-size:12px;color:#A89880;margin-top:6px">👥 {cc} Clients · 📋 {pc} Policies · ⏰ {ec} Expiring</div><a href="{portal_url}" target="_blank" style="display:inline-block;margin-top:10px;background:#C9A96E;color:#1C1410;padding:5px 14px;border-radius:6px;text-decoration:none;font-weight:700;font-size:12px">Open →</a></div>''',unsafe_allow_html=True)
-        with mc2:
-            st.markdown('''<div style="background:white;border:1px solid #E8E0D5;border-radius:12px;padding:18px 20px"><div style="font-size:11px;color:#7A6A5A;text-transform:uppercase;margin-bottom:6px">Admin</div><div style="font-size:13px;line-height:2">Username: <code>admin</code><br>Email: <code>xiatropoulos@gmail.com</code></div></div>''',unsafe_allow_html=True)
-        st.markdown("### Client Portals")
-        portals=[{"client":"Pantelis Kourbelas","url":"panteliskourbelas-chiinsurancebrokers.netlify.app","status":"🟢 Live"}]
-        for p in portals:
-            pc1,pc2,pc3,pc4=st.columns([2,3,1,1]); pc1.markdown(f"**{p['client']}**")
-            if p["url"]: pc2.markdown(f"[{p['url']}](https://{p['url']})"); pc4.link_button("Open",f"https://{p['url']}",use_container_width=True)
-            pc3.markdown(p["status"])
+    st.markdown(f'''<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);border-radius:16px;padding:28px;text-align:center;margin-bottom:20px"><div style="font-size:40px">🛡️</div><div style="font-size:22px;font-weight:800;color:#C9A96E;margin-bottom:6px">CHI Admin Panel</div><div style="font-size:13px;color:#A89880;margin-bottom:20px">138 Clients · 222 Policies · 30 Expiring</div></div>''',unsafe_allow_html=True)
+    q1,q2,q3,q4=st.columns(4)
+    with q1: st.link_button("👥 Clients",f"{portal_url}/clients",use_container_width=True,type="primary")
+    with q2: st.link_button("📄 Policies",f"{portal_url}/policies",use_container_width=True,type="primary")
+    with q3: st.link_button("💳 Payments",f"{portal_url}/payments",use_container_width=True,type="primary")
+    with q4: st.link_button("📧 Renewals",f"{portal_url}/renewals",use_container_width=True)
+    st.divider()
+    st.markdown("### Client Portals")
+    portals=[{"client":"Pantelis Kourbelas","url":"panteliskourbelas-chiinsurancebrokers.netlify.app","status":"🟢 Live"}]
+    for p in portals:
+        pc1,pc2,pc3,pc4=st.columns([2,3,1,1]); pc1.markdown(f"**{p['client']}**")
+        if p["url"]: pc2.markdown(f"[{p['url']}](https://{p['url']})"); pc4.link_button("Open",f"https://{p['url']}",use_container_width=True)
+        pc3.markdown(p["status"])
 
 
 def render_kira_pet_hal():
@@ -2185,7 +2044,7 @@ def render_kira_pet_hal():
     col1,col2=st.columns(2)
     with col1:
         st.markdown("""<div style="background:linear-gradient(135deg,#059669,#0EA5E9);border-radius:14px;padding:24px;color:white;margin-bottom:16px"><div style="font-size:32px;margin-bottom:8px">🐾</div><div style="font-size:18px;font-weight:700">Kira Pet App</div><div style="font-size:13px;opacity:.85;margin:8px 0">AI triage · Photo scan · Vet report</div></div>""",unsafe_allow_html=True)
-        st.link_button("🚀 Open Kira Pet","https://kiraaipet.streamlit.app",use_container_width=True)
+        st.link_button("🚀 Open Kira Pet","https://kiraaipet.streamlit.app",use_container_width=True,type="primary")
     with col2:
         st.markdown("""<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);border-radius:14px;padding:24px;color:#E8DDD0;margin-bottom:16px"><div style="font-size:32px;margin-bottom:8px">🌐</div><div style="font-size:18px;font-weight:700;color:#C9A96E">petshealth.gr</div><div style="font-size:13px;opacity:.85;margin:8px 0">Pet insurance brand · Safe Pet System</div></div>""",unsafe_allow_html=True)
         st.link_button("🌐 Open petshealth.gr","https://petshealth.gr",use_container_width=True)
@@ -2199,7 +2058,7 @@ def render_kira_pet_hal():
             api_key=get_api_key()
             if api_key:
                 import urllib.request,json as _json
-                prompt=f"Write pet insurance content for petshealth.gr (Greek brand, Ashlar Insurance, carrier: Safe Pet System). Content: {content_type if not custom else custom}. Language: {lang}. Professional, warm, genuine."
+                prompt=f"Write pet insurance content for petshealth.gr (Greek brand, Ashlar Insurance, carrier: Safe Pet System). Content: {content_type if not custom else custom}. Language: {lang}. Mention Kira Pet (kiraaipet.streamlit.app) — free AI Veterinary Nurse — when relevant. Professional, warm, genuine."
                 body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":1500,"messages":[{"role":"user","content":prompt}]}).encode()
                 req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 with st.spinner("Writing..."):
@@ -2214,12 +2073,175 @@ def render_kira_pet_hal():
             api_key=get_api_key()
             if api_key and angle:
                 import urllib.request,json as _json
-                body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":600,"messages":[{"role":"user","content":f"Write a {platform} post for petshealth.gr about: {angle}. Greek language, English hashtags."}]}).encode()
+                body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":600,"messages":[{"role":"user","content":f"Write a {platform} post for petshealth.gr about: {angle}. Greek language, English hashtags. Mention Kira Pet (kiraaipet.streamlit.app) if relevant."}]}).encode()
                 req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":get_api_key(),"anthropic-version":"2023-06-01","content-type":"application/json"})
                 with st.spinner("..."):
                     try:
                         with urllib.request.urlopen(req,timeout=30) as r: st.markdown(_json.loads(r.read())["content"][0]["text"])
                     except Exception as e: st.error(f"Error: {e}")
+
+
+def render_memory():
+    st.markdown("## 🧠 HAL Memory")
+    st.caption(f"Persistent business conversations · {MEMORY_WINDOW_DAYS}-day rolling auto-context · Full search across all history")
+
+    # Load conv worksheet
+    if "_conv_ws" not in st.session_state:
+        try:
+            _, _, _conv_ws = get_gsheet()
+            st.session_state._conv_ws = _conv_ws
+        except Exception:
+            st.session_state._conv_ws = None
+    conv_ws = st.session_state.get("_conv_ws")
+
+    if conv_ws is None:
+        st.error("⚠️ Google Sheets not connected. Configure `gcp_service_account` and `HAL_SHEET_ID` in Streamlit secrets to enable persistent memory.")
+        st.info("Until then, conversations only live in the current session and disappear on refresh.")
+        return
+
+    tab_search, tab_browse, tab_stats, tab_settings = st.tabs([
+        "🔍 Search", "📅 Browse Recent", "📊 Stats", "⚙️ Settings"
+    ])
+
+    # ── TAB: SEARCH (all history) ────────────────────────────────────────────
+    with tab_search:
+        st.markdown("### Search every conversation HAL has stored")
+        st.caption("Searches the full archive — useful for finding old analyses (Ergo offer, Bupa appeal, etc).")
+        q = st.text_input("Search term", placeholder="e.g. Ergo, Bupa, Tzina, colonoscopy, Generali...")
+        if q:
+            with st.spinner("Searching..."):
+                results = search_conversations(conv_ws, q, limit=50)
+            if not results:
+                st.info(f"No matches for '{q}'.")
+            else:
+                st.success(f"Found {len(results)} matches")
+                # Group by session
+                sessions = {}
+                for r in results:
+                    sid = r["session_id"]
+                    sessions.setdefault(sid, []).append(r)
+                for sid, msgs in sessions.items():
+                    with st.expander(f"📅 Session {msgs[0]['timestamp'][:10]} — {len(msgs)} match(es)"):
+                        for m in msgs:
+                            icon = "🧑" if m["role"] == "user" else "🤖"
+                            st.markdown(f"**{icon} {m['role'].title()}** · `{m['timestamp']}`")
+                            # Highlight the search term
+                            content = m["content"]
+                            if len(content) > 600:
+                                # Try to centre on the match
+                                idx = content.lower().find(q.lower())
+                                if idx > 200:
+                                    content = "..." + content[idx-200:idx+400] + "..."
+                                else:
+                                    content = content[:600] + "..."
+                            st.markdown(f"> {content}")
+                            st.divider()
+
+    # ── TAB: BROWSE RECENT (7 days) ──────────────────────────────────────────
+    with tab_browse:
+        st.markdown(f"### Last {MEMORY_WINDOW_DAYS} days of business conversations")
+        days = st.slider("Days to show", 1, 30, MEMORY_WINDOW_DAYS, key="browse_days")
+        with st.spinner("Loading..."):
+            recent = load_recent_conversations(conv_ws, days=days, mode_filter="business")
+        if not recent:
+            st.info(f"No conversations in the last {days} days. Start chatting with HAL and they'll appear here.")
+        else:
+            # Group by session, most recent first
+            sessions = {}
+            for r in recent:
+                sid = r["session_id"]
+                sessions.setdefault(sid, []).append(r)
+            session_keys = sorted(sessions.keys(), key=lambda k: sessions[k][0]["timestamp"], reverse=True)
+            st.caption(f"{len(recent)} messages across {len(sessions)} session(s)")
+            for sid in session_keys:
+                msgs = sessions[sid]
+                first_ts = msgs[0]["timestamp"]
+                # Try to extract a topic preview from the first user message
+                first_user = next((m for m in msgs if m["role"] == "user"), None)
+                preview = (first_user["content"][:80] if first_user else "")
+                with st.expander(f"📅 {first_ts} — {len(msgs)} msgs — {preview}..."):
+                    for m in msgs:
+                        icon = "🧑" if m["role"] == "user" else "🤖"
+                        with st.chat_message("user" if m["role"]=="user" else "assistant"):
+                            st.caption(m["timestamp"])
+                            st.markdown(m["content"])
+
+            st.divider()
+            # Export
+            if st.button("📥 Export visible to text", use_container_width=True):
+                lines = [f"HAL Memory Export — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                         f"Last {days} days · {len(recent)} messages",""]
+                for sid in session_keys:
+                    lines.append(f"\n=== Session {sid} ===")
+                    for m in sessions[sid]:
+                        lines.append(f"\n[{m['timestamp']}] {m['role'].upper()}:")
+                        lines.append(m["content"])
+                export_text = "\n".join(lines)
+                st.download_button("Download .txt", export_text,
+                    file_name=f"hal_memory_{datetime.now().strftime('%Y%m%d')}.txt",
+                    mime="text/plain", use_container_width=True)
+
+    # ── TAB: STATS ───────────────────────────────────────────────────────────
+    with tab_stats:
+        st.markdown("### Memory Statistics")
+        with st.spinner("Calculating..."):
+            try:
+                all_rows = conv_ws.get_all_records()
+                total = len(all_rows)
+                sessions_set = set(r.get("SessionID","") for r in all_rows if r.get("SessionID"))
+                user_msgs = sum(1 for r in all_rows if r.get("Role") == "user")
+                hal_msgs  = sum(1 for r in all_rows if r.get("Role") == "assistant")
+                # Last 7 days
+                from datetime import timedelta
+                cutoff = datetime.now() - timedelta(days=MEMORY_WINDOW_DAYS)
+                recent_count = 0
+                for r in all_rows:
+                    try:
+                        ts = datetime.strptime(r.get("Timestamp",""), "%Y-%m-%d %H:%M:%S")
+                        if ts >= cutoff:
+                            recent_count += 1
+                    except: pass
+
+                c1,c2,c3,c4 = st.columns(4)
+                c1.metric("Total messages", f"{total:,}")
+                c2.metric("Total sessions", len(sessions_set))
+                c3.metric(f"Last {MEMORY_WINDOW_DAYS}d (active memory)", recent_count)
+                c4.metric("User : HAL", f"{user_msgs}:{hal_msgs}")
+
+                st.caption(f"🧠 Current session ID: `{st.session_state.session_id}`")
+                st.caption(f"📁 Sheet: tab 'Conversations' in your HAL Google Sheet")
+            except Exception as e:
+                st.warning(f"Could not load stats: {e}")
+
+    # ── TAB: SETTINGS ────────────────────────────────────────────────────────
+    with tab_settings:
+        st.markdown("### Memory Settings")
+        st.markdown(f"""
+| Setting | Value | How to change |
+|---|---|---|
+| Rolling window | **{MEMORY_WINDOW_DAYS} days** | Edit `MEMORY_WINDOW_DAYS` near the top of `app.py` |
+| Modes saved | **{', '.join(MEMORY_SAVE_MODES)}** | Edit `MEMORY_SAVE_MODES` near the top of `app.py` |
+| Max injected messages | **{MEMORY_MAX_INJECT}** | Edit `MEMORY_MAX_INJECT` near the top of `app.py` |
+| Storage backend | Google Sheets tab `Conversations` | Sheet ID in Streamlit secret `HAL_SHEET_ID` |
+| Private/lodge mode | **NEVER stored** (confidential) | Hard-coded in `save_message_to_sheet` |
+        """)
+
+        st.divider()
+        st.markdown("#### 🗑 Danger Zone")
+        with st.expander("Clear current session from memory"):
+            st.warning(f"This removes only the current session ({st.session_state.session_id}) from the sheet. Past sessions stay.")
+            if st.button("Reset current session memory", type="secondary"):
+                try:
+                    cell_list = conv_ws.findall(st.session_state.session_id)
+                    rows_to_delete = sorted({c.row for c in cell_list}, reverse=True)
+                    for row in rows_to_delete:
+                        conv_ws.delete_rows(row)
+                    st.session_state.chat_history = []
+                    st.session_state.memory_injected = False
+                    st.success(f"Cleared {len(rows_to_delete)} rows from current session.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not clear: {e}")
 
 
 def render_placeholder(title, icon):
@@ -2239,6 +2261,7 @@ if mode == "private" and not st.session_state.private_unlocked:
 elif mode == "business":
     if module == "home":        render_business_home()
     elif module == "hal_chat":  render_hal_chat()
+    elif module == "memory":    render_memory()
     elif module == "quotes":    render_quotes()
     elif module == "documents": render_documents()
     elif module == "comms":     render_comms()
