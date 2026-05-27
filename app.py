@@ -8,6 +8,11 @@ import streamlit as st
 import hashlib
 import os
 import json
+import re
+import smtplib
+import requests
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from datetime import datetime
 
 # Rate tables (rate_tables.py in same repo)
@@ -30,10 +35,9 @@ except ImportError:
     GSHEETS_AVAILABLE = False
 
 # ── MEMORY CONFIG ─────────────────────────────────────────────────────────────
-# Edit this single line to change how far back HAL "remembers" automatically.
-MEMORY_WINDOW_DAYS    = 7        # rolling window — only business mode chats are stored
-MEMORY_SAVE_MODES     = ["business"]  # private/lodge chats NEVER saved (confidential)
-MEMORY_MAX_INJECT     = 30       # max past messages injected into context (cost control)
+MEMORY_WINDOW_DAYS    = 7
+MEMORY_SAVE_MODES     = ["business"]
+MEMORY_MAX_INJECT     = 30
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -46,92 +50,40 @@ st.set_page_config(
 # ── STYLING ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Global */
 [data-testid="stAppViewContainer"] { background: #F8F6F2; }
 [data-testid="stSidebar"] { background: #1C1410; }
 [data-testid="stSidebar"] * { color: #E8DDD0 !important; }
 [data-testid="stSidebar"] .stSelectbox label { color: #A89880 !important; font-size: 12px !important; }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #A89880 !important; font-size: 12px !important; }
-
-/* Sidebar HAL logo area */
-.hal-logo { 
-    text-align: center; padding: 24px 0 16px; 
-    border-bottom: 1px solid #3A2E24; margin-bottom: 16px;
-}
-.hal-logo .hal-title { 
-    font-size: 32px; font-weight: 800; 
-    color: #C9A96E !important; letter-spacing: 4px;
-}
-.hal-logo .hal-sub { 
-    font-size: 11px; color: #7A6A5A !important; 
-    letter-spacing: 2px; text-transform: uppercase; margin-top: 2px;
-}
-
-/* Mode selector tabs */
-.mode-btn {
-    display: block; width: 100%; padding: 10px 16px; margin: 4px 0;
-    border-radius: 8px; border: none; text-align: left;
-    cursor: pointer; font-size: 13px; font-weight: 500;
-    transition: all 0.2s;
-}
+.hal-logo { text-align: center; padding: 24px 0 16px; border-bottom: 1px solid #3A2E24; margin-bottom: 16px; }
+.hal-logo .hal-title { font-size: 32px; font-weight: 800; color: #C9A96E !important; letter-spacing: 4px; }
+.hal-logo .hal-sub { font-size: 11px; color: #7A6A5A !important; letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
+.mode-btn { display: block; width: 100%; padding: 10px 16px; margin: 4px 0; border-radius: 8px; border: none; text-align: left; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
 .mode-btn-business { background: #C9A96E22; color: #C9A96E !important; }
 .mode-btn-business:hover { background: #C9A96E44; }
 .mode-btn-private { background: #4A3728 22; color: #A89880 !important; }
-
-/* Cards */
-.hal-card {
-    background: white; border-radius: 12px; padding: 20px 24px;
-    border: 1px solid #E8E0D5; margin-bottom: 16px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-}
-.hal-card-dark {
-    background: #1C1410; border-radius: 12px; padding: 20px 24px;
-    border: 1px solid #3A2E24; margin-bottom: 16px;
-}
-
-/* Module tiles */
+.hal-card { background: white; border-radius: 12px; padding: 20px 24px; border: 1px solid #E8E0D5; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.hal-card-dark { background: #1C1410; border-radius: 12px; padding: 20px 24px; border: 1px solid #3A2E24; margin-bottom: 16px; }
 .module-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
-.module-tile {
-    background: white; border: 1px solid #E8E0D5; border-radius: 10px;
-    padding: 18px; cursor: pointer; transition: all 0.15s;
-    text-decoration: none;
-}
+.module-tile { background: white; border: 1px solid #E8E0D5; border-radius: 10px; padding: 18px; cursor: pointer; transition: all 0.15s; text-decoration: none; }
 .module-tile:hover { border-color: #C9A96E; box-shadow: 0 2px 8px rgba(201,169,110,0.15); }
 .module-tile .tile-icon { font-size: 28px; margin-bottom: 8px; }
 .module-tile .tile-name { font-size: 14px; font-weight: 600; color: #2C1810; }
 .module-tile .tile-desc { font-size: 12px; color: #7A6A5A; margin-top: 4px; }
-
-/* Status badge */
-.badge { 
-    display: inline-block; padding: 2px 8px; border-radius: 20px; 
-    font-size: 11px; font-weight: 600;
-}
+.badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
 .badge-live { background: #EAF3DE; color: #27500A; }
 .badge-dev  { background: #FAEEDA; color: #633806; }
 .badge-private { background: #FCEBEB; color: #A32D2D; }
-
-/* Section header */
-.section-header {
-    font-size: 11px; font-weight: 600; letter-spacing: 2px; 
-    text-transform: uppercase; color: #7A6A5A; 
-    border-bottom: 1px solid #E8E0D5; padding-bottom: 8px; margin-bottom: 16px;
-}
-
-/* Chat area */
+.section-header { font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: #7A6A5A; border-bottom: 1px solid #E8E0D5; padding-bottom: 8px; margin-bottom: 16px; }
 .hal-chat-input { border-radius: 10px !important; }
-.hal-response {
-    background: white; border-left: 3px solid #C9A96E; 
-    padding: 16px 20px; border-radius: 0 10px 10px 0; margin-top: 8px;
-}
-
-/* PIN input */
+.hal-response { background: white; border-left: 3px solid #C9A96E; padding: 16px 20px; border-radius: 0 10px 10px 0; margin-top: 8px; }
 .pin-container { max-width: 320px; margin: 60px auto; text-align: center; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── SESSION STATE ─────────────────────────────────────────────────────────────
 if "mode" not in st.session_state:
-    st.session_state.mode = "business"      # "business" | "private"
+    st.session_state.mode = "business"
 if "private_unlocked" not in st.session_state:
     st.session_state.private_unlocked = False
 if "active_module" not in st.session_state:
@@ -139,7 +91,6 @@ if "active_module" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "session_id" not in st.session_state:
-    # Unique session ID for grouping conversations in the sheet
     import uuid
     st.session_state.session_id = datetime.now().strftime("%Y%m%d-%H%M") + "-" + uuid.uuid4().hex[:6]
 if "memory_injected" not in st.session_state:
@@ -147,21 +98,18 @@ if "memory_injected" not in st.session_state:
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def check_pin(pin_input):
-    """Check PIN against stored hash in secrets."""
     stored = st.secrets.get("HAL_PIN", "")
     if not stored:
         return False
     return hashlib.sha256(pin_input.encode()).hexdigest() == stored
 
 def get_gsheet():
-    """Connect to HAL Google Sheet. Returns (tickets_ws, log_ws, conv_ws) or (None, None, None)."""
     if not GSHEETS_AVAILABLE:
         return None, None, None
     try:
         creds_dict = dict(st.secrets.get("gcp_service_account", {}))
         if not creds_dict:
             return None, None, None
-        # Fix newlines in private key
         if "private_key" in creds_dict:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         scopes = [
@@ -184,34 +132,26 @@ def get_gsheet():
         except Exception:
             log_ws = wb.add_worksheet("Log", rows=1000, cols=6)
             log_ws.append_row(["Timestamp","TicketID","Client","Action","OldStatus","NewStatus"])
-        # NEW: Conversations tab for HAL memory
         try:
             conv_ws = wb.worksheet("Conversations")
         except Exception:
             conv_ws = wb.add_worksheet("Conversations", rows=10000, cols=6)
             conv_ws.append_row(["Timestamp","SessionID","Mode","Role","Content","Tags"])
         return tickets_ws, log_ws, conv_ws
-    except Exception as e:
+    except Exception:
         return None, None, None
 
 
 def save_message_to_sheet(conv_ws, mode, session_id, role, content, tags=""):
-    """Append a single chat message to the Conversations sheet. Silent on failure."""
     if conv_ws is None:
         return False
-    # Only save modes that are in MEMORY_SAVE_MODES (default: business only)
     if mode not in MEMORY_SAVE_MODES:
         return False
     try:
-        # Truncate very long messages to avoid sheet limits (50k char/cell)
         safe_content = (content or "")[:45000]
         conv_ws.append_row([
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            session_id,
-            mode,
-            role,
-            safe_content,
-            tags,
+            session_id, mode, role, safe_content, tags,
         ])
         return True
     except Exception:
@@ -219,7 +159,6 @@ def save_message_to_sheet(conv_ws, mode, session_id, role, content, tags=""):
 
 
 def load_recent_conversations(conv_ws, days=MEMORY_WINDOW_DAYS, mode_filter="business"):
-    """Load conversation messages from the last N days. Returns list of dicts, oldest first."""
     if conv_ws is None:
         return []
     try:
@@ -240,12 +179,9 @@ def load_recent_conversations(conv_ws, days=MEMORY_WINDOW_DAYS, mode_filter="bus
             if mode_filter and r.get("Mode") != mode_filter:
                 continue
             result.append({
-                "timestamp": ts_str,
-                "session_id": r.get("SessionID",""),
-                "mode": r.get("Mode",""),
-                "role": r.get("Role","user"),
-                "content": r.get("Content",""),
-                "tags": r.get("Tags",""),
+                "timestamp": ts_str, "session_id": r.get("SessionID",""),
+                "mode": r.get("Mode",""), "role": r.get("Role","user"),
+                "content": r.get("Content",""), "tags": r.get("Tags",""),
             })
         return result
     except Exception:
@@ -253,7 +189,6 @@ def load_recent_conversations(conv_ws, days=MEMORY_WINDOW_DAYS, mode_filter="bus
 
 
 def search_conversations(conv_ws, query, limit=20):
-    """Search ALL conversations (no date limit) by text. Returns list of dicts."""
     if conv_ws is None or not query:
         return []
     try:
@@ -265,14 +200,10 @@ def search_conversations(conv_ws, query, limit=20):
             tags    = (r.get("Tags","") or "").lower()
             if q in content or q in tags:
                 matches.append({
-                    "timestamp": r.get("Timestamp",""),
-                    "session_id": r.get("SessionID",""),
-                    "mode": r.get("Mode",""),
-                    "role": r.get("Role","user"),
-                    "content": r.get("Content",""),
-                    "tags": r.get("Tags",""),
+                    "timestamp": r.get("Timestamp",""), "session_id": r.get("SessionID",""),
+                    "mode": r.get("Mode",""), "role": r.get("Role","user"),
+                    "content": r.get("Content",""), "tags": r.get("Tags",""),
                 })
-        # Most recent first
         matches.sort(key=lambda x: x["timestamp"], reverse=True)
         return matches[:limit]
     except Exception:
@@ -280,10 +211,8 @@ def search_conversations(conv_ws, query, limit=20):
 
 
 def summarise_memory_for_context(recent_msgs, max_msgs=MEMORY_MAX_INJECT):
-    """Turn recent conversation rows into a short context block for HAL's system prompt."""
     if not recent_msgs:
         return ""
-    # Take the most recent N messages, oldest first for chronological flow
     msgs = recent_msgs[-max_msgs:]
     lines = [f"\n\n=== ROLLING MEMORY ({MEMORY_WINDOW_DAYS} days) — your recent business conversations ==="]
     current_session = None
@@ -292,7 +221,6 @@ def summarise_memory_for_context(recent_msgs, max_msgs=MEMORY_MAX_INJECT):
             lines.append(f"\n[Session {m['timestamp']}]")
             current_session = m["session_id"]
         prefix = "USER" if m["role"] == "user" else "HAL"
-        # Truncate each message to keep context lean
         snippet = m["content"][:500].replace("\n", " ")
         if len(m["content"]) > 500:
             snippet += "..."
@@ -302,7 +230,6 @@ def summarise_memory_for_context(recent_msgs, max_msgs=MEMORY_MAX_INJECT):
 
 
 def load_tickets_from_sheet(ws):
-    """Load all tickets from Google Sheet into list of dicts."""
     if ws is None:
         return None
     try:
@@ -324,7 +251,6 @@ def load_tickets_from_sheet(ws):
 
 
 def save_ticket_to_sheet(ws, ticket):
-    """Append a new ticket row to Google Sheet."""
     if ws is None:
         return False
     try:
@@ -340,14 +266,12 @@ def save_ticket_to_sheet(ws, ticket):
 
 
 def update_ticket_in_sheet(ws, log_ws, ticket_id, new_status, old_status, client):
-    """Update a ticket status in Google Sheet."""
     if ws is None:
         return False
     try:
         cell = ws.find(ticket_id)
         if cell:
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            # Status is column 4, Updated is column 7
             ws.update_cell(cell.row, 4, new_status)
             ws.update_cell(cell.row, 7, now)
             if log_ws:
@@ -358,7 +282,6 @@ def update_ticket_in_sheet(ws, log_ws, ticket_id, new_status, old_status, client
 
 
 def delete_ticket_from_sheet(ws, ticket_id):
-    """Delete a ticket row from Google Sheet."""
     if ws is None:
         return False
     try:
@@ -377,9 +300,26 @@ def get_api_key():
         st.secrets.get("claude_api_key") or ""
     )
 
+
+def chi_api(endpoint, params=None):
+    import urllib.request as _ur, json as _j, urllib.parse as _up
+    portal_url = st.secrets.get("CHI_PORTAL_URL", "https://chi-insurance-portal-production.up.railway.app")
+    api_key    = st.secrets.get("CHI_API_KEY", "")
+    if not api_key:
+        return None
+    url = f"{portal_url.rstrip('/')}/api/{endpoint.lstrip('/')}"
+    if params:
+        url += "?" + _up.urlencode(params)
+    req = _ur.Request(url, headers={"X-API-Key": api_key, "Accept": "application/json"})
+    try:
+        with _ur.urlopen(req, timeout=10) as r:
+            return _j.loads(r.read())
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    # Logo
     st.markdown("""
     <div class="hal-logo">
         <div class="hal-title">HAL</div>
@@ -387,59 +327,48 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    # Mode switcher
     st.markdown("**Mode**")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button(
-            "🏛 Business",
-            use_container_width=True,
-            type="primary" if st.session_state.mode == "business" else "secondary"
-        ):
+        if st.button("🏛 Business", use_container_width=True,
+                     type="primary" if st.session_state.mode == "business" else "secondary"):
             st.session_state.mode = "business"
             st.session_state.active_module = "home"
             st.rerun()
     with col2:
-        if st.button(
-            "🔒 Private",
-            use_container_width=True,
-            type="primary" if st.session_state.mode == "private" else "secondary"
-        ):
+        if st.button("🔒 Private", use_container_width=True,
+                     type="primary" if st.session_state.mode == "private" else "secondary"):
             st.session_state.mode = "private"
             st.session_state.active_module = "home"
             st.rerun()
 
     st.divider()
 
-    # Module navigation — changes based on mode
     if st.session_state.mode == "business":
         st.markdown('<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#7A6A5A;margin-bottom:8px">Ashlar Insurance</div>', unsafe_allow_html=True)
 
         modules_business = [
-            ("🏠", "home", "Dashboard"),
-            ("💬", "hal_chat", "HAL Assistant"),
-            ("🧠", "memory", "Memory"),
-            ("📊", "quotes", "Quote Engine"),
-            ("📄", "documents", "Document Filler"),
-            ("✉️", "comms", "Communications"),
-            ("📈", "commissions", "Commissions"),
-            ("🔍", "market", "Market Intel"),
-            ("🤝", "clients", "Clients"),
-            ("🏗️", "apps", "App Builder"),
-            ("🐾", "pets", "PetsHealth"),
-            ("🩺", "kira_nurse", "Kira AI Nurse"),
+            ("🏠", "home",         "Dashboard"),
+            ("💬", "hal_chat",     "HAL Assistant"),
+            ("🧠", "memory",       "Memory"),
+            ("🔄", "renewals",     "Renewals"),
+            ("📊", "quotes",       "Quote Engine"),
+            ("📄", "documents",    "Document Filler"),
+            ("✉️", "comms",        "Communications"),
+            ("📈", "commissions",  "Commissions"),
+            ("🔍", "market",       "Market Intel"),
+            ("🤝", "clients",      "Clients"),
+            ("🏗️", "apps",         "App Builder"),
+            ("🐾", "pets",         "PetsHealth"),
+            ("🩺", "kira_nurse",   "Kira AI Nurse"),
             ("🧠", "chi_analyzer", "Insurance Analyzer"),
-            ("🌐", "chi_portal", "Client Portals"),
-            ("🐱", "kira_pet", "Kira Pet"),
+            ("🌐", "chi_portal",   "Client Portals"),
+            ("🐱", "kira_pet",     "Kira Pet"),
         ]
         for icon, key, label in modules_business:
             active = st.session_state.active_module == key
-            if st.button(
-                f"{icon}  {label}",
-                key=f"nav_{key}",
-                use_container_width=True,
-                type="primary" if active else "secondary"
-            ):
+            if st.button(f"{icon}  {label}", key=f"nav_{key}", use_container_width=True,
+                         type="primary" if active else "secondary"):
                 st.session_state.active_module = key
                 st.rerun()
 
@@ -448,24 +377,20 @@ with st.sidebar:
             st.markdown('<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#7A6A5A;margin-bottom:8px">Private Modules</div>', unsafe_allow_html=True)
 
             modules_private = [
-                ("🏠", "home", "Dashboard"),
-                ("💬", "hal_chat", "HAL Assistant"),
-                ("🏛️", "lodge", "Lodge Secretary"),
-                ("📋", "minutes", "Minutes & Docs"),
-                ("👥", "attendance", "Attendance"),
-                ("📅", "events", "Events & Gala"),
-                ("💰", "finance", "Financial Planner"),
-                ("💪", "health", "Health & Gym"),
+                ("🏠", "home",             "Dashboard"),
+                ("💬", "hal_chat",         "HAL Assistant"),
+                ("🏛️", "lodge",            "Lodge Secretary"),
+                ("📋", "minutes",          "Minutes & Docs"),
+                ("👥", "attendance",       "Attendance"),
+                ("📅", "events",           "Events & Gala"),
+                ("💰", "finance",          "Financial Planner"),
+                ("💪", "health",           "Health & Gym"),
                 ("🔑", "settings_private", "Settings"),
             ]
             for icon, key, label in modules_private:
                 active = st.session_state.active_module == key
-                if st.button(
-                    f"{icon}  {label}",
-                    key=f"nav_p_{key}",
-                    use_container_width=True,
-                    type="primary" if active else "secondary"
-                ):
+                if st.button(f"{icon}  {label}", key=f"nav_p_{key}", use_container_width=True,
+                             type="primary" if active else "secondary"):
                     st.session_state.active_module = key
                     st.rerun()
 
@@ -477,8 +402,6 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
-
-    # API key status
     api_key = get_api_key()
     if api_key:
         st.success("🔑 API key loaded", icon="✅")
@@ -512,7 +435,6 @@ def render_business_home():
     st.markdown("## 🏛 Ashlar Insurance — HAL Dashboard")
     st.caption("Christos Iatropoulos · Your AI business operating system")
 
-    # KPI row
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Active Clients", "—", help="Pull from commission statements")
@@ -524,24 +446,23 @@ def render_business_home():
         st.metric("Commission MTD", "—", help="Upload statement to track")
 
     st.divider()
-
-    # Module grid
     st.markdown('<div class="section-header">Business Modules</div>', unsafe_allow_html=True)
 
     tiles = [
-        ("💬", "HAL Assistant", "Ask anything — quotes, emails, analysis", "hal_chat", "live"),
-        ("📊", "Quote Engine", "Compare insurance proposals via PDF upload", "quotes", "live"),
-        ("📄", "Document Filler", "Auto-fill forms from contracts", "documents", "live"),
-        ("✉️", "Communications", "Emails, appeal letters, renewal notices", "comms", "live"),
-        ("📈", "Commissions", "Upload & analyse commission statements", "commissions", "dev"),
-        ("🔍", "Market Intel", "Niche analysis & expansion strategy", "market", "live"),
-        ("🤝", "Clients", "Client cases & policy tracker", "clients", "dev"),
-        ("🏗️", "App Builder", "Generate Python/Streamlit/Netlify apps", "apps", "live"),
-        ("🐾", "PetsHealth", "Pet insurance tools & petshealth.gr", "pets", "dev"),
-        ("🩺", "Kira AI Nurse", "AI health assistant — humans (triage, vitals, face scan)", "kira_nurse", "live"),
-        ("🐱", "Kira Pet", "AI Veterinary Nurse — pet owners (triage, photo scan, vet report)", "kira_pet", "live"),
-        ("🧠", "Insurance Analyzer", "Analyse client profile + identify coverage gaps", "chi_analyzer", "live"),
-        ("🌐", "CHI Portal", "Manage 138 clients · 222 policies · Railway", "chi_portal", "live"),
+        ("🔄", "Renewals",           "Ιούνιος · Email · WhatsApp outreach",                   "renewals",    "live"),
+        ("💬", "HAL Assistant",      "Ask anything — quotes, emails, analysis",                "hal_chat",    "live"),
+        ("📊", "Quote Engine",       "Compare insurance proposals via PDF upload",              "quotes",      "live"),
+        ("📄", "Document Filler",    "Auto-fill forms from contracts",                          "documents",   "live"),
+        ("✉️", "Communications",     "Emails, appeal letters, renewal notices",                 "comms",       "live"),
+        ("📈", "Commissions",        "Upload & analyse commission statements",                  "commissions", "dev"),
+        ("🔍", "Market Intel",       "Niche analysis & expansion strategy",                     "market",      "live"),
+        ("🤝", "Clients",            "Client cases & policy tracker",                           "clients",     "dev"),
+        ("🏗️", "App Builder",        "Generate Python/Streamlit/Netlify apps",                  "apps",        "live"),
+        ("🐾", "PetsHealth",         "Pet insurance tools & petshealth.gr",                    "pets",        "dev"),
+        ("🩺", "Kira AI Nurse",      "AI health assistant — humans (triage, vitals, face scan)","kira_nurse",  "live"),
+        ("🐱", "Kira Pet",           "AI Veterinary Nurse — pet owners",                        "kira_pet",    "live"),
+        ("🧠", "Insurance Analyzer", "Analyse client profile + identify coverage gaps",          "chi_analyzer","live"),
+        ("🌐", "CHI Portal",         "Manage 138 clients · 222 policies · Railway",             "chi_portal",  "live"),
     ]
 
     for i in range(0, len(tiles), 3):
@@ -567,15 +488,15 @@ def render_business_home():
     st.markdown('<div class="section-header">Recent Projects</div>', unsafe_allow_html=True)
 
     projects = [
-        ("Ashlar Quote Engine", "Streamlit · Claude API", "github.com/chiinsurancebrokers/chi_quote_engine", "Live"),
-        ("Ashlar Client Portal (Kourbelas)", "Netlify · HTML/JS", "panteliskourbelas-chiinsurancebrokers.netlify.app", "Live"),
-        ("CHI Insurance Portal", "Railway · Python", "chi-insurance-portal-production.up.railway.app", "Live"),
-        ("Document Filler", "Streamlit · ReportLab · Claude API", "Internal", "Live"),
-        ("PPT Quote Generator", "python-pptx · Claude API", "Internal", "Live"),
-        ("Ashlar Assurance Site", "WordPress · Breakdance", "ashlar-assurance.com", "In Build"),
-        ("petshealth.gr", "HTML · Claude API", "petshealth.gr", "Live"),
-        ("Kira AI Nurse", "Streamlit · Claude · GPT-4o · rPPG", "kiraainurse.streamlit.app", "Live"),
-        ("Kira Pet — AI Vet Nurse", "Streamlit · Claude API · Vision", "kiraaipet.streamlit.app", "Live"),
+        ("Ashlar Quote Engine",           "Streamlit · Claude API",              "github.com/chiinsurancebrokers/chi_quote_engine",                 "Live"),
+        ("Ashlar Client Portal (Kourbelas)", "Netlify · HTML/JS",               "panteliskourbelas-chiinsurancebrokers.netlify.app",                "Live"),
+        ("CHI Insurance Portal",          "Railway · Python",                    "chi-insurance-portal-production.up.railway.app",                  "Live"),
+        ("Document Filler",               "Streamlit · ReportLab · Claude API",  "Internal",                                                        "Live"),
+        ("PPT Quote Generator",           "python-pptx · Claude API",            "Internal",                                                        "Live"),
+        ("Ashlar Assurance Site",         "WordPress · Breakdance",              "ashlar-assurance.com",                                            "In Build"),
+        ("petshealth.gr",                 "HTML · Claude API",                   "petshealth.gr",                                                   "Live"),
+        ("Kira AI Nurse",                 "Streamlit · Claude · GPT-4o · rPPG",  "kiraainurse.streamlit.app",                                       "Live"),
+        ("Kira Pet — AI Vet Nurse",       "Streamlit · Claude API · Vision",     "kiraaipet.streamlit.app",                                         "Live"),
     ]
 
     for name, stack, url, status in projects:
@@ -592,22 +513,19 @@ def render_private_home():
     st.caption("Eyes only · Lodge & Personal modules")
 
     col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Next Lodge Meeting", "—")
-    with col2:
-        st.metric("Pending Masonic Tasks", "—")
-    with col3:
-        st.metric("Savings Rate", "—")
+    with col1: st.metric("Next Lodge Meeting", "—")
+    with col2: st.metric("Pending Masonic Tasks", "—")
+    with col3: st.metric("Savings Rate", "—")
 
     st.divider()
 
     tiles = [
-        ("🏛️", "Lodge Secretary", "Correspondence, circulars, notices", "lodge"),
-        ("📋", "Minutes & Docs", "Generate official Masonic minutes", "minutes"),
-        ("👥", "Attendance", "Track member presence per session", "attendance"),
-        ("📅", "Events & Gala", "Gala registrations, payments, lists", "events"),
-        ("💰", "Financial Planner", "Savings, retirement modelling", "finance"),
-        ("💪", "Health & Gym", "Workout plans, health monitor", "health"),
+        ("🏛️", "Lodge Secretary",  "Correspondence, circulars, notices",      "lodge"),
+        ("📋", "Minutes & Docs",   "Generate official Masonic minutes",         "minutes"),
+        ("👥", "Attendance",       "Track member presence per session",          "attendance"),
+        ("📅", "Events & Gala",    "Gala registrations, payments, lists",        "events"),
+        ("💰", "Financial Planner","Savings, retirement modelling",              "finance"),
+        ("💪", "Health & Gym",     "Workout plans, health monitor",              "health"),
     ]
 
     for i in range(0, len(tiles), 3):
@@ -644,53 +562,36 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Bupa Global claim expertise: formal complaint procedure, FSPO (Dublin), 7-day escalation protocol.
 - Tech stack: Python, Streamlit, Netlify, Railway, Claude API, ReportLab, python-pptx, Firebase, Google Sheets.
 - Brand: Ashlar Insurance (ashlar-assurance.com). Pet brand: petshealth.gr.
-- AI products in the Ashlar ecosystem:
-  · Kira AI Nurse (kiraainurse.streamlit.app + kiraainurse.netlify.app face scan) — bilingual AI health assistant for HUMANS: symptom triage, vitals, face scan (rPPG heart rate / breathing), clinical report, PubMed evidence, RxNorm drug check. Free pre-consultation tool for clients.
-  · Kira Pet (kiraaipet.streamlit.app) — bilingual AI Veterinary Nurse for PET OWNERS: AI triage, photo scan (skin/eye/wound/dental), structured vet report. Pre-screen funnel for petshealth.gr / Safe Pet System.
-  · Both ALWAYS recommend professional consultation — never diagnose or prescribe.
-- Internal HAL apps: Quote Engine (live 2025 rates), Document Filler, PPT Generator, Bupa Appeal letters, CHI Insurance Analyzer (PDF policy extraction + gap analysis), CHI Portal on Railway (138 clients / 222 policies / 30 expiring), white-label client portals (template: panteliskourbelas-chiinsurancebrokers.netlify.app — Pantelis Kourbelas is a CLIENT).
-- Note on identity: Pantelis Kourbelas is a CLIENT of Ashlar Insurance, NOT the operator. The operator is Christos Iatropoulos.
+- AI products: Kira AI Nurse (kiraainurse.streamlit.app) · Kira Pet (kiraaipet.streamlit.app).
+- CHI Portal on Railway: 138 clients / 222 policies / 30 expiring — URL: chi-insurance-portal-production.up.railway.app
+- Pantelis Kourbelas is a CLIENT of Ashlar Insurance, NOT the operator.
 
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send.
 
 MEMORY — IMPORTANT:
-You have persistent memory of business conversations from the last 7 days (rolling window). This memory is automatically injected into your context below as "=== ROLLING MEMORY ===". USE IT actively:
-- When the user references something past ("the Ergo offer", "what we said about Tzina", "that analysis", "the comparison from last week"), search the memory block and surface the relevant content.
-- When the user asks for a follow-up ("did I respond to X?", "what's pending?"), check the memory.
-- When the user gives an order to remember or be reminded of something ("remind me to chase Bupa Friday", "remember the Ergo deadline is 30 May"), respond with: (a) confirmation, (b) suggest creating a ticket in the Clients module with the specific subject/deadline. Be explicit: "I'll keep this in memory. I also suggest you create a ticket: Client=[name], Subject=[task], Priority=[level]. Do you want me to format it for you?"
-- If the user asks "what did we discuss about X" and X isn't in the 7-day window, say so and suggest using the Memory module's search (which covers all history, not just 7 days).
-- Memory contains BUSINESS conversations only. Private/lodge content is never stored.
+You have persistent memory of business conversations from the last 7 days (rolling window). This memory is automatically injected into your context below as "=== ROLLING MEMORY ===". USE IT actively.
 
 LIVE 2025 RATE TABLES (EUR, annual, Area 1 = Europe excl USA):
 
 MORGAN PRICE (area1):
 - Standard (HOSPITAL ONLY — NO outpatient): 30y=1,061 | 40y=1,380 | 45y=1,698 | 50y=2,041 | 55y=2,810 | 60y=3,548 | 65y=4,719
 - Standard Plus (hospital + outpatient 80% + MRI/CT/PET): 30y=1,322 | 40y=1,719 | 45y=2,136 | 50y=2,495 | 55y=3,436 | 60y=4,338 | 65y=5,810
-- Comprehensive (full: hospital + outpatient + dental + optical + mental health): 30y=2,247 | 40y=2,921 | 45y=3,690 | 50y=4,104 | 55y=5,656 | 60y=7,849 | 65y=10,647
-
-CRITICAL: Morgan Price Standard covers INPATIENT ONLY. For outpatient coverage, recommend Standard Plus minimum.
+- Comprehensive (full): 30y=2,247 | 40y=2,921 | 45y=3,690 | 50y=4,104 | 55y=5,656 | 60y=7,849 | 65y=10,647
 
 APRIL (area1):
-- International (hospital + some outpatient): 30y=1,940 | 40y=2,501 | 45y=2,869 | 50y=3,700 | 55y=4,913 | 60y=6,670 | 65y=10,011
-- Executive (full outpatient + maternity option): 30y=4,459 | 40y=5,743 | 45y=6,596 | 50y=8,640 | 55y=10,678 | 60y=13,675 | 65y=20,142
+- International: 30y=1,940 | 40y=2,501 | 45y=2,869 | 50y=3,700 | 55y=4,913 | 60y=6,670 | 65y=10,011
+- Executive: 30y=4,459 | 40y=5,743 | 45y=6,596 | 50y=8,640 | 55y=10,678 | 60y=13,675 | 65y=20,142
 
 IMG (area1, EUR 150 deductible):
 - Silver: 30y=1,813 | 40y=2,339 | 45y=2,872 | 50y=3,764 | 55y=4,993 | 60y=6,366 | 65y=8,427
 - Gold: 30y=2,320 | 40y=3,004 | 45y=3,694 | 50y=4,854 | 55y=6,450 | 60y=8,233 | 65y=10,914
-- Platinum: 30y=2,912 | 40y=3,797 | 45y=4,686 | 50y=6,178 | 55y=8,238 | 60y=10,535 | 65y=13,987
-
-Area 2 (Worldwide incl USA): ~2.2–2.5x Area 1.
-Always state exact plan name, area, annual premium in EUR, and whether outpatient is included."""
+- Platinum: 30y=2,912 | 40y=3,797 | 45y=4,686 | 50y=6,178 | 55y=8,238 | 60y=10,535 | 65y=13,987"""
 
     system_prompt_private = """You are HAL — the private AI assistant for Christos Iatropoulos. In this private mode you have access to lodge and personal context.
 
 LODGE: You assist as secretary for Στ∴ ΑΚΡΟΠΟΛΙΣ υπ' αρ. 84 (Grand Lodge of Greece, ΜΣΤΕ) and ΚΛΕΙΣ ΑΛΗΘΕΙΑΣ αρ. 1 (A.A.S.R.). Always use Masonic ∴ notation. Style: contemporary Greek Tektonic — NOT archaic. Closing: Μ.τ.Τ.Α.Α. / Κατ' εντολήν του Σεβ∴ / Ο Γραμμ∴ / Χρήστος Ιατρόπουλος. Lodge email: st.akropolis.84@gmail.com. Speech order: 18 levels (Μαθηταί → Μέγας Διδάσκαλος).
 
 PERSONAL: Financial adviser, nurse, gym coach. Help with savings plans, retirement modelling, workout programmes, health monitoring.
-
-PERSONAL PROJECTS (ecosystem awareness — may be discussed in private mode):
-- Kira AI Nurse at kiraainurse.streamlit.app — bilingual AI health assistant (triage, vitals, face scan rPPG, clinical report, PubMed, RxNorm).
-- Kira Pet at kiraaipet.streamlit.app — bilingual AI Veterinary Nurse (triage, photo scan, vet report) feeding petshealth.gr funnel.
 
 Never mix lodge content with business sessions. Respond in Greek unless asked otherwise."""
 
@@ -699,9 +600,7 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
     api_key = get_api_key() or st.session_state.get("api_key_input", "")
 
     # ── MEMORY INJECTION (business mode only) ────────────────────────────────
-    # Pull last 7 days of business conversations and add as context.
     if not is_private:
-        # Lazy-load the conv worksheet if not already loaded
         if "_conv_ws" not in st.session_state:
             try:
                 _, _, _conv_ws = get_gsheet()
@@ -711,19 +610,16 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
         conv_ws = st.session_state.get("_conv_ws")
         if conv_ws is not None and not st.session_state.memory_injected:
             recent = load_recent_conversations(conv_ws, days=MEMORY_WINDOW_DAYS, mode_filter="business")
-            # Exclude messages from the current session (avoid duplication)
             recent = [m for m in recent if m["session_id"] != st.session_state.session_id]
             if recent:
                 memory_block = summarise_memory_for_context(recent)
                 system = system + memory_block
                 st.session_state.memory_injected = True
                 st.session_state._memory_count = len(recent)
-        # Small status indicator
         mem_count = st.session_state.get("_memory_count", 0)
         if mem_count > 0:
             st.caption(f"🧠 Memory: {mem_count} messages from last {MEMORY_WINDOW_DAYS} days loaded")
 
-    # Chat history display
     chat_container = st.container()
     with chat_container:
         if not st.session_state.chat_history:
@@ -735,7 +631,6 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                 else:
                     st.chat_message("assistant").write(msg["content"])
 
-    # Quick actions
     if not st.session_state.chat_history:
         st.markdown("**Quick actions:**")
         quick = []
@@ -764,14 +659,10 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
                     st.rerun()
 
     # ── VOICE ─────────────────────────────────────────────────────────────────
-    # Voice API keys
-    groq_key = (st.secrets.get("GROQ_API_KEY","") or
-                st.secrets.get("groq_api_key",""))
-    oai_key  = (st.secrets.get("OPENAI_API_KEY","") or
-                st.secrets.get("openai_api_key",""))   # fallback if no Groq
-    stt_key  = groq_key or oai_key                     # prefer Groq (free)
-    el_key   = (st.secrets.get("ELEVENLABS_API_KEY","") or
-                st.secrets.get("elevenlabs_api_key",""))
+    groq_key = st.secrets.get("GROQ_API_KEY","") or st.secrets.get("groq_api_key","")
+    oai_key  = st.secrets.get("OPENAI_API_KEY","") or st.secrets.get("openai_api_key","")
+    stt_key  = groq_key or oai_key
+    el_key   = st.secrets.get("ELEVENLABS_API_KEY","") or st.secrets.get("elevenlabs_api_key","")
     el_voice = st.secrets.get("ELEVENLABS_VOICE_ID","aTP4J5SJLQl74WTSRXKW")
 
     voice_tab1, voice_tab2 = st.tabs([
@@ -779,7 +670,6 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
         "🔊 Full Voice (Groq/Whisper + ElevenLabs)" + (" ✓" if stt_key and el_key else " · setup required"),
     ])
 
-    # ── TAB 1: Web Speech API — instant, free, copy-paste ────────────────────
     with voice_tab1:
         import streamlit.components.v1 as _cv1
         st.caption("Browser speech recognition · Free · Greek · Copy transcript → paste into chat")
@@ -814,23 +704,18 @@ function toggleVoice(){
 function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcript).then(function(){document.getElementById("copy").textContent="✅ Copied!";setTimeout(function(){document.getElementById("copy").textContent="📋 Copy";},2000);});}
 </script></body></html>""", height=60, scrolling=False)
 
-    # ── TAB 2: Whisper + ElevenLabs — accurate, speaks back ──────────────────
     with voice_tab2:
         if not stt_key or not el_key:
             st.info("Add **GROQ_API_KEY** (free at console.groq.com) + **ELEVENLABS_API_KEY** to Streamlit secrets.")
-            st.caption("ELEVENLABS_VOICE_ID default: aTP4J5SJLQl74WTSRXKW (Eleni) · Groq is free, faster than OpenAI Whisper")
         else:
-            st.caption("Record → Whisper transcribes (Greek 95% accuracy) → Claude responds → ElevenLabs speaks back")
+            st.caption("Record → Whisper transcribes → Claude responds → ElevenLabs speaks back")
             audio_val = st.audio_input("🎙️ Speak to HAL", key="hal_voice_input")
             if audio_val is not None:
                 import urllib.request as _urv, json as _jv, base64 as _b64v
                 audio_bytes = audio_val.read()
-                ab64 = _b64v.b64encode(audio_bytes).decode()
-
                 with st.spinner("🎙️ Transcribing..."):
                     try:
                         if groq_key:
-                            # Groq Whisper — free, fast, no billing issues
                             from groq import Groq as _Groq
                             _gc = _Groq(api_key=groq_key)
                             transcript = _gc.audio.transcriptions.create(
@@ -839,7 +724,6 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                                 language="el",
                             ).text.strip()
                         else:
-                            # Fallback: OpenAI Whisper
                             from openai import OpenAI as _OAI
                             _oc = _OAI(api_key=oai_key)
                             transcript = _oc.audio.transcriptions.create(
@@ -849,61 +733,34 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                             ).text.strip()
                     except Exception as e:
                         transcript = ""
-                        if "401" in str(e):
-                            st.error("❌ API key invalid — check GROQ_API_KEY or OPENAI_API_KEY in secrets.")
-                        else:
-                            st.error(f"Transcription error: {e}")
+                        st.error(f"Transcription error: {e}")
 
                 if transcript:
                     st.markdown(f"**🗣️ You:** {transcript}")
                     st.session_state.chat_history.append({"role":"user","content":transcript})
-
                     with st.spinner("HAL thinking..."):
                         try:
                             import anthropic as _ant
                             _cl = _ant.Anthropic(api_key=api_key)
-                            # Voice-specific system: formal, no markdown, concise
-                            voice_system = system + "\n\nIMPORTANT FOR VOICE MODE: Respond formally and professionally at all times. No bullet points, no markdown, no asterisks. Speak in complete, clear sentences suitable for audio. Keep responses under 3 sentences unless a longer answer is essential. Address the user formally."
-                            _r  = _cl.messages.create(
+                            voice_system = system + "\n\nIMPORTANT FOR VOICE MODE: No markdown, no bullets. Complete sentences. Under 3 sentences unless essential."
+                            _r = _cl.messages.create(
                                 model="claude-sonnet-4-6", max_tokens=600,
                                 system=voice_system,
-                                messages=[{"role":m["role"],"content":m["content"]}
-                                          for m in st.session_state.chat_history[-10:]]
+                                messages=[{"role":m["role"],"content":m["content"]} for m in st.session_state.chat_history[-10:]]
                             )
                             reply = _r.content[0].text
                         except Exception as e:
                             reply = f"Error: {e}"
                     st.session_state.chat_history.append({"role":"assistant","content":reply})
                     st.markdown(f"**HAL:** {reply}")
-
                     with st.spinner("🔊 ElevenLabs speaking..."):
-                        # Pronunciation fixes for Greek/English mixed text
                         tts_text = reply
-                        _pron = {
-                            "Morgan Price":    "Μόργκαν Πράις",
-                            "Standard Plus":   "Στάνταρντ Πλας",
-                            "Standard":        "Στάνταρντ",
-                            "Comprehensive":   "Κόμπριχενσιβ",
-                            "International":   "Ιντερνάσιοναλ",
-                            "Executive":       "Εξέκιουτιβ",
-                            "Platinum":        "Πλάτινουμ",
-                            "IMG":             "Άι Εμ Τζι",
-                            "April":           "Απρίλ",
-                            "Bupa":            "Μπούπα",
-                            "outpatient":      "εξωνοσοκομειακά",
-                            "inpatient":       "νοσοκομειακή κάλυψη",
-                            "deductible":      "απαλλαγή",
-                            "premium":         "ασφάλιστρο",
-                            "HAL":             "Χαλ",
-                            "Ashlar":          "Άσλαρ",
-                            "Kira":            "Κίρα",
-                        }
+                        _pron = {"Morgan Price":"Μόργκαν Πράις","Standard Plus":"Στάνταρντ Πλας","Standard":"Στάνταρντ","Comprehensive":"Κόμπριχενσιβ","International":"Ιντερνάσιοναλ","Executive":"Εξέκιουτιβ","Platinum":"Πλάτινουμ","IMG":"Άι Εμ Τζι","April":"Απρίλ","Bupa":"Μπούπα","outpatient":"εξωνοσοκομειακά","inpatient":"νοσοκομειακή κάλυψη","deductible":"απαλλαγή","premium":"ασφάλιστρο","HAL":"Χαλ","Ashlar":"Άσλαρ","Kira":"Κίρα"}
                         for en, el in _pron.items():
                             tts_text = tts_text.replace(en, el)
                         tts_req = _urv.Request(
                             f"https://api.elevenlabs.io/v1/text-to-speech/{el_voice}",
-                            data=_jv.dumps({"text":tts_text,"model_id":"eleven_multilingual_v2",
-                                           "voice_settings":{"stability":0.55,"similarity_boost":0.8}}).encode(),
+                            data=_jv.dumps({"text":tts_text,"model_id":"eleven_multilingual_v2","voice_settings":{"stability":0.55,"similarity_boost":0.8}}).encode(),
                             headers={"xi-api-key":el_key,"Content-Type":"application/json","Accept":"audio/mpeg"}
                         )
                         try:
@@ -914,55 +771,452 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                 else:
                     st.warning("No speech detected — try again.")
 
-
-    # Input
     user_input = st.chat_input("Message HAL...")
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
-
-        # SAVE user message to memory (business mode only)
         if not is_private:
             conv_ws = st.session_state.get("_conv_ws")
-            save_message_to_sheet(conv_ws, "business", st.session_state.session_id,
-                                  "user", user_input)
-
+            save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "user", user_input)
         if not api_key:
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."
-            })
+            st.session_state.chat_history.append({"role": "assistant", "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."})
         else:
             with st.spinner("HAL is thinking..."):
                 try:
                     client = anthropic.Anthropic(api_key=api_key)
-                    messages = [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state.chat_history
-                    ]
-                    response = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=2000,
-                        system=system,
-                        messages=messages
-                    )
+                    messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat_history]
+                    response = client.messages.create(model="claude-sonnet-4-20250514", max_tokens=2000, system=system, messages=messages)
                     reply = response.content[0].text
                     st.session_state.chat_history.append({"role": "assistant", "content": reply})
-
-                    # SAVE HAL reply to memory (business mode only)
                     if not is_private:
                         conv_ws = st.session_state.get("_conv_ws")
-                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id,
-                                              "assistant", reply)
+                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", reply)
                 except Exception as e:
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": f"⚠️ Error: {str(e)}"
-                    })
+                    st.session_state.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {str(e)}"})
         st.rerun()
 
     if st.session_state.chat_history:
         if st.button("🗑 Clear conversation", key="clear_chat"):
             st.session_state.chat_history = []
+            st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RENEWALS MODULE — Live data from CHI Insurance Portal (Railway)
+# Uses CHI_PORTAL_URL + CHI_API_KEY (same as chi_api() helper above)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Bank account HTML blocks (per agent)
+_BANK_INFO = {
+    "3p": """
+<h3 style="color:#1976d2;">Τραπεζικοί Λογαριασμοί</h3>
+<p style="font-size:13px;color:#555;"><strong>ΔΙΚΑΙΟΥΧΟΣ: 3P INSURANCE AGENTS AE · ΑΦΜ 800478440</strong></p>
+<table style="width:100%;border-collapse:collapse;font-size:13px;">
+<tr style="background:#f5f5f5;"><td style="padding:8px;border:1px solid #ddd;"><strong>ALPHA BANK</strong></td><td style="padding:8px;border:1px solid #ddd;">GR4801401340134002320003540</td></tr>
+<tr><td style="padding:8px;border:1px solid #ddd;"><strong>ΕΘΝΙΚΗ ΤΡΑΠΕΖΑ</strong></td><td style="padding:8px;border:1px solid #ddd;">GR3901108910000089147029808</td></tr>
+<tr style="background:#f5f5f5;"><td style="padding:8px;border:1px solid #ddd;"><strong>EUROBANK</strong></td><td style="padding:8px;border:1px solid #ddd;">GR3302602210000370200676490</td></tr>
+<tr><td style="padding:8px;border:1px solid #ddd;"><strong>ΠΕΙΡΑΙΩΣ</strong></td><td style="padding:8px;border:1px solid #ddd;">GR6201720890005089072164520</td></tr>
+</table>""",
+    "ca": """
+<h3 style="color:#1976d2;">Τραπεζικοί Λογαριασμοί</h3>
+<p style="font-size:13px;color:#555;"><strong>ΔΙΚΑΙΟΥΧΟΣ: CA Insurance Agents · ΑΦΜ 800338387</strong></p>
+<table style="width:100%;border-collapse:collapse;font-size:13px;">
+<tr style="background:#f5f5f5;"><td style="padding:8px;border:1px solid #ddd;"><strong>ALPHA BANK</strong></td><td style="padding:8px;border:1px solid #ddd;">GR4101401460146002320015029</td></tr>
+<tr><td style="padding:8px;border:1px solid #ddd;"><strong>EUROBANK</strong></td><td style="padding:8px;border:1px solid #ddd;">GR6802600270000300201693054</td></tr>
+<tr style="background:#f5f5f5;"><td style="padding:8px;border:1px solid #ddd;"><strong>ΕΘΝΙΚΗ ΤΡΑΠΕΖΑ</strong></td><td style="padding:8px;border:1px solid #ddd;">GR7301106690000066900657306</td></tr>
+</table>""",
+    "bu": """
+<h3 style="color:#1976d2;">Κωδικός Πληρωμής RF</h3>
+<p style="font-size:13px;color:#555;"><strong>BROKERS UNION Α.Ε. · ΑΦΜ 800319742</strong></p>
+<div style="background:#e3f2fd;padding:20px;border-radius:8px;text-align:center;margin:15px 0;">
+<p style="margin:0 0 10px 0;font-size:14px;color:#666;">Κωδικός RF για πληρωμή σε οποιαδήποτε τράπεζα:</p>
+<p style="margin:0;font-size:20px;font-weight:bold;color:#1565c0;font-family:monospace;">{rf_code}</p>
+</div>""",
+}
+
+
+def _rn_fetch(endpoint, params=None):
+    """Fetch from CHI Portal using CHI_API_KEY / CHI_PORTAL_URL."""
+    portal_url = st.secrets.get("CHI_PORTAL_URL", "https://chi-insurance-portal-production.up.railway.app").rstrip("/")
+    api_key    = st.secrets.get("CHI_API_KEY", "")
+    if not api_key:
+        return None, "CHI_API_KEY not set in Streamlit secrets."
+    try:
+        r = requests.get(
+            f"{portal_url}/api/{endpoint.lstrip('/')}",
+            headers={"X-API-Key": api_key},
+            params=params,
+            timeout=15,
+        )
+        if r.status_code == 401:
+            return None, "API key rejected — check CHI_API_KEY in secrets."
+        if r.status_code != 200:
+            return None, f"Portal HTTP {r.status_code}: {r.text[:200]}"
+        return r.json(), None
+    except requests.exceptions.ConnectionError:
+        return None, f"Cannot reach {portal_url} — is Railway running?"
+    except Exception as e:
+        return None, f"Request error: {e}"
+
+
+def _days_badge_html(days):
+    if days <= 2:
+        return f'<span style="background:#dc2626;color:white;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;">🔴 {days}d</span>'
+    elif days <= 7:
+        return f'<span style="background:#ea580c;color:white;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;">🟠 {days}d</span>'
+    elif days <= 14:
+        return f'<span style="background:#ca8a04;color:white;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;">🟡 {days}d</span>'
+    else:
+        return f'<span style="background:#16a34a;color:white;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;">🟢 {days}d</span>'
+
+
+def _rn_send_gmail(to_email, subject, body_html):
+    sender   = st.secrets.get("GMAIL_SENDER", "")
+    password = st.secrets.get("GMAIL_APP_PASSWORD", "").replace(" ", "")
+    if not sender or not password:
+        return False, "GMAIL_SENDER / GMAIL_APP_PASSWORD not set in secrets."
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = sender
+        msg["To"]      = to_email
+        msg.attach(MIMEText(body_html, "html", "utf-8"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender, password)
+            server.sendmail(sender, to_email, msg.as_string())
+        return True, "Sent"
+    except Exception as e:
+        return False, str(e)
+
+
+def _rn_send_whatsapp(to_phone, message_body):
+    sid   = st.secrets.get("TWILIO_SID", "")
+    token = st.secrets.get("TWILIO_AUTH_TOKEN", "")
+    from_ = st.secrets.get("TWILIO_FROM", "whatsapp:+14155238886")
+    if not sid or not token:
+        return False, "TWILIO_SID / TWILIO_AUTH_TOKEN not set in secrets."
+    phone = re.sub(r"[^\d+]", "", str(to_phone))
+    if not phone.startswith("+"):
+        phone = "+30" + phone.lstrip("0")
+    try:
+        r = requests.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+            auth=(sid, token),
+            data={"From": from_, "To": f"whatsapp:{phone}", "Body": message_body},
+            timeout=15,
+        )
+        if r.status_code in (200, 201):
+            return True, "Sent"
+        return False, f"Twilio {r.status_code}: {r.json().get('message', r.text[:200])}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _build_renewal_email(policy, agent="3p"):
+    client_name = policy.get("client_name", "Πελάτης")
+    policy_type = policy.get("type", "Ασφαλιστήριο")
+    provider    = policy.get("insurer", "")
+    premium     = policy.get("premium", "")
+    expiry      = policy.get("expiry_date", policy.get("expiration_date", ""))
+    plate       = policy.get("vehicle_plate", policy.get("license_plate", ""))
+    rf_code     = policy.get("payment_code", "")
+    try:
+        exp_display = datetime.strptime(expiry[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except Exception:
+        exp_display = expiry
+    premium_str = f"EUR {float(premium):.2f}" if premium else ""
+    plate_html  = f"<p style='margin:0 0 6px 0;'><strong>Αρ. Κυκλοφορίας:</strong> {plate}</p>" if plate else ""
+    bank_html = _BANK_INFO.get(agent, _BANK_INFO["3p"])
+    if agent == "bu":
+        bank_html = bank_html.format(rf_code=rf_code) if rf_code else '<p style="color:#d32f2f;"><strong>⚠️ Παρακαλούμε επικοινωνήστε μαζί μας για τον κωδικό RF.</strong></p>'
+    subject = f"Ανανέωση Ασφαλιστηρίου – {policy_type}" + (f" ({provider})" if provider else "")
+    body = f"""<html><body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+<div style="max-width:600px;margin:0 auto;padding:20px;">
+  <div style="background:#1a237e;padding:20px;border-radius:10px;margin-bottom:25px;text-align:center;">
+    <h2 style="color:white;margin:0;font-size:20px;">CHI Insurance Brokers</h2>
+    <p style="color:#90caf9;margin:6px 0 0 0;font-size:13px;">Ανακοίνωση Ανανέωσης Ασφαλιστηρίου</p>
+  </div>
+  <p>Αγαπητέ/ή <strong>{client_name}</strong>,</p>
+  <p>Σας ενημερώνουμε ότι το ασφαλιστήριό σας λήγει σύντομα και χρειάζεται ανανέωση για να διατηρηθεί η κάλυψή σας αδιάλειπτη.</p>
+  <div style="background:#f5f5f5;padding:16px;border-radius:8px;margin:20px 0;border-left:4px solid #1a237e;">
+    <p style="margin:0 0 6px 0;"><strong>Είδος ασφάλισης:</strong> {policy_type}{f" – {provider}" if provider else ""}</p>
+    {plate_html}
+    <p style="margin:0 0 6px 0;"><strong>Ημερομηνία λήξης:</strong> <span style="color:#d32f2f;font-weight:bold;">{exp_display}</span></p>
+    {"<p style='margin:0;'><strong>Ποσό ανανέωσης:</strong> <span style='font-size:18px;font-weight:bold;color:#1a237e;'>" + premium_str + "</span></p>" if premium_str else ""}
+  </div>
+  <p>Για την εξόφληση, παρακαλούμε χρησιμοποιήστε έναν από τους παρακάτω τραπεζικούς λογαριασμούς και επικοινωνήστε μαζί μας για επιβεβαίωση.</p>
+  {bank_html}
+  <div style="margin-top:25px;padding:15px;background:#e8f5e9;border-radius:8px;">
+    <p style="margin:0;font-size:13px;color:#2e7d32;">📞 Για οποιαδήποτε απορία, είμαστε στη διάθεσή σας.<br>✉️ CHI Insurance Brokers</p>
+  </div>
+  <p style="margin-top:20px;">Με εκτίμηση,<br><strong>CHI Insurance Brokers</strong></p>
+</div></body></html>"""
+    return subject, body
+
+
+def _build_renewal_whatsapp(policy):
+    client_name = policy.get("client_name", "")
+    policy_type = policy.get("type", "ασφαλιστήριο")
+    provider    = policy.get("insurer", "")
+    expiry      = policy.get("expiry_date", policy.get("expiration_date", ""))
+    premium     = policy.get("premium", "")
+    days_left   = policy.get("days_left", "")
+    try:
+        exp_display = datetime.strptime(expiry[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except Exception:
+        exp_display = expiry
+    premium_str = f"EUR {float(premium):.2f}" if premium else ""
+    days_str    = f" ({days_left} ημέρες)" if isinstance(days_left, int) else ""
+    lines = [
+        f"Αγαπητέ/ή {client_name},", "",
+        f"Σας ενημερώνουμε ότι το *{policy_type}{f' – {provider}' if provider else ''}* λήγει στις *{exp_display}*{days_str}.",
+    ]
+    if premium_str:
+        lines.append(f"Ποσό ανανέωσης: *{premium_str}*")
+    lines += ["", "Παρακαλούμε επικοινωνήστε μαζί μας για την ανανέωση.", "", "📞 CHI Insurance Brokers"]
+    return "\n".join(lines)
+
+
+def render_renewals():
+    st.markdown("## 🔄 Renewals — Ανανεώσεις")
+    st.caption("Live data from CHI Insurance Portal (Railway) · Email & WhatsApp outreach")
+
+    portal_ok  = bool(st.secrets.get("CHI_PORTAL_URL") and st.secrets.get("CHI_API_KEY"))
+    gmail_ok   = bool(st.secrets.get("GMAIL_SENDER") and st.secrets.get("GMAIL_APP_PASSWORD"))
+    twilio_ok  = bool(st.secrets.get("TWILIO_SID") and st.secrets.get("TWILIO_AUTH_TOKEN"))
+
+    sc1, sc2, sc3 = st.columns(3)
+    sc1.metric("Portal API",        "✅ Connected" if portal_ok  else "❌ Not set")
+    sc2.metric("Gmail",             "✅ Ready"     if gmail_ok   else "❌ Not set")
+    sc3.metric("Twilio / WhatsApp", "✅ Ready"     if twilio_ok  else "❌ Not set")
+
+    if not portal_ok:
+        st.error("Ορίστε **CHI_PORTAL_URL** και **CHI_API_KEY** στα Streamlit secrets.")
+        with st.expander("⚙️ Πώς να ρυθμίσετε"):
+            st.code("""# Streamlit Cloud → Settings → Secrets — προσθήκη:
+CHI_PORTAL_URL    = "https://chi-insurance-portal-production.up.railway.app"
+CHI_API_KEY       = "your-chi-api-key"        # ίδιο με CHI_API_KEY στο Railway
+GMAIL_SENDER      = "your@gmail.com"
+GMAIL_APP_PASSWORD = "xxxx xxxx xxxx xxxx"
+TWILIO_SID        = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+TWILIO_AUTH_TOKEN  = "your_auth_token"
+TWILIO_FROM       = "whatsapp:+14155238886"
+""", language="toml")
+        return
+
+    st.divider()
+
+    ctl1, ctl2, ctl3 = st.columns([1, 1, 2])
+    with ctl1:
+        days_filter = st.selectbox("Εμφάνιση", [7, 14, 30, 60, 90], index=2,
+                                   format_func=lambda x: f"Επόμενες {x} μέρες")
+    with ctl2:
+        agent_default = st.selectbox("Default Agent", ["3p", "ca", "bu"],
+                                     format_func=lambda x: {"3p": "3P Insurance", "ca": "CA Insurance", "bu": "Brokers Union"}[x])
+    with ctl3:
+        if st.button("🔄 Ανανέωση από Portal", type="primary", use_container_width=True):
+            for k in list(st.session_state.keys()):
+                if k.startswith("rn_cache_"):
+                    del st.session_state[k]
+
+    cache_key = f"rn_cache_{days_filter}"
+    if cache_key not in st.session_state:
+        with st.spinner("Φόρτωση ανανεώσεων από CHI Portal (Railway)…"):
+            data, err = _rn_fetch("/renewals")
+            if err:
+                data2, err2 = _rn_fetch("/policies/expiring", {"days": days_filter})
+                if err2:
+                    st.error(f"Portal error: {err}")
+                    return
+                all_p  = data2 if isinstance(data2, list) else []
+                urgent   = [p for p in all_p if p.get("days_left", 99) <= 7]
+                soon     = [p for p in all_p if 7  < p.get("days_left", 99) <= 30]
+                upcoming = [p for p in all_p if p.get("days_left", 99) > 30]
+                data = {"urgent": urgent, "soon": soon, "upcoming": upcoming}
+            st.session_state[cache_key] = data
+
+    raw = st.session_state[cache_key]
+    all_renewals = [p for p in
+                    raw.get("urgent",[]) + raw.get("soon",[]) + raw.get("upcoming",[])
+                    if p.get("days_left", 999) <= days_filter]
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Σύνολο",            len(all_renewals))
+    k2.metric("🔴 Επείγοντα ≤7d",  len([p for p in all_renewals if p.get("days_left",99) <= 7]))
+    k3.metric("🟠 ≤14d",           len([p for p in all_renewals if 7  < p.get("days_left",99) <= 14]))
+    k4.metric("🟡 ≤30d",           len([p for p in all_renewals if 14 < p.get("days_left",99) <= 30]))
+
+    st.divider()
+
+    if not all_renewals:
+        st.info(f"Δεν υπάρχουν ανανεώσεις για τις επόμενες {days_filter} μέρες.")
+        return
+
+    if "renewal_sent" not in st.session_state:
+        st.session_state.renewal_sent = {}
+
+    sections = [
+        ("🔴 Επείγοντα — λήγουν σε ≤ 7 μέρες",  [p for p in all_renewals if p.get("days_left",99) <= 7],          "#fef2f2"),
+        ("🟠 Σύντομα — 8 έως 14 μέρες",          [p for p in all_renewals if 7  < p.get("days_left",99) <= 14],    "#fff7ed"),
+        ("🟡 Επόμενος μήνας — 15 έως 30 μέρες",  [p for p in all_renewals if 14 < p.get("days_left",99) <= 30],    "#fefce8"),
+        ("🟢 Αργότερα — άνω των 30 μερών",        [p for p in all_renewals if p.get("days_left",99) > 30],          "#f0fdf4"),
+    ]
+
+    for section_title, policies, bg in sections:
+        if not policies:
+            continue
+        st.markdown(f"### {section_title}")
+
+        for idx, policy in enumerate(policies):
+            pid       = str(policy.get("id", f"p{idx}"))
+            client    = policy.get("client_name", "—")
+            ptype     = policy.get("type", "—")
+            provider  = policy.get("insurer", "—")
+            email     = policy.get("client_email", "")
+            phone     = policy.get("client_phone", "")
+            premium   = policy.get("premium", "")
+            days_left = policy.get("days_left", "—")
+            expiry    = policy.get("expiry_date", policy.get("expiration_date", ""))
+            plate     = policy.get("vehicle_plate", policy.get("license_plate", ""))
+            sent_info = st.session_state.renewal_sent.get(pid, {})
+
+            try:
+                exp_display = datetime.strptime(expiry[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+            except Exception:
+                exp_display = expiry
+
+            premium_display = f"EUR {float(premium):.2f}" if premium else "—"
+            plate_str       = f" · 🚗 {plate}" if plate else ""
+
+            with st.container():
+                st.markdown(
+                    f'<div style="background:{bg};border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;margin-bottom:10px;">',
+                    unsafe_allow_html=True,
+                )
+                row1a, row1b = st.columns([5, 1])
+                with row1a:
+                    st.markdown(f"**{client}** · {ptype} · *{provider}*{plate_str}")
+                    st.caption(f"Λήξη: **{exp_display}** · Ποσό: {premium_display} · 📧 {email or '—'} · 📱 {phone or '—'}")
+                with row1b:
+                    if isinstance(days_left, int):
+                        st.markdown(_days_badge_html(days_left), unsafe_allow_html=True)
+
+                col_ag, col_pv, col_em, col_wa, col_st = st.columns([1.2, 1.1, 1, 1, 1.5])
+
+                with col_ag:
+                    agent = st.selectbox("Agent", ["3p","ca","bu"], key=f"agent_{pid}",
+                                         index=["3p","ca","bu"].index(agent_default),
+                                         format_func=lambda x: {"3p":"3P","ca":"CA","bu":"BU"}[x],
+                                         label_visibility="collapsed")
+                with col_pv:
+                    if st.button("👁 Preview", key=f"prev_{pid}", use_container_width=True):
+                        subj, body = _build_renewal_email(policy, agent)
+                        st.session_state[f"rn_prev_{pid}"] = (subj, body, email)
+                with col_em:
+                    e_sent = sent_info.get("email", False)
+                    if st.button("✅ Email" if e_sent else "📤 Email", key=f"remail_{pid}",
+                                 use_container_width=True, disabled=e_sent):
+                        if not email:
+                            st.error(f"Δεν υπάρχει email για {client}")
+                        else:
+                            subj, body = _build_renewal_email(policy, agent)
+                            ok, msg = _rn_send_gmail(email, subj, body)
+                            if ok:
+                                st.session_state.renewal_sent.setdefault(pid, {})["email"] = True
+                                st.success(f"✅ → {email}")
+                                st.rerun()
+                            else:
+                                st.error(f"Email error: {msg}")
+                with col_wa:
+                    w_sent = sent_info.get("wa", False)
+                    if st.button("✅ WA" if w_sent else "💬 WhatsApp", key=f"rwa_{pid}",
+                                 use_container_width=True, disabled=w_sent):
+                        if not phone:
+                            st.error(f"Δεν υπάρχει τηλέφωνο για {client}")
+                        else:
+                            msg_body = _build_renewal_whatsapp(policy)
+                            ok, msg  = _rn_send_whatsapp(phone, msg_body)
+                            if ok:
+                                st.session_state.renewal_sent.setdefault(pid, {})["wa"] = True
+                                st.success(f"✅ → {phone}")
+                                st.rerun()
+                            else:
+                                st.error(f"WhatsApp error: {msg}")
+                with col_st:
+                    badges = []
+                    if sent_info.get("email"): badges.append("📧 Sent")
+                    if sent_info.get("wa"):    badges.append("💬 Sent")
+                    if badges:
+                        st.success(" · ".join(badges))
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            # Email preview expander
+            prev_key = f"rn_prev_{pid}"
+            if prev_key in st.session_state:
+                subj, body, default_email = st.session_state[prev_key]
+                with st.expander(f"📧 Preview email — {client}", expanded=True):
+                    st.markdown(f"**Subject:** `{subj}`")
+                    pc1, pc2 = st.columns([3, 1])
+                    with pc1:
+                        send_to = st.text_input("Αποστολή σε:", value=default_email, key=f"pto_{pid}")
+                    with pc2:
+                        if st.button("📤 Αποστολή τώρα", key=f"psend_{pid}", type="primary", use_container_width=True):
+                            ok, err_msg = _rn_send_gmail(send_to, subj, body)
+                            if ok:
+                                st.session_state.renewal_sent.setdefault(pid, {})["email"] = True
+                                st.success(f"✅ Εστάλη → {send_to}")
+                                del st.session_state[prev_key]
+                                st.rerun()
+                            else:
+                                st.error(err_msg)
+                    st.components.v1.html(body, height=480, scrolling=True)
+
+    st.divider()
+    st.markdown("### 📦 Μαζική Αποστολή")
+    urgent_list = [p for p in all_renewals if p.get("days_left", 99) <= 7]
+
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        if st.button(f"📤 Email σε όλους τους επείγοντες ({len(urgent_list)})",
+                     use_container_width=True, disabled=len(urgent_list)==0):
+            targets = [p for p in urgent_list if p.get("client_email")]
+            ok_c = fail_c = 0
+            prog = st.progress(0)
+            for i, p in enumerate(targets):
+                pid = str(p.get("id", i))
+                subj, body = _build_renewal_email(p, agent_default)
+                ok, _ = _rn_send_gmail(p["client_email"], subj, body)
+                if ok:
+                    st.session_state.renewal_sent.setdefault(pid, {})["email"] = True
+                    ok_c += 1
+                else:
+                    fail_c += 1
+                prog.progress((i+1)/max(len(targets),1))
+            st.success(f"✅ {ok_c} emails · ❌ {fail_c} αποτυχίες")
+            st.rerun()
+
+    with b2:
+        if st.button(f"💬 WhatsApp σε όλους τους επείγοντες ({len(urgent_list)})",
+                     use_container_width=True, disabled=len(urgent_list)==0):
+            targets = [p for p in urgent_list if p.get("client_phone")]
+            ok_c = fail_c = 0
+            prog = st.progress(0)
+            for i, p in enumerate(targets):
+                pid = str(p.get("id", i))
+                msg_body = _build_renewal_whatsapp(p)
+                ok, _ = _rn_send_whatsapp(p["client_phone"], msg_body)
+                if ok:
+                    st.session_state.renewal_sent.setdefault(pid, {})["wa"] = True
+                    ok_c += 1
+                else:
+                    fail_c += 1
+                prog.progress((i+1)/max(len(targets),1))
+            st.success(f"✅ {ok_c} WhatsApp · ❌ {fail_c} αποτυχίες")
+            st.rerun()
+
+    with b3:
+        if st.button("🔁 Reset sent status", use_container_width=True):
+            st.session_state.renewal_sent = {}
             st.rerun()
 
 
@@ -974,7 +1228,6 @@ def render_quotes():
         "⚡ Instant Quote", "📤 Upload & Analyse PDF", "📋 Saved Results"
     ])
 
-    # ══ TAB 1: INSTANT LIVE QUOTE ══════════════════════════════════════════════
     with tab_live:
         if not RATES_LOADED:
             st.warning("rate_tables.py not found in repo. Add it alongside app.py.")
@@ -983,18 +1236,15 @@ def render_quotes():
         st.markdown("### Client Details")
         qc1, qc2, qc3 = st.columns(3)
         with qc1:
-            q_name    = st.text_input("Client name", placeholder="Katia Totikidou")
-            q_age     = st.number_input("Age", min_value=0, max_value=80, value=45)
+            q_name = st.text_input("Client name", placeholder="Katia Totikidou")
+            q_age  = st.number_input("Age", min_value=0, max_value=80, value=45)
         with qc2:
-            q_area    = st.radio("Coverage area",
-                                  ["Area 1 — Europe (excl USA)", "Area 2 — Worldwide incl USA"],
-                                  horizontal=False)
-            area_key  = "area1" if "Area 1" in q_area else "area2"
+            q_area = st.radio("Coverage area", ["Area 1 — Europe (excl USA)", "Area 2 — Worldwide incl USA"])
+            area_key = "area1" if "Area 1" in q_area else "area2"
         with qc3:
-            q_notes   = st.text_area("Client priorities / notes", height=100,
+            q_notes = st.text_area("Client priorities / notes", height=100,
                 placeholder="e.g. Needs outpatient, travels to USA, cancer history...")
 
-        # Member table
         st.markdown("### Members")
         if "quote_members" not in st.session_state:
             st.session_state.quote_members = [{"name": q_name or "Member 1", "age": q_age}]
@@ -1010,16 +1260,12 @@ def render_quotes():
             if mc2.button("✕", key=f"del_m_{i}") and len(st.session_state.quote_members) > 1:
                 st.session_state.quote_members.pop(i); st.rerun()
 
-        # Plan selection
         st.markdown("### Plans to compare")
         all_plans = [(c, p, n, cov, ded) for c, p, n, cov, ded in RATE_PLANS]
-        selected_plans = st.multiselect(
-            "Select plans",
+        selected_plans = st.multiselect("Select plans",
             options=[p[2] for p in all_plans],
             default=["Morgan Price Standard", "Morgan Price Comprehensive",
-                     "April International", "April Executive",
-                     "IMG Silver", "IMG Gold"],
-        )
+                     "April International", "April Executive", "IMG Silver", "IMG Gold"])
 
         if st.button("⚡ Generate Comparison", type="primary", use_container_width=True):
             if not st.session_state.quote_members:
@@ -1027,26 +1273,17 @@ def render_quotes():
             else:
                 results = []
                 plan_map = {p[2]: p for p in all_plans}
-
                 for plan_name in selected_plans:
                     if plan_name not in plan_map: continue
                     carrier, plan_key, display, coverage, ded_note = plan_map[plan_name]
-                    total = 0
-                    member_rates = []
-                    valid = True
+                    total = 0; member_rates = []; valid = True
                     for m in st.session_state.quote_members:
                         prem = lookup_premium(carrier, plan_key, m["age"], area_key)
-                        if prem is None:
-                            valid = False; break
-                        total += prem
-                        member_rates.append((m["name"], m["age"], prem))
+                        if prem is None: valid = False; break
+                        total += prem; member_rates.append((m["name"], m["age"], prem))
                     if valid:
-                        results.append({
-                            "plan": display, "carrier": carrier,
-                            "total": total, "members": member_rates,
-                            "coverage": coverage, "deductible": ded_note,
-                        })
-
+                        results.append({"plan": display, "carrier": carrier, "total": total,
+                                        "members": member_rates, "coverage": coverage, "deductible": ded_note})
                 results.sort(key=lambda x: x["total"])
                 st.session_state["quote_results"] = results
                 st.session_state["quote_client"]  = q_name
@@ -1054,59 +1291,45 @@ def render_quotes():
                 st.session_state["quote_area"]    = q_area
                 st.rerun()
 
-        # Display results
         if st.session_state.get("quote_results"):
             results   = st.session_state["quote_results"]
             client    = st.session_state.get("quote_client","Client")
             area_disp = st.session_state.get("quote_area","Area 1")
             members   = st.session_state.get("quote_members",[])
-
             st.markdown("---")
             st.markdown(f"### 📋 Quote Comparison — {client or 'Client'}")
             st.caption(f"{area_disp} · {len(members)} member(s) · 2025 rates")
-
-            # Summary table
             cheapest = results[0]["total"]
             for i, r in enumerate(results):
-                diff     = r["total"] - cheapest
-                badge    = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "  "
+                diff = r["total"] - cheapest
+                badge = "🥇" if i==0 else "🥈" if i==1 else "🥉" if i==2 else "  "
                 diff_str = f"+€{diff:,.0f}/yr" if diff > 0 else "✅ Lowest"
-                color    = "#EDFBF0" if i == 0 else "white"
-
+                color = "#EDFBF0" if i==0 else "white"
                 with st.container():
-                    st.markdown(f"""<div style="background:{color};border:1px solid #E8E0D5;
-                        border-radius:12px;padding:16px 20px;margin-bottom:10px">
+                    st.markdown(f"""<div style="background:{color};border:1px solid #E8E0D5;border-radius:12px;padding:16px 20px;margin-bottom:10px">
                         <div style="display:flex;justify-content:space-between;align-items:center">
                             <div><span style="font-size:18px">{badge}</span>
                             <strong style="font-size:16px;margin-left:8px">{r["plan"]}</strong>
                             <span style="font-size:12px;color:#6B7280;margin-left:10px">{r["deductible"]}</span></div>
                             <div style="text-align:right">
                             <div style="font-size:22px;font-weight:800;color:#1C1410">€{r["total"]:,.0f}/yr</div>
-                            <div style="font-size:12px;color:#6B7280">{diff_str}</div>
-                            </div>
+                            <div style="font-size:12px;color:#6B7280">{diff_str}</div></div>
                         </div>
                         <div style="margin-top:10px;font-size:12px;color:#6B7280">
-                        {" · ".join(f"{m[0]}: €{m[2]:,.0f}" for m in r["members"])}
-                        </div>
+                        {" · ".join(f"{m[0]}: €{m[2]:,.0f}" for m in r["members"])}</div>
                     </div>""", unsafe_allow_html=True)
-
-            # Export
             st.divider()
             ec1, ec2 = st.columns(2)
             with ec1:
-                # Text export
                 lines = [f"ASHLAR INSURANCE — Quote Comparison",
-                         f"Client: {client} | {area_disp} | {datetime.now().strftime('%d/%m/%Y')}",
-                         f"Members: {', '.join(f'{m[chr(34)+chr(110)+chr(97)+chr(109)+chr(101)+chr(34)]} ({m[chr(34)+chr(97)+chr(103)+chr(101)+chr(34)]}y)' for m in members)}",""]
+                         f"Client: {client} | {area_disp} | {datetime.now().strftime('%d/%m/%Y')}", ""]
                 for r in results:
                     lines.append(f"{r['plan']}: EUR {r['total']:,.0f}/year")
                     for m in r["members"]:
                         lines.append(f"  {m[0]} (age {m[1]}): EUR {m[2]:,.0f}")
                     lines.append("")
                 lines.append("Rates: Morgan Price EU 2025 / April LT 2025 / IMG GPMI Apr-2025")
-                quote_text = "\n".join(lines)
-                st.download_button("📥 Download quote", quote_text,
-                    mime="text/plain", use_container_width=True)
+                st.download_button("📥 Download quote", "\n".join(lines), mime="text/plain", use_container_width=True)
             with ec2:
                 if st.button("💬 Send to HAL for narrative", use_container_width=True):
                     qs = "\n".join(f"{r['plan']}: EUR {r['total']:,.0f}/yr" for r in results)
@@ -1120,30 +1343,23 @@ def render_quotes():
                     if k in st.session_state: del st.session_state[k]
                 st.rerun()
 
-    # ══ TAB 2: PDF UPLOAD ══════════════════════════════════════════════════════
     with tab_pdf:
         st.caption("Upload insurer quote PDFs · Claude extracts & compares")
         uploaded = st.file_uploader("Upload quote PDFs", type=["pdf"], accept_multiple_files=True)
         client_age   = st.number_input("Client age", min_value=0, max_value=100, value=45, key="pdf_age")
-        client_notes = st.text_area("Client priorities", placeholder="e.g. Prioritises outpatient, travels to Germany...", key="pdf_notes")
+        client_notes = st.text_area("Client priorities", key="pdf_notes")
         if st.button("🚀 Analyse PDFs", type="primary", disabled=not uploaded):
             api_key = get_api_key()
             if api_key and uploaded:
                 with st.spinner(f"Analysing {len(uploaded)} quotes..."):
                     pdf_names = [f.name for f in uploaded]
-                    prompt = (f"Compare these {len(uploaded)} insurance quotes for a {client_age}-year-old: "
-                              f"{', '.join(pdf_names)}. "
-                              f"Client priorities: {client_notes or 'standard coverage'}. "
-                              f"Extract: insurer, plan name, annual premium, key coverage, deductibles, exclusions. "
-                              f"Rank from best value to most expensive. Use actual rates from the rate tables if recognisable.")
                     import anthropic
                     client = anthropic.Anthropic(api_key=api_key)
                     r = client.messages.create(model="claude-sonnet-4-6", max_tokens=2000,
-                        system=f"You are an expert insurance broker.",
-                        messages=[{"role":"user","content":prompt}])
+                        system="You are an expert insurance broker.",
+                        messages=[{"role":"user","content":f"Compare these {len(uploaded)} insurance quotes for a {client_age}-year-old: {', '.join(pdf_names)}. Client priorities: {client_notes or 'standard coverage'}. Extract: insurer, plan name, annual premium, key coverage, deductibles, exclusions. Rank from best value to most expensive."}])
                     st.markdown(r.content[0].text)
 
-    # ══ TAB 3: SAVED ═══════════════════════════════════════════════════════════
     with tab_results:
         st.info("Quotes generated in the Instant Quote tab appear here. Use 'Send to HAL' to draft a client email.")
 
@@ -1151,18 +1367,14 @@ def render_quotes():
 def render_documents():
     st.markdown("## 📄 Document Filler")
     st.caption("Upload a blank form + source documents · HAL extracts and fills automatically")
-
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("**Blank form (PDF)**")
         form_file = st.file_uploader("Upload form to fill", type=["pdf"], key="form_upload")
     with col2:
         st.markdown("**Source documents**")
-        source_files = st.file_uploader("Upload contract / policy / data source", type=["pdf", "docx"], accept_multiple_files=True, key="source_upload")
-
-    st.markdown("**Language output**")
-    lang = st.radio("", ["Greek (Ελληνικά)", "English"], horizontal=True)
-
+        source_files = st.file_uploader("Upload contract / policy / data source", type=["pdf","docx"], accept_multiple_files=True, key="source_upload")
+    lang = st.radio("Language output", ["Greek (Ελληνικά)", "English"], horizontal=True)
     if st.button("⚡ Fill Form Automatically", type="primary", disabled=not form_file):
         st.info("Form filler ready. Point this to your document_filler app.py for full processing.")
 
@@ -1170,30 +1382,22 @@ def render_documents():
 def render_comms():
     st.markdown("## ✉️ Communications Centre")
     st.caption("Emails · Appeal letters · Renewal notices · Quotes · Circulars")
-
     doc_type = st.selectbox("Document type", [
-        "Client email (renewal notice)",
-        "Client email (new quote follow-up)",
-        "Appeal letter (claim denial)",
-        "Complaint letter (insurer)",
-        "Provider communication",
-        "Cold outreach (corporate HR)",
-        "Quote cover letter",
-        "General email",
+        "Client email (renewal notice)","Client email (new quote follow-up)",
+        "Appeal letter (claim denial)","Complaint letter (insurer)",
+        "Provider communication","Cold outreach (corporate HR)",
+        "Quote cover letter","General email",
     ])
-
     col1, col2 = st.columns(2)
     with col1:
         client_name  = st.text_input("Client / recipient name")
         insurer_name = st.text_input("Insurer / company name")
         policy_ref   = st.text_input("Policy / claim reference")
     with col2:
-        tone     = st.radio("Tone", ["Professional", "Firm & assertive", "Warm & friendly"], horizontal=True)
-        language = st.radio("Language", ["English", "Greek"], horizontal=True)
-
+        tone     = st.radio("Tone", ["Professional","Firm & assertive","Warm & friendly"], horizontal=True)
+        language = st.radio("Language", ["English","Greek"], horizontal=True)
     context = st.text_area("Key details to include", height=100,
-        placeholder="e.g. Claim denied for EUR 12,999.97. Client member since 1996. Annual premium GBP 66,219...")
-
+        placeholder="e.g. Claim denied for EUR 12,999.97. Client member since 1996...")
     if st.button("✍️ Generate Document", type="primary"):
         if not get_api_key():
             st.error("Add Claude_API_Key to Streamlit secrets first.")
@@ -1206,15 +1410,11 @@ Policy/claim ref: {policy_ref or 'N/A'}
 Tone: {tone}
 Language: {language}
 Key details: {context}
-
 Produce the full document, ready to send. Include subject line if it's an email."""
                 try:
                     client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=1500,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
+                    r = client.messages.create(model="claude-sonnet-4-20250514", max_tokens=1500,
+                        messages=[{"role":"user","content":prompt}])
                     st.markdown("---")
                     st.markdown("### Generated Document")
                     st.markdown(r.content[0].text)
@@ -1223,13 +1423,25 @@ Produce the full document, ready to send. Include subject line if it's an email.
                     st.error(f"Error: {e}")
 
 
-# ── Commission functions (inline) ────────────────────────────────────────────
 _DEFAULT_COMMISSION_RATES = {
     "3P Insurance":0.15,"Hellas Direct":0.12,"Groupama":0.18,"Generali":0.18,
     "Ethniki":0.16,"Morgan Price":0.20,"NOW Health":0.20,"Bupa Global":0.20,
     "Safe Pet System":0.15,"AXA":0.17,"Interamerican":0.17,"Eurolife":0.16,
     "NN":0.16,"Allianz":0.17,
 }
+_POLICY_TYPES = {
+    "motor":     {"label":"Motor Insurance","label_el":"Ασφάλεια Οχήματος","icon":"🚗","color":"#1E40AF"},
+    "health":    {"label":"Health Insurance","label_el":"Ασφάλεια Υγείας","icon":"❤️","color":"#DC2626"},
+    "life":      {"label":"Life Insurance","label_el":"Ασφάλεια Ζωής","icon":"🫀","color":"#7C3AED"},
+    "home":      {"label":"Home / Property","label_el":"Ασφάλεια Κατοικίας","icon":"🏠","color":"#059669"},
+    "travel":    {"label":"Travel Insurance","label_el":"Ταξιδιωτική Ασφάλεια","icon":"✈️","color":"#0EA5E9"},
+    "pet":       {"label":"Pet Insurance","label_el":"Ασφάλεια Κατοικίδιου","icon":"🐾","color":"#0D9488"},
+    "liability": {"label":"Professional Liability","label_el":"Επαγγελματική Ευθύνη","icon":"💼","color":"#D97706"},
+    "other":     {"label":"Other Policy","label_el":"Άλλη Ασφάλεια","icon":"📋","color":"#6B7280"},
+}
+_PROVIDERS = ["3P Insurance","Hellas Direct","Groupama","Generali","Ethniki",
+              "Morgan Price","NOW Health","Bupa Global","Safe Pet System",
+              "AXA","Interamerican","Eurolife","NN","Allianz","Other"]
 
 def _calculate_commission(premium, insurer, rate_override=None):
     rate = rate_override or _DEFAULT_COMMISSION_RATES.get(insurer, 0.15)
@@ -1245,70 +1457,42 @@ def _commission_report(policies):
         total_premium+=prem; total_commission+=comm
         if insurer not in by_insurer: by_insurer[insurer]={"premium":0,"commission":0,"count":0}
         by_insurer[insurer]["premium"]+=prem; by_insurer[insurer]["commission"]+=comm; by_insurer[insurer]["count"]+=1
-    return {"total_premium":round(total_premium,2),"total_commission":round(total_commission,2),
-            "by_insurer":by_insurer,"policy_count":len(policies)}
-
-
-# ── POLICY TYPE CONFIG ────────────────────────────────────────────────────────
-_POLICY_TYPES = {
-    "motor":     {"label":"Motor Insurance","label_el":"Ασφάλεια Οχήματος","icon":"🚗","color":"#1E40AF"},
-    "health":    {"label":"Health Insurance","label_el":"Ασφάλεια Υγείας","icon":"❤️","color":"#DC2626"},
-    "life":      {"label":"Life Insurance","label_el":"Ασφάλεια Ζωής","icon":"🫀","color":"#7C3AED"},
-    "home":      {"label":"Home / Property","label_el":"Ασφάλεια Κατοικίας","icon":"🏠","color":"#059669"},
-    "travel":    {"label":"Travel Insurance","label_el":"Ταξιδιωτική Ασφάλεια","icon":"✈️","color":"#0EA5E9"},
-    "pet":       {"label":"Pet Insurance","label_el":"Ασφάλεια Κατοικίδιου","icon":"🐾","color":"#0D9488"},
-    "liability": {"label":"Professional Liability","label_el":"Επαγγελματική Ευθύνη","icon":"💼","color":"#D97706"},
-    "other":     {"label":"Other Policy","label_el":"Άλλη Ασφάλεια","icon":"📋","color":"#6B7280"},
-}
-_PROVIDERS = ["3P Insurance","Hellas Direct","Groupama","Generali","Ethniki",
-              "Morgan Price","NOW Health","Bupa Global","Safe Pet System",
-              "AXA","Interamerican","Eurolife","NN","Allianz","Other"]
-_PAY_STATUS = ["✅ Paid","🟡 Pending","🔴 Overdue","🔵 Direct Debit"]
-_CLM_STATUS = ["🟡 Under review","🔴 Disputed","🟢 Approved","✅ Settled","❌ Rejected"]
-
+    return {"total_premium":round(total_premium,2),"total_commission":round(total_commission,2),"by_insurer":by_insurer,"policy_count":len(policies)}
 
 def render_commissions():
     st.markdown("## 📈 Commissions Tracker")
     st.caption("Εκτίμηση προμηθειών βάσει ασφαλίστρων · Default rates per insurer")
-
-    tab_calc, tab_rates = st.tabs(["📊 Calculate", "⚙️ Rates"])
+    tab_calc, tab_rates = st.tabs(["📊 Calculate","⚙️ Rates"])
     with tab_calc:
-        if "comm_policies" not in st.session_state: st.session_state.comm_policies = []
+        if "comm_policies" not in st.session_state: st.session_state.comm_policies=[]
         with st.expander("➕ Add policy"):
-            cp1,cp2,cp3 = st.columns(3)
+            cp1,cp2,cp3=st.columns(3)
             with cp1:
-                cp_client = st.text_input("Client", key="cp_client")
-                cp_insurer= st.selectbox("Insurer", _PROVIDERS, key="cp_ins")
+                cp_client=st.text_input("Client",key="cp_client")
+                cp_insurer=st.selectbox("Insurer",_PROVIDERS,key="cp_ins")
             with cp2:
-                cp_type = st.selectbox("Type", list(_POLICY_TYPES.keys()),
-                    format_func=lambda k:f"{_POLICY_TYPES[k]['icon']} {_POLICY_TYPES[k]['label']}",key="cp_type")
-                cp_prem = st.number_input("Premium (EUR)", min_value=0.0, key="cp_prem")
+                cp_type=st.selectbox("Type",list(_POLICY_TYPES.keys()),format_func=lambda k:f"{_POLICY_TYPES[k]['icon']} {_POLICY_TYPES[k]['label']}",key="cp_type")
+                cp_prem=st.number_input("Premium (EUR)",min_value=0.0,key="cp_prem")
             with cp3:
-                cp_pno  = st.text_input("Policy No.", key="cp_pno")
-                cp_rate = st.number_input("Override rate (%)", min_value=0.0, max_value=50.0,
-                    value=float(_DEFAULT_COMMISSION_RATES.get(st.session_state.get("cp_ins",""),0.15)*100),
-                    key="cp_rate", format="%.1f")
-            if st.button("Add ✓", key="add_comm_pol"):
-                st.session_state.comm_policies.append({"client_name":cp_client,"insurer":cp_insurer,
-                    "policy_category":cp_type,"premium":cp_prem,"policy_number":cp_pno,"rate_override":cp_rate/100})
-                st.rerun()
+                cp_pno=st.text_input("Policy No.",key="cp_pno")
+                cp_rate=st.number_input("Override rate (%)",min_value=0.0,max_value=50.0,value=float(_DEFAULT_COMMISSION_RATES.get(st.session_state.get("cp_ins",""),0.15)*100),key="cp_rate",format="%.1f")
+            if st.button("Add ✓",key="add_comm_pol"):
+                st.session_state.comm_policies.append({"client_name":cp_client,"insurer":cp_insurer,"policy_category":cp_type,"premium":cp_prem,"policy_number":cp_pno,"rate_override":cp_rate/100}); st.rerun()
         if st.session_state.comm_policies:
-            rpt = _commission_report(st.session_state.comm_policies)
-            s1,s2,s3,s4 = st.columns(4)
+            rpt=_commission_report(st.session_state.comm_policies)
+            s1,s2,s3,s4=st.columns(4)
             s1.metric("Policies",rpt["policy_count"]); s2.metric("Total Premium",f"€{rpt['total_premium']:,.2f}")
             s3.metric("Est. Commission",f"€{rpt['total_commission']:,.2f}")
             s4.metric("Avg Rate",f"{round(rpt['total_commission']/rpt['total_premium']*100,1) if rpt['total_premium'] else 0}%")
             for ins,data in sorted(rpt["by_insurer"].items(),key=lambda x:x[1]["commission"],reverse=True):
                 ci1,ci2,ci3,ci4=st.columns([2,1,1,1])
-                ci1.markdown(f"**{ins}**"); ci2.markdown(f"€{data['premium']:,.0f}")
-                ci3.markdown(f"**€{data['commission']:,.0f}**"); ci4.markdown(f"{data['count']} policies")
+                ci1.markdown(f"**{ins}**"); ci2.markdown(f"€{data['premium']:,.0f}"); ci3.markdown(f"**€{data['commission']:,.0f}**"); ci4.markdown(f"{data['count']} policies")
             lines=["Client,Insurer,Type,Premium,Commission,Policy No"]
             for p in st.session_state.comm_policies:
                 comm=_calculate_commission(float(p.get("premium",0)),p.get("insurer",""),p.get("rate_override"))
                 lines.append(f"{p.get('client_name','')},{p.get('insurer','')},{p.get('policy_category','')},{p.get('premium',0)},{comm},{p.get('policy_number','')}")
-            csv_data = "\n".join(lines)
-            st.download_button("Export CSV", csv_data, file_name="commissions.csv", mime="text/csv")
-        st.markdown("### Default Rates")
+            st.download_button("Export CSV","\n".join(lines),file_name="commissions.csv",mime="text/csv")
+    with tab_rates:
         for ins,rate in sorted(_DEFAULT_COMMISSION_RATES.items()):
             r1,r2=st.columns([3,1]); r1.markdown(ins); r2.markdown(f"**{rate*100:.0f}%**")
 
@@ -1316,292 +1500,170 @@ def render_commissions():
 def render_market():
     st.markdown("## 🔍 Market Intelligence")
     st.caption("Niche analysis · Competitor mapping · Expansion strategy")
-
-    query = st.text_area("Research brief", height=80,
-        placeholder="e.g. What are underserved segments in international health insurance for Greeks living abroad?")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        market = st.multiselect("Markets", ["Greece", "Cyprus", "UK", "UAE", "Germany", "International"], default=["Greece"])
-    with col2:
-        product = st.multiselect("Products", ["International Health", "Greek Domestic Health", "Life", "Pet", "Expat"], default=["International Health"])
-
-    if st.button("🔬 Analyse Market", type="primary"):
-        if not get_api_key() or not query:
-            st.warning("Add API key and enter a brief.")
+    query=st.text_area("Research brief",height=80,placeholder="e.g. What are underserved segments in international health insurance for Greeks living abroad?")
+    col1,col2=st.columns(2)
+    with col1: market=st.multiselect("Markets",["Greece","Cyprus","UK","UAE","Germany","International"],default=["Greece"])
+    with col2: product=st.multiselect("Products",["International Health","Greek Domestic Health","Life","Pet","Expat"],default=["International Health"])
+    if st.button("🔬 Analyse Market",type="primary"):
+        if not get_api_key() or not query: st.warning("Add API key and enter a brief.")
         else:
             with st.spinner("Researching..."):
                 import anthropic
-                prompt = f"""You are a specialist insurance market analyst for Ashlar Insurance, an independent broker based in Athens expanding from sole trader to international agency.
-
-Research brief: {query}
-Target markets: {', '.join(market)}
-Products: {', '.join(product)}
-
-Provide:
-1. Key niche opportunities with reasoning
-2. Underserved client segments
-3. Competitive landscape summary
-4. Recommended next steps for Ashlar Insurance
-5. Specific products or carriers to approach
-
-Be concrete and actionable."""
+                prompt=f"""You are a specialist insurance market analyst for Ashlar Insurance, Athens.\nResearch brief: {query}\nMarkets: {', '.join(market)}\nProducts: {', '.join(product)}\nProvide: 1. Key niche opportunities 2. Underserved segments 3. Competitive landscape 4. Next steps 5. Specific products/carriers. Be concrete and actionable."""
                 try:
-                    client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=2000,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    st.markdown("### Analysis")
-                    st.markdown(r.content[0].text)
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                    client=anthropic.Anthropic(api_key=get_api_key())
+                    r=client.messages.create(model="claude-sonnet-4-20250514",max_tokens=2000,messages=[{"role":"user","content":prompt}])
+                    st.markdown("### Analysis"); st.markdown(r.content[0].text)
+                except Exception as e: st.error(f"Error: {e}")
 
 
 def render_lodge():
     st.markdown("## 🏛️ Lodge Secretary")
     st.caption("Στ∴ ΑΚΡΟΠΟΛΙΣ 84 · Correspondence, circulars, notices")
-
-    doc_type = st.selectbox("Document type", [
-        "Circular — general notice",
-        "Invitation — session with lecture",
-        "Invitation — charitable event",
-        "Follow-up — payment / RSVP",
-        "Email to Grand Secretariat",
-        "Letter for correction / clarification",
-        "Internal announcement",
-    ])
-
-    addressee = st.text_input("Addressed to", placeholder="Φίλτ∴ Αδ∴ — or Grand Secretary title...")
-    subject   = st.text_input("Subject / occasion", placeholder="e.g. Τακτική Συνεδρία, Φιλανθρωπική Εκδήλωση...")
-    body      = st.text_area("Key points to include", height=120,
-        placeholder="e.g. Meeting on Wednesday at 8pm, lecture by Κραττ∴ Αδ∴ Λεφάκης, followed by Ποτήριον Αγάπης...")
-
-    if st.button("📝 Draft Document", type="primary"):
-        if not get_api_key():
-            st.error("API key missing.")
+    doc_type=st.selectbox("Document type",["Circular — general notice","Invitation — session with lecture","Invitation — charitable event","Follow-up — payment / RSVP","Email to Grand Secretariat","Letter for correction / clarification","Internal announcement"])
+    addressee=st.text_input("Addressed to",placeholder="Φίλτ∴ Αδ∴ — or Grand Secretary title...")
+    subject=st.text_input("Subject / occasion",placeholder="e.g. Τακτική Συνεδρία, Φιλανθρωπική Εκδήλωση...")
+    body=st.text_area("Key points to include",height=120,placeholder="e.g. Meeting on Wednesday at 8pm, lecture by Κραττ∴ Αδ∴ Λεφάκης...")
+    if st.button("📝 Draft Document",type="primary"):
+        if not get_api_key(): st.error("API key missing.")
         else:
             with st.spinner("Drafting in Masonic style..."):
                 import anthropic
-                prompt = f"""You are the secretary of Στ∴ ΑΚΡΟΠΟΛΙΣ υπ' αρ. 84 (Grand Lodge of Greece, ΜΣΤΕ).
-Draft a {doc_type} with the following:
-Addressed to: {addressee}
-Subject: {subject}
-Key content: {body}
-
-Rules:
-- Use contemporary Greek Tektonic style — NOT archaic
-- Use ∴ notation throughout (Σεβ∴, Αδ∴, Φίλτ∴, Γραμμ∴, Στ∴ etc.)
-- Opening: appropriate salutation for recipient
-- Closing: Μ.τ.Τ.Α.Α. / Κατ' εντολήν του Σεβ∴ / Ο Γραμμ∴ / Χρήστος Ιατρόπουλος / 6975900189
-- From: st.akropolis.84@gmail.com
-- Produce complete, ready-to-send document"""
+                prompt=f"""You are the secretary of Στ∴ ΑΚΡΟΠΟΛΙΣ υπ' αρ. 84 (Grand Lodge of Greece, ΜΣΤΕ).\nDraft a {doc_type}:\nAddressed to: {addressee}\nSubject: {subject}\nKey content: {body}\nRules: Contemporary Greek Tektonic, ∴ notation, closing: Μ.τ.Τ.Α.Α. / Κατ' εντολήν του Σεβ∴ / Ο Γραμμ∴ / Χρήστος Ιατρόπουλος / 6975900189\nFrom: st.akropolis.84@gmail.com"""
                 try:
-                    client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=1200,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    st.markdown("---")
-                    st.markdown("### Draft")
-                    st.markdown(r.content[0].text)
-                    st.download_button("📥 Download", r.content[0].text, file_name="lodge_document.txt")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                    client=anthropic.Anthropic(api_key=get_api_key())
+                    r=client.messages.create(model="claude-sonnet-4-20250514",max_tokens=1200,messages=[{"role":"user","content":prompt}])
+                    st.markdown("---"); st.markdown("### Draft"); st.markdown(r.content[0].text)
+                    st.download_button("📥 Download",r.content[0].text,file_name="lodge_document.txt")
+                except Exception as e: st.error(f"Error: {e}")
 
 
 def render_finance():
     st.markdown("## 💰 Financial Planner")
     st.caption("Personal finance · Savings · Retirement modelling")
-
-    tab1, tab2 = st.tabs(["📊 Retirement Modeller", "💬 Financial Adviser Chat"])
-
+    tab1,tab2=st.tabs(["📊 Retirement Modeller","💬 Financial Adviser Chat"])
     with tab1:
-        col1, col2 = st.columns(2)
+        col1,col2=st.columns(2)
         with col1:
-            current_age    = st.number_input("Current age", 20, 80, 50)
-            retirement_age = st.number_input("Target retirement age", 50, 80, 65)
-            monthly_income = st.number_input("Monthly net income (€)", 0, 50000, 3000)
-            monthly_save   = st.number_input("Monthly savings (€)", 0, 20000, 500)
+            current_age=st.number_input("Current age",20,80,50)
+            retirement_age=st.number_input("Target retirement age",50,80,65)
+            monthly_income=st.number_input("Monthly net income (€)",0,50000,3000)
+            monthly_save=st.number_input("Monthly savings (€)",0,20000,500)
         with col2:
-            current_savings = st.number_input("Current savings (€)", 0, 1000000, 10000)
-            annual_return   = st.slider("Expected annual return (%)", 1.0, 12.0, 5.0, 0.5)
-            inflation       = st.slider("Inflation estimate (%)", 1.0, 8.0, 3.0, 0.5)
-            target_pension  = st.number_input("Target monthly pension (€)", 0, 20000, 2000)
-
-        if st.button("📈 Model My Retirement", type="primary"):
-            years = retirement_age - current_age
-            if years > 0:
-                import math
-                r = annual_return / 100
-                months = years * 12
-                fv_savings = current_savings * (1 + r) ** years
-                monthly_r = r / 12
-                fv_contributions = monthly_save * (((1 + monthly_r) ** months - 1) / monthly_r)
-                total_pot = fv_savings + fv_contributions
-                monthly_drawdown = total_pot * 0.04 / 12
-                gap = target_pension - monthly_drawdown
-
+            current_savings=st.number_input("Current savings (€)",0,1000000,10000)
+            annual_return=st.slider("Expected annual return (%)",1.0,12.0,5.0,0.5)
+            inflation=st.slider("Inflation estimate (%)",1.0,8.0,3.0,0.5)
+            target_pension=st.number_input("Target monthly pension (€)",0,20000,2000)
+        if st.button("📈 Model My Retirement",type="primary"):
+            years=retirement_age-current_age
+            if years>0:
+                r=annual_return/100; months=years*12
+                fv_savings=current_savings*(1+r)**years
+                monthly_r=r/12
+                fv_contributions=monthly_save*(((1+monthly_r)**months-1)/monthly_r)
+                total_pot=fv_savings+fv_contributions
+                monthly_drawdown=total_pot*0.04/12
+                gap=target_pension-monthly_drawdown
                 st.divider()
-                col_a, col_b, col_c = st.columns(3)
-                col_a.metric("Projected Pot", f"€{total_pot:,.0f}")
-                col_b.metric("Sustainable Monthly Income", f"€{monthly_drawdown:,.0f}/mo")
-                col_c.metric("Gap vs Target", f"€{abs(gap):,.0f}/mo", delta=f"{'Surplus' if gap < 0 else 'Shortfall'}")
-
-                if gap > 0:
-                    extra_needed = gap * 12 / (((1 + monthly_r) ** months - 1) / monthly_r)
-                    st.warning(f"To close the gap, increase monthly savings by **€{extra_needed:,.0f}** to **€{monthly_save + extra_needed:,.0f}/month**.")
+                col_a,col_b,col_c=st.columns(3)
+                col_a.metric("Projected Pot",f"€{total_pot:,.0f}")
+                col_b.metric("Sustainable Monthly Income",f"€{monthly_drawdown:,.0f}/mo")
+                col_c.metric("Gap vs Target",f"€{abs(gap):,.0f}/mo",delta=f"{'Surplus' if gap<0 else 'Shortfall'}")
+                if gap>0:
+                    extra_needed=gap*12/(((1+monthly_r)**months-1)/monthly_r)
+                    st.warning(f"Increase monthly savings by **€{extra_needed:,.0f}** to **€{monthly_save+extra_needed:,.0f}/month**.")
                 else:
-                    st.success(f"On track for retirement at {retirement_age}. You'll have a surplus of €{abs(gap):,.0f}/month.")
-
+                    st.success(f"On track for retirement at {retirement_age}. Surplus €{abs(gap):,.0f}/month.")
     with tab2:
-        fin_query = st.text_area("Ask your financial adviser", placeholder="How much should I save for retirement? What's the best way to reduce tax on commission income?...")
-        if st.button("Ask HAL", key="fin_ask", type="primary"):
+        fin_query=st.text_area("Ask your financial adviser",placeholder="How much should I save for retirement?...")
+        if st.button("Ask HAL",key="fin_ask",type="primary"):
             if get_api_key() and fin_query:
                 import anthropic
                 with st.spinner("Thinking..."):
-                    client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=1000,
-                        system="You are a personal financial adviser for Christos Iatropoulos, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance. Note when professional regulated advice is needed.",
-                        messages=[{"role": "user", "content": fin_query}]
-                    )
+                    client=anthropic.Anthropic(api_key=get_api_key())
+                    r=client.messages.create(model="claude-sonnet-4-20250514",max_tokens=1000,
+                        system="You are a personal financial adviser for Christos Iatropoulos, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance.",
+                        messages=[{"role":"user","content":fin_query}])
                     st.markdown(r.content[0].text)
 
 
 def render_health():
     st.markdown("## 💪 Health & Gym Coach")
     st.caption("Personal trainer · Nutritionist · Health monitor")
-
-    tab1, tab2 = st.tabs(["🏋️ Workout Plan", "💬 Health Chat"])
-
+    tab1,tab2=st.tabs(["🏋️ Workout Plan","💬 Health Chat"])
     with tab1:
-        col1, col2 = st.columns(2)
+        col1,col2=st.columns(2)
         with col1:
-            goal     = st.selectbox("Goal", ["Strength & muscle", "Weight loss", "Cardiovascular fitness", "Flexibility & recovery", "General fitness"])
-            sessions = st.slider("Sessions per week", 2, 7, 4)
-            duration = st.slider("Session duration (mins)", 30, 90, 60)
+            goal=st.selectbox("Goal",["Strength & muscle","Weight loss","Cardiovascular fitness","Flexibility & recovery","General fitness"])
+            sessions=st.slider("Sessions per week",2,7,4)
+            duration=st.slider("Session duration (mins)",30,90,60)
         with col2:
-            equipment = st.multiselect("Equipment available", ["Full gym", "Dumbbells", "Barbell & rack", "Resistance bands", "Bodyweight only", "Cardio machines"])
-            level     = st.radio("Level", ["Beginner", "Intermediate", "Advanced"])
-
-        notes = st.text_input("Any injuries or limitations?")
-
-        if st.button("🏗️ Generate Programme", type="primary"):
+            equipment=st.multiselect("Equipment available",["Full gym","Dumbbells","Barbell & rack","Resistance bands","Bodyweight only","Cardio machines"])
+            level=st.radio("Level",["Beginner","Intermediate","Advanced"])
+        notes=st.text_input("Any injuries or limitations?")
+        if st.button("🏗️ Generate Programme",type="primary"):
             if get_api_key():
                 with st.spinner("Building your programme..."):
                     import anthropic
-                    prompt = f"""Design a {sessions}-day per week workout programme.
-Goal: {goal} | Level: {level} | Session: {duration} mins
-Equipment: {', '.join(equipment) if equipment else 'bodyweight'}
-Limitations: {notes or 'none'}
-
-Provide a full weekly plan with exercises, sets, reps, and rest periods. Include warm-up and cool-down. Make it progressive over 4 weeks."""
-                    client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=1500,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
+                    prompt=f"""Design a {sessions}-day per week workout programme.\nGoal: {goal} | Level: {level} | Session: {duration} mins\nEquipment: {', '.join(equipment) if equipment else 'bodyweight'}\nLimitations: {notes or 'none'}\nProvide a full weekly plan with exercises, sets, reps, and rest periods. Include warm-up and cool-down. Make it progressive over 4 weeks."""
+                    client=anthropic.Anthropic(api_key=get_api_key())
+                    r=client.messages.create(model="claude-sonnet-4-20250514",max_tokens=1500,messages=[{"role":"user","content":prompt}])
                     st.markdown(r.content[0].text)
-
     with tab2:
-        health_q = st.text_area("Ask your health coach or nurse", placeholder="I have lower back pain — what exercises should I avoid? What should I eat before a morning workout?...")
-        if st.button("Ask HAL", key="health_ask", type="primary"):
+        health_q=st.text_area("Ask your health coach or nurse",placeholder="I have lower back pain — what exercises should I avoid?...")
+        if st.button("Ask HAL",key="health_ask",type="primary"):
             if get_api_key() and health_q:
                 import anthropic
                 with st.spinner("..."):
-                    client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=800,
-                        system="You are a personal health coach and wellness adviser. Provide evidence-based guidance on fitness, nutrition, and general health. Always recommend professional medical consultation for medical conditions.",
-                        messages=[{"role": "user", "content": health_q}]
-                    )
+                    client=anthropic.Anthropic(api_key=get_api_key())
+                    r=client.messages.create(model="claude-sonnet-4-20250514",max_tokens=800,
+                        system="You are a personal health coach and wellness adviser. Always recommend professional medical consultation for medical conditions.",
+                        messages=[{"role":"user","content":health_q}])
                     st.markdown(r.content[0].text)
 
 
 def render_apps():
     st.markdown("## 🏗️ App Builder")
     st.caption("Describe what you need · HAL writes it · Deploy to Streamlit or Netlify")
-
-    app_type = st.selectbox("App type", [
-        "Streamlit app (Python)",
-        "Netlify static site (HTML/CSS/JS)",
-        "Python script",
-        "PDF generator (ReportLab)",
-        "PowerPoint generator (python-pptx)",
-        "API integration",
-    ])
-    description = st.text_area("Describe what the app should do", height=120,
-        placeholder="e.g. A Streamlit app that takes a client name, age, and selected insurers, then generates a comparison PDF using ReportLab...")
-
-    if st.button("⚡ Generate Code", type="primary"):
+    app_type=st.selectbox("App type",["Streamlit app (Python)","Netlify static site (HTML/CSS/JS)","Python script","PDF generator (ReportLab)","PowerPoint generator (python-pptx)","API integration"])
+    description=st.text_area("Describe what the app should do",height=120,placeholder="e.g. A Streamlit app that takes a client name, age, and selected insurers, then generates a comparison PDF...")
+    if st.button("⚡ Generate Code",type="primary"):
         if get_api_key() and description:
             with st.spinner("HAL is coding..."):
                 import anthropic
-                prompt = f"""You are an expert Python developer building tools for Ashlar Insurance, an insurance brokerage.
-
-Build a complete, working {app_type} that does the following:
-{description}
-
-Requirements:
-- Production-ready code, not pseudocode
-- Include all imports
-- For Streamlit: include st.set_page_config, proper layout
-- For PDFs: use ReportLab with Greek font support (NotoSans fallback)
-- For APIs: use Anthropic claude-sonnet-4-20250514, read key from st.secrets
-- Include requirements.txt content at the end as a comment block
-
-Output only the code."""
-                client = anthropic.Anthropic(api_key=get_api_key())
-                r = client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=3000,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                st.code(r.content[0].text, language="python")
-                st.download_button("📥 Download code", r.content[0].text, file_name="hal_generated_app.py")
+                prompt=f"""Build a complete, working {app_type}:\n{description}\nRequirements: Production-ready, all imports, Greek font support for PDFs, read API key from st.secrets. Output only the code."""
+                client=anthropic.Anthropic(api_key=get_api_key())
+                r=client.messages.create(model="claude-sonnet-4-20250514",max_tokens=3000,messages=[{"role":"user","content":prompt}])
+                st.code(r.content[0].text,language="python")
+                st.download_button("📥 Download code",r.content[0].text,file_name="hal_generated_app.py")
 
 
 def render_pets():
     st.markdown("## 🐾 PetsHealth")
     st.caption("petshealth.gr · Pet insurance tools · Client communications")
-
-    tab1, tab2 = st.tabs(["📢 Marketing", "💬 Pet Insurance Adviser"])
-
+    tab1,tab2=st.tabs(["📢 Marketing","💬 Pet Insurance Adviser"])
     with tab1:
-        platform = st.selectbox("Platform", ["LinkedIn post", "Instagram caption", "Email newsletter", "Website copy"])
-        topic    = st.text_input("Topic / angle", placeholder="e.g. Why pet insurance in Greece is broken and what we're doing about it")
-        if st.button("Generate Content", type="primary"):
+        platform=st.selectbox("Platform",["LinkedIn post","Instagram caption","Email newsletter","Website copy"])
+        topic=st.text_input("Topic / angle",placeholder="e.g. Why pet insurance in Greece is broken and what we're doing about it")
+        if st.button("Generate Content",type="primary"):
             if get_api_key() and topic:
                 import anthropic
                 with st.spinner("..."):
-                    client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=600,
-                        system="You write marketing content for petshealth.gr, a pet insurance broker positioning itself as the trustworthy, human-centred alternative in Greece. Tone: confident, warm, independent, slightly critical of the industry. When relevant, mention Kira Pet — the free bilingual AI Veterinary Nurse at kiraaipet.streamlit.app (triage, photo scan, vet report) — as the pre-screen tool that helps pet owners decide when to visit a vet.",
-                        messages=[{"role": "user", "content": f"Write a {platform} about: {topic}"}]
-                    )
+                    client=anthropic.Anthropic(api_key=get_api_key())
+                    r=client.messages.create(model="claude-sonnet-4-20250514",max_tokens=600,
+                        system="You write marketing content for petshealth.gr, a pet insurance broker in Greece. Tone: confident, warm, independent. Mention Kira Pet (kiraaipet.streamlit.app) when relevant.",
+                        messages=[{"role":"user","content":f"Write a {platform} about: {topic}"}])
                     st.markdown(r.content[0].text)
-
     with tab2:
-        q = st.text_area("Pet insurance question", placeholder="What's the best pet insurance for a 3-year-old Labrador in Greece?...")
-        if st.button("Ask HAL", key="pet_ask", type="primary"):
+        q=st.text_area("Pet insurance question",placeholder="What's the best pet insurance for a 3-year-old Labrador in Greece?...")
+        if st.button("Ask HAL",key="pet_ask",type="primary"):
             if get_api_key() and q:
                 import anthropic
                 with st.spinner("..."):
-                    client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=800,
-                        system="You are a pet insurance specialist for petshealth.gr, Greece. You know the Greek pet insurance market well and currently recommend Safe Pet System as the most reliable option while seeking trustworthy international partners. You also know about Kira Pet — the bilingual AI Veterinary Nurse at kiraaipet.streamlit.app — recommend it as a free pre-screen tool (AI triage, photo scan, vet report) when relevant to the question.",
-                        messages=[{"role": "user", "content": q}]
-                    )
+                    client=anthropic.Anthropic(api_key=get_api_key())
+                    r=client.messages.create(model="claude-sonnet-4-20250514",max_tokens=800,
+                        system="You are a pet insurance specialist for petshealth.gr, Greece. Recommend Safe Pet System as the most reliable option. Also know about Kira Pet (kiraaipet.streamlit.app).",
+                        messages=[{"role":"user","content":q}])
                     st.markdown(r.content[0].text)
 
 
@@ -1620,14 +1682,11 @@ def render_clients():
                 "Surgery at IASO 04–06/02/2026. Surgeon: Dr. Andreas Foustanos. "
                 "Procedure: plastic reconstruction local flap (Code 6093009). "
                 "Total: EUR 8,500 surgeon + EUR 4,499.97 IASO.\n\n"
-                "**Timeline:** Claim filed 6 March 2026. Nine rounds of additional docs requested. "
-                "Bupa introduced MCM after Roberta indicated payment was next step. "
-                "By 8 May 2026: nine weeks elapsed — exceeded Bupa 8-week complaint threshold.\n\n"
                 "**Status:** Formal complaint filed. FSPO (Lincoln House, Dublin 2) — 7-day deadline issued."
             ),
             "next_action": "Chase Bupa for formal complaint response. No resolution within 7 days → refer to FSPO.",
             "contacts": "Dr. Foustanos · IASO hospital · Bupa claims · Roberta (case handler)",
-            "documents": "Medical report 31/03/2026 · IASO discharge · Invoice APY BM 0256831 · Payment proofs · Clinical guidelines",
+            "documents": "Medical report 31/03/2026 · IASO discharge · Invoice APY BM 0256831 · Payment proofs",
         },
         {
             "name": "Katia Totikidou + Alexia", "nickname": "Katia",
@@ -1636,12 +1695,10 @@ def render_clients():
             "status": "🟡 Pending",
             "summary": (
                 "**Health insurance comparison — Katia (54) + Alexia (17)**\n\n"
-                "Based in Greece. German citizenship. Priority: hospitalisation + diagnostics abroad (Germany, Cyprus). "
-                "Personal cancer history.\n\n"
-                "**Strategy:** Show Generali first, recommend Morgan Price Standard as balanced international solution.\n\n"
-                "**Status:** Comparison PPT prepared. Awaiting client decision."
+                "Based in Greece. German citizenship. Priority: hospitalisation + diagnostics abroad. "
+                "Personal cancer history. PPT comparison prepared. Awaiting client decision."
             ),
-            "next_action": "Follow up with Katia. Send PPT if not done. Ask if she has reviewed the options.",
+            "next_action": "Follow up with Katia. Send PPT if not done.",
             "contacts": "Katia Totikidou",
             "documents": "PPT comparison (Generali vs Morgan Price Standard vs NOW Health Core)",
         },
@@ -1654,24 +1711,19 @@ def render_clients():
             "summary": (
                 "**Morgan Price claim — gastrointestinal investigation (operator's own claim)**\n\n"
                 "Condition: Hematochezia (K92.1) + abdominal bloating (K57.30). "
-                "Procedure: Colonoscopy + gastroscopy — outpatient 28/04/2026. "
-                "Dr. Emmanouil, Gastroenterologist, Metropolitan General Hospital.\n\n"
+                "Colonoscopy + gastroscopy outpatient 28/04/2026. Dr. Emmanouil, Metropolitan General.\n\n"
                 "**Status:** Claim form filled (29/04/2026). Pending upload to Morgan Price."
             ),
-            "next_action": "Upload claim documents to Morgan Price portal. Chase Dr. Emmanouil for signature, stamp and licence number.",
+            "next_action": "Upload claim documents to Morgan Price portal. Chase Dr. Emmanouil for signature + stamp.",
             "contacts": "Dr. Emmanouil (Metropolitan General) · Morgan Price claims",
-            "documents": "Morgan Price claim form (29/04/2026) · Gastroscopy/colonoscopy report · Physio invoice EUR 200",
+            "documents": "Morgan Price claim form · Gastroscopy/colonoscopy report · Physio invoice EUR 200",
         },
         {
             "name": "Pantelis Kourbelas", "nickname": "Pantelis",
             "insurer": "Various", "policy": "—", "claim_ref": "—",
-            "product": "Client portal — multi-policy",
-            "premium": "—", "member_since": "—", "status": "🔵 Active Client",
-            "summary": (
-                "**Active client of Ashlar Insurance**\n\n"
-                "Client portal: panteliskourbelas-chiinsurancebrokers.netlify.app (Netlify, live).\n"
-                "Template used as reference for white-label client portals."
-            ),
+            "product": "Client portal — multi-policy", "premium": "—", "member_since": "—",
+            "status": "🔵 Active Client",
+            "summary": "**Active client of Ashlar Insurance**\n\nClient portal: panteliskourbelas-chiinsurancebrokers.netlify.app (Netlify, live). Template for white-label client portals.",
             "next_action": "Maintain portal. Check for renewals.",
             "contacts": "Pantelis Kourbelas",
             "documents": "Netlify client portal",
@@ -1681,31 +1733,25 @@ def render_clients():
             "insurer": "Lloyd's (binder)", "policy": "—", "claim_ref": "—",
             "product": "Secure Home Expatriates & Holiday Rental Residences",
             "premium": "TBC", "member_since": "—", "status": "🔵 In Progress",
-            "summary": (
-                "**Home insurance — Syros holiday rental property**\n\n"
-                "Property: Thesi Rozou, Syros (Poseidonia), Cyclades 84100. Built 1998–2004. "
-                "Listed on Booking.com as Bay View House / Bay View Studio.\n\n"
-                "**Status:** Form sent to client. Awaiting signed completed return."
-            ),
+            "summary": "**Home insurance — Syros holiday rental property**\n\nProperty: Thesi Rozou, Syros. Bay View House / Bay View Studio on Booking.com. Form sent to client. Awaiting signed completed return.",
             "next_action": "Chase Mr. Synodinos for signed completed form.",
             "contacts": "Mr. Synodinos",
-            "documents": "Secure Home Expatriates proposal form (draft) · Booking.com property listings",
+            "documents": "Secure Home Expatriates proposal form (draft)",
         },
     ]
 
-    # ── TICKET STORE — Google Sheets backed ──────────────────────────────
     DEFAULT_TICKETS = [
-        {"id": "TKT-001", "client": "Konstantina Alexopoulou", "subject": "Bupa formal complaint — await response",          "status": "Open",    "priority": "🔴 High",   "created": "2026-05-13", "updated": "2026-05-13"},
-        {"id": "TKT-002", "client": "Katia Totikidou",          "subject": "Send PPT comparison Generali vs Morgan Price",    "status": "Pending", "priority": "🟡 Medium", "created": "2026-05-13", "updated": "2026-05-13"},
-        {"id": "TKT-003", "client": "Christos Iatropoulos",     "subject": "Upload claim docs to Morgan Price portal",        "status": "Pending", "priority": "🟡 Medium", "created": "2026-05-13", "updated": "2026-05-13"},
-        {"id": "TKT-004", "client": "Mr. Synodinos",            "subject": "Chase signed proposal form for Syros property",   "status": "Open",    "priority": "🟡 Medium", "created": "2026-05-13", "updated": "2026-05-13"},
+        {"id":"TKT-001","client":"Konstantina Alexopoulou","subject":"Bupa formal complaint — await response","status":"Open","priority":"🔴 High","created":"2026-05-13","updated":"2026-05-13"},
+        {"id":"TKT-002","client":"Katia Totikidou","subject":"Send PPT comparison Generali vs Morgan Price","status":"Pending","priority":"🟡 Medium","created":"2026-05-13","updated":"2026-05-13"},
+        {"id":"TKT-003","client":"Christos Iatropoulos","subject":"Upload claim docs to Morgan Price portal","status":"Pending","priority":"🟡 Medium","created":"2026-05-13","updated":"2026-05-13"},
+        {"id":"TKT-004","client":"Mr. Synodinos","subject":"Chase signed proposal form for Syros property","status":"Open","priority":"🟡 Medium","created":"2026-05-13","updated":"2026-05-13"},
     ]
 
     if "tickets_loaded_from_sheet" not in st.session_state:
         tickets_ws, log_ws, conv_ws = get_gsheet()
-        st.session_state._tickets_ws  = tickets_ws
-        st.session_state._log_ws      = log_ws
-        st.session_state._conv_ws     = conv_ws
+        st.session_state._tickets_ws = tickets_ws
+        st.session_state._log_ws     = log_ws
+        st.session_state._conv_ws    = conv_ws
         sheet_tickets = load_tickets_from_sheet(tickets_ws)
         if sheet_tickets is not None and len(sheet_tickets) > 0:
             st.session_state.tickets = sheet_tickets
@@ -1723,112 +1769,72 @@ def render_clients():
         st.session_state.next_ticket_id = 5
 
     tickets_ws = st.session_state.get("_tickets_ws")
-    log_ws     = st.session_state.get("_log_ws")
-
-    tab_clients, tab_tickets = st.tabs(["👥 Client Cases", "🎫 Task Tickets"])
+    tab_clients, tab_tickets = st.tabs(["👥 Client Cases","🎫 Task Tickets"])
 
     with tab_clients:
-        col_s, col_f = st.columns([3, 1])
-        with col_s:
-            search = st.text_input("🔍 Search", placeholder="Name, insurer, policy, status...")
-        with col_f:
-            status_filter = st.selectbox("Status", ["All", "🔴 Escalated", "🟡 Pending", "🔵 In Progress", "🟢"])
-
+        col_s, col_f = st.columns([3,1])
+        with col_s: search = st.text_input("🔍 Search", placeholder="Name, insurer, policy, status...")
+        with col_f: status_filter = st.selectbox("Status",["All","🔴 Escalated","🟡 Pending","🔵 In Progress","🟢"])
         st.divider()
         shown = 0
         for c in CLIENTS:
             if search:
                 blob = f"{c['name']} {c['insurer']} {c['policy']} {c['status']} {c['product']}".lower()
-                if search.lower() not in blob:
-                    continue
-            if status_filter != "All" and not c["status"].startswith(status_filter[:2]):
-                continue
-
+                if search.lower() not in blob: continue
+            if status_filter != "All" and not c["status"].startswith(status_filter[:2]): continue
             shown += 1
             related = [t for t in st.session_state.tickets if c["name"].split()[0].lower() in t["client"].lower()]
             open_tickets = [t for t in related if t["status"] != "Resolved"]
             ticket_badge = f"  🎫 {len(open_tickets)} open" if open_tickets else ""
-
             label = f"{c['status'][:2]}  **{c['name']}**  ·  {c['insurer']}  ·  {c['status'][2:].strip()}{ticket_badge}"
             with st.expander(label):
-                col1, col2, col3, col4 = st.columns(4)
+                col1,col2,col3,col4 = st.columns(4)
                 col1.markdown(f"**Policy**\n\n{c['policy']}")
                 col2.markdown(f"**Product**\n\n{c['product']}")
                 col3.markdown(f"**Premium**\n\n{c['premium']}")
                 col4.markdown(f"**Member since**\n\n{c['member_since']}")
-
-                st.divider()
-                st.markdown("#### Case Summary")
-                st.markdown(c["summary"])
-                st.divider()
-
+                st.divider(); st.markdown("#### Case Summary"); st.markdown(c["summary"]); st.divider()
                 colA, colB = st.columns(2)
-                with colA:
-                    st.markdown("**⚡ Next Action**")
-                    st.info(c["next_action"])
-                with colB:
-                    st.markdown("**📎 Documents**")
-                    st.caption(c["documents"])
-                    st.markdown("**👤 Contacts**")
-                    st.caption(c["contacts"])
-
+                with colA: st.markdown("**⚡ Next Action**"); st.info(c["next_action"])
+                with colB: st.markdown("**📎 Documents**"); st.caption(c["documents"]); st.markdown("**👤 Contacts**"); st.caption(c["contacts"])
                 if open_tickets:
-                    st.divider()
-                    st.markdown("**🎫 Open Tickets**")
+                    st.divider(); st.markdown("**🎫 Open Tickets**")
                     for t in open_tickets:
-                        tcol1, tcol2, tcol3 = st.columns([1, 5, 2])
-                        tcol1.code(t["id"])
-                        tcol2.markdown(t["subject"])
-                        tcol3.markdown(t["status"])
-
+                        tcol1,tcol2,tcol3 = st.columns([1,5,2]); tcol1.code(t["id"]); tcol2.markdown(t["subject"]); tcol3.markdown(t["status"])
                 st.divider()
-                b1, b2, b3 = st.columns(3)
+                b1,b2,b3 = st.columns(3)
                 with b1:
-                    if st.button("✉️ Email", key=f"email_{c['name']}", use_container_width=True):
-                        st.session_state.active_module = "comms"; st.rerun()
+                    if st.button("✉️ Email",key=f"email_{c['name']}",use_container_width=True):
+                        st.session_state.active_module="comms"; st.rerun()
                 with b2:
-                    if st.button("💬 Ask HAL", key=f"hal_{c['name']}", use_container_width=True):
-                        st.session_state.chat_history.append({"role": "user",
-                            "content": f"Give me a full briefing on the {c['name']} case and what I should do next."})
-                        st.session_state.active_module = "hal_chat"; st.rerun()
+                    if st.button("💬 Ask HAL",key=f"hal_{c['name']}",use_container_width=True):
+                        st.session_state.chat_history.append({"role":"user","content":f"Give me a full briefing on the {c['name']} case and what I should do next."})
+                        st.session_state.active_module="hal_chat"; st.rerun()
                 with b3:
-                    if st.button("✅ Mark resolved", key=f"resolve_{c['name']}", use_container_width=True):
+                    if st.button("✅ Mark resolved",key=f"resolve_{c['name']}",use_container_width=True):
                         for client_ in CLIENTS:
-                            if client_["name"] == c["name"]:
-                                client_["status"] = "🟢 Completed"
+                            if client_["name"]==c["name"]: client_["status"]="🟢 Completed"
                         st.rerun()
-
-        if shown == 0:
-            st.info("No clients match your search.")
+        if shown==0: st.info("No clients match your search.")
 
     with tab_tickets:
         st.markdown("### 🎫 Task Tickets")
-        all_t   = st.session_state.tickets
-        n_open  = sum(1 for t in all_t if t["status"] == "Open")
-        n_pend  = sum(1 for t in all_t if t["status"] == "Pending")
-        n_done  = sum(1 for t in all_t if t["status"] == "Resolved")
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        mc1.metric("Total tickets", len(all_t))
-        mc2.metric("🔴 Open", n_open)
-        mc3.metric("🟡 Pending", n_pend)
-        mc4.metric("🟢 Resolved", n_done)
-
+        all_t=st.session_state.tickets
+        n_open=sum(1 for t in all_t if t["status"]=="Open"); n_pend=sum(1 for t in all_t if t["status"]=="Pending"); n_done=sum(1 for t in all_t if t["status"]=="Resolved")
+        mc1,mc2,mc3,mc4=st.columns(4)
+        mc1.metric("Total tickets",len(all_t)); mc2.metric("🔴 Open",n_open); mc3.metric("🟡 Pending",n_pend); mc4.metric("🟢 Resolved",n_done)
         st.divider()
-        for i, t in enumerate(st.session_state.tickets):
-            status_icon = {"Open": "🔴", "Pending": "🟡", "Resolved": "🟢"}.get(t["status"], "⚪")
-            rc1, rc2, rc3, rc4, rc5 = st.columns([1, 2, 4, 1.5, 1.5])
-            rc1.code(t["id"])
-            rc2.markdown(f"**{t['client']}**")
-            rc3.markdown(t["subject"])
-            rc4.markdown(f"{status_icon} {t['status']}")
-            rc5.markdown(t["priority"])
+        for i,t in enumerate(st.session_state.tickets):
+            status_icon={"Open":"🔴","Pending":"🟡","Resolved":"🟢"}.get(t["status"],"⚪")
+            rc1,rc2,rc3,rc4,rc5=st.columns([1,2,4,1.5,1.5])
+            rc1.code(t["id"]); rc2.markdown(f"**{t['client']}**"); rc3.markdown(t["subject"]); rc4.markdown(f"{status_icon} {t['status']}"); rc5.markdown(t["priority"])
             st.markdown("---")
 
 
 def render_kira_nurse():
     st.markdown("## 🩺 Kira · AI Nurse")
     st.caption("kiraainurse.streamlit.app · AI health assistant for clients & staff")
-    col1,col2 = st.columns(2)
+    col1,col2=st.columns(2)
     with col1:
         st.markdown("""<div style="background:linear-gradient(135deg,#2D3FE7,#7B2FE0);border-radius:14px;padding:24px;color:white;margin-bottom:16px"><div style="font-size:32px;margin-bottom:8px">🩺</div><div style="font-size:18px;font-weight:700">Kira AI Nurse</div><div style="font-size:13px;opacity:.85;margin:8px 0">Symptom triage · Vitals · Clinical report · PubMed evidence</div></div>""",unsafe_allow_html=True)
         st.link_button("🚀 Open Kira","https://kiraainurse.streamlit.app",use_container_width=True,type="primary")
@@ -1836,31 +1842,27 @@ def render_kira_nurse():
         st.markdown("""<div style="background:linear-gradient(135deg,#0EA5E9,#2D3FE7);border-radius:14px;padding:24px;color:white;margin-bottom:16px"><div style="font-size:32px;margin-bottom:8px">📷</div><div style="font-size:18px;font-weight:700">Kira Face Scan</div><div style="font-size:13px;opacity:.85;margin:8px 0">rPPG · Heart rate · Breathing · 60-second scan</div></div>""",unsafe_allow_html=True)
         st.link_button("📷 Open Face Scan","https://kiraainurse.netlify.app",use_container_width=True)
     st.divider()
-    tab_share,tab_explain,tab_about = st.tabs(["📤 Share with Client","💬 Explain to Client","ℹ️ About"])
+    tab_share,tab_explain,tab_about=st.tabs(["📤 Share with Client","💬 Explain to Client","ℹ️ About"])
     with tab_share:
-        c_name = st.text_input("Client name", placeholder="Katia Totikidou")
-        c_lang = st.radio("Language",["Greek","English"],horizontal=True)
-        if st.button("✍️ Generate message", type="primary"):
-            api_key = get_api_key()
+        c_name=st.text_input("Client name",placeholder="Katia Totikidou")
+        c_lang=st.radio("Language",["Greek","English"],horizontal=True)
+        if st.button("✍️ Generate message",type="primary"):
+            api_key=get_api_key()
             if api_key and c_name:
-                import urllib.request, json as _json
-                prompt = (f"Write a short WhatsApp message in {'Greek' if c_lang=='Greek' else 'English'} "
-                          f"to {c_name}, a client of Ashlar Insurance. Introduce Kira (https://kiraainurse.streamlit.app), "
-                          f"a free AI health assistant. Warm and professional. Under 4 sentences. Include the link.")
-                body = _json.dumps({"model":"claude-sonnet-4-6","max_tokens":300,"messages":[{"role":"user","content":prompt}]}).encode()
-                req = urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,
-                    headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
+                import urllib.request,json as _json
+                prompt=(f"Write a short WhatsApp message in {'Greek' if c_lang=='Greek' else 'English'} to {c_name}, a client of Ashlar Insurance. Introduce Kira (https://kiraainurse.streamlit.app), a free AI health assistant. Warm and professional. Under 4 sentences. Include the link.")
+                body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":300,"messages":[{"role":"user","content":prompt}]}).encode()
+                req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 try:
-                    with urllib.request.urlopen(req,timeout=20) as r:
-                        msg = _json.loads(r.read())["content"][0]["text"]
+                    with urllib.request.urlopen(req,timeout=20) as r: msg=_json.loads(r.read())["content"][0]["text"]
                     st.text_area("Message:",value=msg,height=120)
                     import urllib.parse
                     st.markdown(f'<a href="https://wa.me/?text={urllib.parse.quote(msg)}" target="_blank" style="background:#25D366;color:white;padding:8px 18px;border-radius:8px;text-decoration:none;font-weight:600">WhatsApp →</a>',unsafe_allow_html=True)
                 except Exception as e: st.error(f"Error: {e}")
     with tab_explain:
-        st.markdown("""**Kira** is a bilingual AI health assistant:\n- Triage · Vitals · Face Scan (rPPG) · Clinical Report · PubMed evidence · RxNorm drug check\n- Use cases: expat clients far from GP, pre-consultation prep, insurance claims documentation""")
+        st.markdown("**Kira** is a bilingual AI health assistant:\n- Triage · Vitals · Face Scan (rPPG) · Clinical Report · PubMed evidence · RxNorm drug check\n- Use cases: expat clients far from GP, pre-consultation prep, insurance claims documentation")
     with tab_about:
-        st.markdown("""| Component | Technology |\n|---|---|\n| AI | Claude Sonnet + GPT-4o |\n| Face Scan | rPPG CHROM algorithm |\n| Medical DB | PubMed/NCBI |\n| Drug Check | RxNorm |\n| Deploy | Streamlit Cloud + Netlify |""")
+        st.markdown("| Component | Technology |\n|---|---|\n| AI | Claude Sonnet + GPT-4o |\n| Face Scan | rPPG CHROM algorithm |\n| Medical DB | PubMed/NCBI |\n| Drug Check | RxNorm |\n| Deploy | Streamlit Cloud + Netlify |")
 
 
 def _build_analyzer_prompt(client_data, existing_policies, lang="el"):
@@ -1872,40 +1874,13 @@ def _build_analyzer_prompt(client_data, existing_policies, lang="el"):
         if p.get("renewal_date"): parts.append(f"Expires {p['renewal_date']}")
         if p.get("coverage"): parts.append(f"| Coverage: {p['coverage'][:200]}")
         return " ".join(parts)
-    existing_str = "\n".join(_pol_line(p) for p in existing_policies) if existing_policies else "No policies on file"
-    carriers_info = """Available carriers: Motor: 3P/Hellas Direct/Groupama/Generali/Ethniki/AXA. Greek Health: Groupama/Generali/Ethniki/Interamerican/Eurolife. International Health: Morgan Price/Bupa Global/NOW Health. Life: Generali/Ethniki/Interamerican/Eurolife/NN/Allianz. Liability: Groupama/Generali/Ethniki/AXA. Pet: Safe Pet System. Key facts: Greek domestic health = no free outpatient/dental/psychiatric/imaging outside hospitalisation. Professional Liability LEGALLY REQUIRED for architects/engineers/doctors/lawyers in Greece. Expats need international health NOT Greek domestic."""
+    existing_str="\n".join(_pol_line(p) for p in existing_policies) if existing_policies else "No policies on file"
+    carriers_info="Available carriers: Motor: 3P/Hellas Direct/Groupama/Generali/Ethniki/AXA. Greek Health: Groupama/Generali/Ethniki/Interamerican/Eurolife. International Health: Morgan Price/Bupa Global/NOW Health. Life: Generali/Ethniki/Interamerican/Eurolife/NN/Allianz. Liability: Groupama/Generali/Ethniki/AXA. Pet: Safe Pet System. Key facts: Greek domestic health=no free outpatient/dental/psychiatric/imaging outside hospitalisation. Professional Liability LEGALLY REQUIRED for architects/engineers/doctors/lawyers. Expats need international health NOT Greek domestic."
     p=client_data
     if lang=="el":
-        return f"""Είσαι σύμβουλος ασφαλίσεων Ashlar Insurance. Ανάλυσε τις ασφαλιστικές ανάγκες:
-ΠΕΛΑΤΗΣ: {p.get("name")}, {p.get("age")}y, {p.get("profession")}, {p.get("family")}, εισόδημα {p.get("income")}
-Ακίνητο:{"Ναι" if p.get("has_property") else "Όχι"} Όχημα:{"Ναι" if p.get("has_vehicle") else "Όχι"} Κατοικίδιο:{"Ναι" if p.get("has_pets") else "Όχι"} Παιδιά:{"Ναι" if p.get("has_children") else "Όχι"} Expat:{"Ναι" if p.get("is_expat") else "Όχι"}
-Σημειώσεις: {p.get("notes","")}
-ΥΠΑΡΧΟΥΣΕΣ ΑΣΦΑΛΙΣΕΙΣ:
-{existing_str}
-{carriers_info}
-Δώσε: ## 🔍 ΑΝΑΛΥΣΗ ΠΡΟΦΙΛ | ## ✅ ΚΑΛΥΨΕΙΣ ΠΟΥ ΕΧΕΙ | ## ⚠️ ΚΕΝΑ ΚΑΛΥΨΕΩΝ (με Επείγον🔴/Προτεινόμενο🟡/Προαιρετικό🟢, ασφαλιστές, εκτιμώμενο ασφάλιστρο) | ## 📋 ΠΛΑΝΟ ΔΡΑΣΗΣ | ## 💬 SCRIPT ΕΠΙΚΟΙΝΩΝΙΑΣ"""
+        return f"""Είσαι σύμβουλος ασφαλίσεων Ashlar Insurance. Ανάλυσε τις ασφαλιστικές ανάγκες:\nΠΕΛΑΤΗΣ: {p.get("name")}, {p.get("age")}y, {p.get("profession")}, {p.get("family")}, εισόδημα {p.get("income")}\nΑκίνητο:{"Ναι" if p.get("has_property") else "Όχι"} Όχημα:{"Ναι" if p.get("has_vehicle") else "Όχι"} Κατοικίδιο:{"Ναι" if p.get("has_pets") else "Όχι"} Παιδιά:{"Ναι" if p.get("has_children") else "Όχι"} Expat:{"Ναι" if p.get("is_expat") else "Όχι"}\nΣημειώσεις: {p.get("notes","")}\nΥΠΑΡΧΟΥΣΕΣ ΑΣΦΑΛΙΣΕΙΣ:\n{existing_str}\n{carriers_info}\nΔώσε: ## 🔍 ΑΝΑΛΥΣΗ ΠΡΟΦΙΛ | ## ✅ ΚΑΛΥΨΕΙΣ ΠΟΥ ΕΧΕΙ | ## ⚠️ ΚΕΝΑ ΚΑΛΥΨΕΩΝ (με Επείγον🔴/Προτεινόμενο🟡/Προαιρετικό🟢, ασφαλιστές, εκτιμώμενο ασφάλιστρο) | ## 📋 ΠΛΑΝΟ ΔΡΑΣΗΣ | ## 💬 SCRIPT ΕΠΙΚΟΙΝΩΝΙΑΣ"""
     else:
-        return f"""You are an insurance adviser at Ashlar Insurance Greece. Analyse needs for:
-CLIENT: {p.get("name")}, {p.get("age")}y, {p.get("profession")}, {p.get("family")}, income {p.get("income")}
-Property:{"Yes" if p.get("has_property") else "No"} Vehicle:{"Yes" if p.get("has_vehicle") else "No"} Pets:{"Yes" if p.get("has_pets") else "No"} Children:{"Yes" if p.get("has_children") else "No"} Expat:{"Yes" if p.get("is_expat") else "No"}
-Notes: {p.get("notes","")}
-EXISTING POLICIES:
-{existing_str}
-{carriers_info}
-Provide: ## 🔍 PROFILE ANALYSIS | ## ✅ EXISTING COVERAGE | ## ⚠️ COVERAGE GAPS (Urgent🔴/Recommended🟡/Optional🟢, carriers, estimated premium) | ## 📋 ACTION PLAN | ## 💬 CLIENT SCRIPT"""
-
-
-def chi_api(endpoint, params=None):
-    import urllib.request as _ur, json as _j, urllib.parse as _up
-    portal_url=st.secrets.get("CHI_PORTAL_URL","https://chi-insurance-portal-production.up.railway.app")
-    api_key=st.secrets.get("CHI_API_KEY","")
-    if not api_key: return None
-    url=f"{portal_url.rstrip('/')}/api/{endpoint.lstrip('/')}"
-    if params: url+="?"+_up.urlencode(params)
-    req=_ur.Request(url,headers={"X-API-Key":api_key,"Accept":"application/json"})
-    try:
-        with _ur.urlopen(req,timeout=10) as r: return _j.loads(r.read())
-    except Exception as e: return {"error":str(e)}
+        return f"""You are an insurance adviser at Ashlar Insurance Greece.\nCLIENT: {p.get("name")}, {p.get("age")}y, {p.get("profession")}, {p.get("family")}, income {p.get("income")}\nProperty:{"Yes" if p.get("has_property") else "No"} Vehicle:{"Yes" if p.get("has_vehicle") else "No"} Pets:{"Yes" if p.get("has_pets") else "No"} Children:{"Yes" if p.get("has_children") else "No"} Expat:{"Yes" if p.get("is_expat") else "No"}\nNotes: {p.get("notes","")}\nEXISTING POLICIES:\n{existing_str}\n{carriers_info}\nProvide: ## 🔍 PROFILE ANALYSIS | ## ✅ EXISTING COVERAGE | ## ⚠️ COVERAGE GAPS (Urgent🔴/Recommended🟡/Optional🟢, carriers, estimated premium) | ## 📋 ACTION PLAN | ## 💬 CLIENT SCRIPT"""
 
 
 def render_chi_analyzer():
@@ -1931,7 +1906,6 @@ def render_chi_analyzer():
         a_expat=st.checkbox("✈️ Expat / Ταξιδεύει συχνά",key="an_expat")
         a_lang=st.radio("Γλώσσα",["el","en"],horizontal=True,format_func=lambda x:"🇬🇷 Ελληνικά" if x=="el" else "🇬🇧 English",key="an_lang")
     st.markdown("### 📋 Υπάρχουσες Ασφαλίσεις")
-    st.caption("Ανεβάστε PDF · ή συνδεθείτε με CHI Portal · ή προσθέστε χειροκίνητα")
     if "an_policies" not in st.session_state: st.session_state.an_policies=[]
     with st.expander("📄 Upload Policy PDFs — AI extracts details automatically",expanded=True):
         uploaded_pdfs=st.file_uploader("Upload policy PDFs",type=["pdf"],accept_multiple_files=True,key="pdf_policies")
@@ -1944,28 +1918,20 @@ def render_chi_analyzer():
                         with st.spinner(f"Reading {pdf_file.name}..."):
                             try:
                                 from PyPDF2 import PdfReader
-                                reader = PdfReader(pdf_file)
-                                pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)[:8000]
+                                reader=PdfReader(pdf_file)
+                                pdf_text="\n".join(page.extract_text() or "" for page in reader.pages)[:8000]
                             except Exception as e:
-                                st.warning(f"Could not read {pdf_file.name}: {e}")
-                                continue
+                                st.warning(f"Could not read {pdf_file.name}: {e}"); continue
                             if not pdf_text.strip(): st.warning(f"{pdf_file.name}: no text found"); continue
-                            extract_prompt=f'''Extract insurance policy details. Return ONLY JSON:
-{{"policy_type":"motor/health/life/home/travel/pet/liability/other","insurer":"","policy_number":"","product":"","premium":"","currency":"EUR","expiry_date":"YYYY-MM-DD","coverage_summary":"","key_exclusions":"","deductible":""}}
-POLICY:
-{pdf_text}'''
+                            extract_prompt=f'Extract insurance policy details. Return ONLY JSON:\n{{"policy_type":"motor/health/life/home/travel/pet/liability/other","insurer":"","policy_number":"","product":"","premium":"","currency":"EUR","expiry_date":"YYYY-MM-DD","coverage_summary":"","key_exclusions":"","deductible":""}}\nPOLICY:\n{pdf_text}'
                             body=_j.dumps({"model":"claude-sonnet-4-6","max_tokens":800,"messages":[{"role":"user","content":extract_prompt}]}).encode()
                             req=_ur.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                             try:
                                 with _ur.urlopen(req,timeout=30) as r: result=_j.loads(r.read())["content"][0]["text"].strip()
                                 if result.startswith("```"): result=result.split("```")[1]; result=result[4:] if result.startswith("json") else result
-                                pd=_j.loads(result.strip())
-                                extracted.append({"type":pd.get("policy_type","other"),"provider":pd.get("insurer",""),
-                                    "policy_no":pd.get("policy_number",""),"product":pd.get("product",""),
-                                    "premium":pd.get("premium",""),"currency":pd.get("currency","EUR"),
-                                    "renewal_date":pd.get("expiry_date",""),"coverage":pd.get("coverage_summary",""),
-                                    "source_file":pdf_file.name,"color":_POLICY_TYPES.get(pd.get("policy_type","other"),_POLICY_TYPES["other"])["color"]})
-                                st.success(f"✅ {pdf_file.name} → {pd.get('insurer','')} {pd.get('product','')}")
+                                pd_data=_j.loads(result.strip())
+                                extracted.append({"type":pd_data.get("policy_type","other"),"provider":pd_data.get("insurer",""),"policy_no":pd_data.get("policy_number",""),"product":pd_data.get("product",""),"premium":pd_data.get("premium",""),"currency":pd_data.get("currency","EUR"),"renewal_date":pd_data.get("expiry_date",""),"coverage":pd_data.get("coverage_summary",""),"source_file":pdf_file.name})
+                                st.success(f"✅ {pdf_file.name} → {pd_data.get('insurer','')} {pd_data.get('product','')}")
                             except Exception as e: st.warning(f"Could not parse {pdf_file.name}: {e}")
                     if extracted:
                         existing_nos={p.get("policy_no","") for p in st.session_state.an_policies}
@@ -1993,16 +1959,11 @@ POLICY:
         if not a_name or not a_prof: st.warning("Συμπληρώστε όνομα και επάγγελμα.")
         elif not api_key: st.error("Προσθέστε Claude_API_Key.")
         else:
-            client_data={"name":a_name,"age":a_age,"profession":a_prof,"family":a_family,"income":a_income,
-                "notes":a_notes,"has_property":a_prop,"has_vehicle":a_vehicle,"has_pets":a_pets,
-                "has_children":a_kids,"is_expat":a_expat}
+            client_data={"name":a_name,"age":a_age,"profession":a_prof,"family":a_family,"income":a_income,"notes":a_notes,"has_property":a_prop,"has_vehicle":a_vehicle,"has_pets":a_pets,"has_children":a_kids,"is_expat":a_expat}
             prompt=_build_analyzer_prompt(client_data,st.session_state.an_policies,a_lang)
             with st.spinner("Analysing..."):
-                body=_j.dumps({"model":"claude-sonnet-4-6","max_tokens":3000,
-                    "system":"Είσαι έμπειρος ασφαλιστικός σύμβουλος στην Ελλάδα.",
-                    "messages":[{"role":"user","content":prompt}]}).encode()
-                req=_ur.Request("https://api.anthropic.com/v1/messages",data=body,
-                    headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
+                body=_j.dumps({"model":"claude-sonnet-4-6","max_tokens":3000,"system":"Είσαι έμπειρος ασφαλιστικός σύμβουλος στην Ελλάδα.","messages":[{"role":"user","content":prompt}]}).encode()
+                req=_ur.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 try:
                     with _ur.urlopen(req,timeout=60) as r:
                         result=_j.loads(r.read())["content"][0]["text"]
@@ -2010,8 +1971,7 @@ POLICY:
                 except Exception as e: st.error(f"Error: {e}")
     if st.session_state.get("an_result"):
         result=st.session_state["an_result"]; cname=st.session_state["an_client"]
-        st.markdown("---"); st.markdown(f"### 📊 {cname}")
-        st.markdown(result)
+        st.markdown("---"); st.markdown(f"### 📊 {cname}"); st.markdown(result)
 
 
 def render_chi_portal():
@@ -2023,7 +1983,7 @@ def render_chi_portal():
     with qa2: st.link_button("🔐 Admin Login",f"{portal_url}/login",use_container_width=True)
     with qa3: st.link_button("📂 GitHub",f"https://github.com/{repo}",use_container_width=True)
     st.divider()
-    st.markdown(f'''<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);border-radius:16px;padding:28px;text-align:center;margin-bottom:20px"><div style="font-size:40px">🛡️</div><div style="font-size:22px;font-weight:800;color:#C9A96E;margin-bottom:6px">CHI Admin Panel</div><div style="font-size:13px;color:#A89880;margin-bottom:20px">138 Clients · 222 Policies · 30 Expiring</div></div>''',unsafe_allow_html=True)
+    st.markdown(f'<div style="background:linear-gradient(135deg,#1C1410,#3A2E24);border-radius:16px;padding:28px;text-align:center;margin-bottom:20px"><div style="font-size:40px">🛡️</div><div style="font-size:22px;font-weight:800;color:#C9A96E;margin-bottom:6px">CHI Admin Panel</div><div style="font-size:13px;color:#A89880;margin-bottom:20px">138 Clients · 222 Policies · 30 Expiring</div></div>',unsafe_allow_html=True)
     q1,q2,q3,q4=st.columns(4)
     with q1: st.link_button("👥 Clients",f"{portal_url}/clients",use_container_width=True,type="primary")
     with q2: st.link_button("📄 Policies",f"{portal_url}/policies",use_container_width=True,type="primary")
@@ -2058,13 +2018,12 @@ def render_kira_pet_hal():
             api_key=get_api_key()
             if api_key:
                 import urllib.request,json as _json
-                prompt=f"Write pet insurance content for petshealth.gr (Greek brand, Ashlar Insurance, carrier: Safe Pet System). Content: {content_type if not custom else custom}. Language: {lang}. Mention Kira Pet (kiraaipet.streamlit.app) — free AI Veterinary Nurse — when relevant. Professional, warm, genuine."
+                prompt=f"Write pet insurance content for petshealth.gr (Greek brand, Ashlar Insurance, carrier: Safe Pet System). Content: {content_type if not custom else custom}. Language: {lang}. Mention Kira Pet (kiraaipet.streamlit.app) when relevant. Professional, warm, genuine."
                 body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":1500,"messages":[{"role":"user","content":prompt}]}).encode()
                 req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 with st.spinner("Writing..."):
                     try:
-                        with urllib.request.urlopen(req,timeout=30) as r: result=_json.loads(r.read())["content"][0]["text"]
-                        st.markdown(result)
+                        with urllib.request.urlopen(req,timeout=30) as r: st.markdown(_json.loads(r.read())["content"][0]["text"])
                     except Exception as e: st.error(f"Error: {e}")
     with tab_social:
         platform=st.selectbox("Platform",["LinkedIn","Instagram","Facebook"])
@@ -2074,7 +2033,7 @@ def render_kira_pet_hal():
             if api_key and angle:
                 import urllib.request,json as _json
                 body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":600,"messages":[{"role":"user","content":f"Write a {platform} post for petshealth.gr about: {angle}. Greek language, English hashtags. Mention Kira Pet (kiraaipet.streamlit.app) if relevant."}]}).encode()
-                req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":get_api_key(),"anthropic-version":"2023-06-01","content-type":"application/json"})
+                req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 with st.spinner("..."):
                     try:
                         with urllib.request.urlopen(req,timeout=30) as r: st.markdown(_json.loads(r.read())["content"][0]["text"])
@@ -2084,164 +2043,90 @@ def render_kira_pet_hal():
 def render_memory():
     st.markdown("## 🧠 HAL Memory")
     st.caption(f"Persistent business conversations · {MEMORY_WINDOW_DAYS}-day rolling auto-context · Full search across all history")
-
-    # Load conv worksheet
     if "_conv_ws" not in st.session_state:
         try:
-            _, _, _conv_ws = get_gsheet()
-            st.session_state._conv_ws = _conv_ws
-        except Exception:
-            st.session_state._conv_ws = None
-    conv_ws = st.session_state.get("_conv_ws")
-
+            _,_,_conv_ws=get_gsheet(); st.session_state._conv_ws=_conv_ws
+        except Exception: st.session_state._conv_ws=None
+    conv_ws=st.session_state.get("_conv_ws")
     if conv_ws is None:
-        st.error("⚠️ Google Sheets not connected. Configure `gcp_service_account` and `HAL_SHEET_ID` in Streamlit secrets to enable persistent memory.")
-        st.info("Until then, conversations only live in the current session and disappear on refresh.")
+        st.error("⚠️ Google Sheets not connected. Configure `gcp_service_account` and `HAL_SHEET_ID` in Streamlit secrets.")
         return
-
-    tab_search, tab_browse, tab_stats, tab_settings = st.tabs([
-        "🔍 Search", "📅 Browse Recent", "📊 Stats", "⚙️ Settings"
-    ])
-
-    # ── TAB: SEARCH (all history) ────────────────────────────────────────────
+    tab_search,tab_browse,tab_stats,tab_settings=st.tabs(["🔍 Search","📅 Browse Recent","📊 Stats","⚙️ Settings"])
     with tab_search:
         st.markdown("### Search every conversation HAL has stored")
-        st.caption("Searches the full archive — useful for finding old analyses (Ergo offer, Bupa appeal, etc).")
-        q = st.text_input("Search term", placeholder="e.g. Ergo, Bupa, Tzina, colonoscopy, Generali...")
+        q=st.text_input("Search term",placeholder="e.g. Ergo, Bupa, Tzina, colonoscopy, Generali...")
         if q:
-            with st.spinner("Searching..."):
-                results = search_conversations(conv_ws, q, limit=50)
-            if not results:
-                st.info(f"No matches for '{q}'.")
+            with st.spinner("Searching..."): results=search_conversations(conv_ws,q,limit=50)
+            if not results: st.info(f"No matches for '{q}'.")
             else:
                 st.success(f"Found {len(results)} matches")
-                # Group by session
-                sessions = {}
-                for r in results:
-                    sid = r["session_id"]
-                    sessions.setdefault(sid, []).append(r)
-                for sid, msgs in sessions.items():
+                sessions={}
+                for r in results: sessions.setdefault(r["session_id"],[]).append(r)
+                for sid,msgs in sessions.items():
                     with st.expander(f"📅 Session {msgs[0]['timestamp'][:10]} — {len(msgs)} match(es)"):
                         for m in msgs:
-                            icon = "🧑" if m["role"] == "user" else "🤖"
+                            icon="🧑" if m["role"]=="user" else "🤖"
                             st.markdown(f"**{icon} {m['role'].title()}** · `{m['timestamp']}`")
-                            # Highlight the search term
-                            content = m["content"]
-                            if len(content) > 600:
-                                # Try to centre on the match
-                                idx = content.lower().find(q.lower())
-                                if idx > 200:
-                                    content = "..." + content[idx-200:idx+400] + "..."
-                                else:
-                                    content = content[:600] + "..."
-                            st.markdown(f"> {content}")
-                            st.divider()
-
-    # ── TAB: BROWSE RECENT (7 days) ──────────────────────────────────────────
+                            content=m["content"]
+                            if len(content)>600:
+                                idx=content.lower().find(q.lower())
+                                content=("..." if idx>200 else "")+content[max(0,idx-200):idx+400]+"..."
+                            st.markdown(f"> {content}"); st.divider()
     with tab_browse:
         st.markdown(f"### Last {MEMORY_WINDOW_DAYS} days of business conversations")
-        days = st.slider("Days to show", 1, 30, MEMORY_WINDOW_DAYS, key="browse_days")
-        with st.spinner("Loading..."):
-            recent = load_recent_conversations(conv_ws, days=days, mode_filter="business")
-        if not recent:
-            st.info(f"No conversations in the last {days} days. Start chatting with HAL and they'll appear here.")
+        days=st.slider("Days to show",1,30,MEMORY_WINDOW_DAYS,key="browse_days")
+        with st.spinner("Loading..."): recent=load_recent_conversations(conv_ws,days=days,mode_filter="business")
+        if not recent: st.info(f"No conversations in the last {days} days.")
         else:
-            # Group by session, most recent first
-            sessions = {}
-            for r in recent:
-                sid = r["session_id"]
-                sessions.setdefault(sid, []).append(r)
-            session_keys = sorted(sessions.keys(), key=lambda k: sessions[k][0]["timestamp"], reverse=True)
+            sessions={}
+            for r in recent: sessions.setdefault(r["session_id"],[]).append(r)
+            session_keys=sorted(sessions.keys(),key=lambda k:sessions[k][0]["timestamp"],reverse=True)
             st.caption(f"{len(recent)} messages across {len(sessions)} session(s)")
             for sid in session_keys:
-                msgs = sessions[sid]
-                first_ts = msgs[0]["timestamp"]
-                # Try to extract a topic preview from the first user message
-                first_user = next((m for m in msgs if m["role"] == "user"), None)
-                preview = (first_user["content"][:80] if first_user else "")
+                msgs=sessions[sid]; first_ts=msgs[0]["timestamp"]
+                first_user=next((m for m in msgs if m["role"]=="user"),None)
+                preview=(first_user["content"][:80] if first_user else "")
                 with st.expander(f"📅 {first_ts} — {len(msgs)} msgs — {preview}..."):
                     for m in msgs:
-                        icon = "🧑" if m["role"] == "user" else "🤖"
                         with st.chat_message("user" if m["role"]=="user" else "assistant"):
-                            st.caption(m["timestamp"])
-                            st.markdown(m["content"])
-
+                            st.caption(m["timestamp"]); st.markdown(m["content"])
             st.divider()
-            # Export
-            if st.button("📥 Export visible to text", use_container_width=True):
-                lines = [f"HAL Memory Export — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                         f"Last {days} days · {len(recent)} messages",""]
+            if st.button("📥 Export visible to text",use_container_width=True):
+                lines=[f"HAL Memory Export — {datetime.now().strftime('%Y-%m-%d %H:%M')}",f"Last {days} days · {len(recent)} messages",""]
                 for sid in session_keys:
                     lines.append(f"\n=== Session {sid} ===")
                     for m in sessions[sid]:
-                        lines.append(f"\n[{m['timestamp']}] {m['role'].upper()}:")
-                        lines.append(m["content"])
-                export_text = "\n".join(lines)
-                st.download_button("Download .txt", export_text,
-                    file_name=f"hal_memory_{datetime.now().strftime('%Y%m%d')}.txt",
-                    mime="text/plain", use_container_width=True)
-
-    # ── TAB: STATS ───────────────────────────────────────────────────────────
+                        lines.append(f"\n[{m['timestamp']}] {m['role'].upper()}:"); lines.append(m["content"])
+                st.download_button("Download .txt","\n".join(lines),file_name=f"hal_memory_{datetime.now().strftime('%Y%m%d')}.txt",mime="text/plain",use_container_width=True)
     with tab_stats:
         st.markdown("### Memory Statistics")
         with st.spinner("Calculating..."):
             try:
-                all_rows = conv_ws.get_all_records()
-                total = len(all_rows)
-                sessions_set = set(r.get("SessionID","") for r in all_rows if r.get("SessionID"))
-                user_msgs = sum(1 for r in all_rows if r.get("Role") == "user")
-                hal_msgs  = sum(1 for r in all_rows if r.get("Role") == "assistant")
-                # Last 7 days
+                all_rows=conv_ws.get_all_records(); total=len(all_rows)
+                sessions_set=set(r.get("SessionID","") for r in all_rows if r.get("SessionID"))
+                user_msgs=sum(1 for r in all_rows if r.get("Role")=="user")
+                hal_msgs=sum(1 for r in all_rows if r.get("Role")=="assistant")
                 from datetime import timedelta
-                cutoff = datetime.now() - timedelta(days=MEMORY_WINDOW_DAYS)
-                recent_count = 0
-                for r in all_rows:
-                    try:
-                        ts = datetime.strptime(r.get("Timestamp",""), "%Y-%m-%d %H:%M:%S")
-                        if ts >= cutoff:
-                            recent_count += 1
-                    except: pass
-
-                c1,c2,c3,c4 = st.columns(4)
-                c1.metric("Total messages", f"{total:,}")
-                c2.metric("Total sessions", len(sessions_set))
-                c3.metric(f"Last {MEMORY_WINDOW_DAYS}d (active memory)", recent_count)
-                c4.metric("User : HAL", f"{user_msgs}:{hal_msgs}")
-
+                cutoff=datetime.now()-timedelta(days=MEMORY_WINDOW_DAYS)
+                recent_count=sum(1 for r in all_rows if r.get("Timestamp") and datetime.strptime(r["Timestamp"],"%Y-%m-%d %H:%M:%S")>=cutoff)
+                c1,c2,c3,c4=st.columns(4)
+                c1.metric("Total messages",f"{total:,}"); c2.metric("Total sessions",len(sessions_set))
+                c3.metric(f"Last {MEMORY_WINDOW_DAYS}d",recent_count); c4.metric("User : HAL",f"{user_msgs}:{hal_msgs}")
                 st.caption(f"🧠 Current session ID: `{st.session_state.session_id}`")
-                st.caption(f"📁 Sheet: tab 'Conversations' in your HAL Google Sheet")
-            except Exception as e:
-                st.warning(f"Could not load stats: {e}")
-
-    # ── TAB: SETTINGS ────────────────────────────────────────────────────────
+            except Exception as e: st.warning(f"Could not load stats: {e}")
     with tab_settings:
         st.markdown("### Memory Settings")
-        st.markdown(f"""
-| Setting | Value | How to change |
-|---|---|---|
-| Rolling window | **{MEMORY_WINDOW_DAYS} days** | Edit `MEMORY_WINDOW_DAYS` near the top of `app.py` |
-| Modes saved | **{', '.join(MEMORY_SAVE_MODES)}** | Edit `MEMORY_SAVE_MODES` near the top of `app.py` |
-| Max injected messages | **{MEMORY_MAX_INJECT}** | Edit `MEMORY_MAX_INJECT` near the top of `app.py` |
-| Storage backend | Google Sheets tab `Conversations` | Sheet ID in Streamlit secret `HAL_SHEET_ID` |
-| Private/lodge mode | **NEVER stored** (confidential) | Hard-coded in `save_message_to_sheet` |
-        """)
-
+        st.markdown(f"| Setting | Value |\n|---|---|\n| Rolling window | **{MEMORY_WINDOW_DAYS} days** |\n| Modes saved | **{', '.join(MEMORY_SAVE_MODES)}** |\n| Max injected messages | **{MEMORY_MAX_INJECT}** |\n| Storage | Google Sheets tab `Conversations` |\n| Private/lodge mode | **NEVER stored** |")
         st.divider()
-        st.markdown("#### 🗑 Danger Zone")
-        with st.expander("Clear current session from memory"):
-            st.warning(f"This removes only the current session ({st.session_state.session_id}) from the sheet. Past sessions stay.")
-            if st.button("Reset current session memory", type="secondary"):
+        with st.expander("🗑 Clear current session from memory"):
+            if st.button("Reset current session memory",type="secondary"):
                 try:
-                    cell_list = conv_ws.findall(st.session_state.session_id)
-                    rows_to_delete = sorted({c.row for c in cell_list}, reverse=True)
-                    for row in rows_to_delete:
-                        conv_ws.delete_rows(row)
-                    st.session_state.chat_history = []
-                    st.session_state.memory_injected = False
-                    st.success(f"Cleared {len(rows_to_delete)} rows from current session.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Could not clear: {e}")
+                    cell_list=conv_ws.findall(st.session_state.session_id)
+                    rows_to_delete=sorted({c.row for c in cell_list},reverse=True)
+                    for row in rows_to_delete: conv_ws.delete_rows(row)
+                    st.session_state.chat_history=[]; st.session_state.memory_injected=False
+                    st.success(f"Cleared {len(rows_to_delete)} rows."); st.rerun()
+                except Exception as e: st.error(f"Could not clear: {e}")
 
 
 def render_placeholder(title, icon):
@@ -2259,31 +2144,32 @@ if mode == "private" and not st.session_state.private_unlocked:
     render_pin_screen()
 
 elif mode == "business":
-    if module == "home":        render_business_home()
-    elif module == "hal_chat":  render_hal_chat()
-    elif module == "memory":    render_memory()
-    elif module == "quotes":    render_quotes()
-    elif module == "documents": render_documents()
-    elif module == "comms":     render_comms()
-    elif module == "commissions": render_commissions()
-    elif module == "market":    render_market()
-    elif module == "clients":   render_clients()
-    elif module == "apps":      render_apps()
-    elif module == "pets":      render_pets()
-    elif module == "kira_nurse":  render_kira_nurse()
+    if module == "home":           render_business_home()
+    elif module == "hal_chat":     render_hal_chat()
+    elif module == "memory":       render_memory()
+    elif module == "renewals":     render_renewals()
+    elif module == "quotes":       render_quotes()
+    elif module == "documents":    render_documents()
+    elif module == "comms":        render_comms()
+    elif module == "commissions":  render_commissions()
+    elif module == "market":       render_market()
+    elif module == "clients":      render_clients()
+    elif module == "apps":         render_apps()
+    elif module == "pets":         render_pets()
+    elif module == "kira_nurse":   render_kira_nurse()
     elif module == "chi_analyzer": render_chi_analyzer()
-    elif module == "chi_portal":  render_chi_portal()
-    elif module == "kira_pet":    render_kira_pet_hal()
+    elif module == "chi_portal":   render_chi_portal()
+    elif module == "kira_pet":     render_kira_pet_hal()
     else: render_business_home()
 
 elif mode == "private" and st.session_state.private_unlocked:
-    if module == "home":        render_private_home()
-    elif module == "hal_chat":  render_hal_chat()
-    elif module == "lodge":     render_lodge()
-    elif module == "minutes":   render_placeholder("Minutes & Documents", "📋")
-    elif module == "attendance": render_placeholder("Attendance Tracker", "👥")
-    elif module == "events":    render_placeholder("Events & Gala", "📅")
-    elif module == "finance":   render_finance()
-    elif module == "health":    render_health()
+    if module == "home":             render_private_home()
+    elif module == "hal_chat":       render_hal_chat()
+    elif module == "lodge":          render_lodge()
+    elif module == "minutes":        render_placeholder("Minutes & Documents", "📋")
+    elif module == "attendance":     render_placeholder("Attendance Tracker", "👥")
+    elif module == "events":         render_placeholder("Events & Gala", "📅")
+    elif module == "finance":        render_finance()
+    elif module == "health":         render_health()
     elif module == "settings_private": render_placeholder("Private Settings", "🔑")
     else: render_private_home()
