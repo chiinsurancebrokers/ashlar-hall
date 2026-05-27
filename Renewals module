@@ -1,0 +1,532 @@
+"""
+HAL — Renewals Module
+Reads live data from the CHI Insurance Portal (Railway) via REST API.
+Generates AI emails via Claude · Sends via Gmail · WhatsApp via Twilio.
+
+Add to app.py:
+  1. from renewals_module import render_renewals
+  2. Sidebar nav: ("🔄", "renewals", "Renewals")
+  3. Home tile: ("🔄", "Renewals", "June renewals · Email · WhatsApp", "renewals", "live")
+  4. Router: elif module == "renewals": render_renewals()
+
+Streamlit secrets needed:
+  PORTAL_API_URL   = "https://your-app.up.railway.app"
+  PORTAL_API_KEY   = "your-chi-api-key"
+  GMAIL_SENDER     = "your@gmail.com"
+  GMAIL_APP_PASSWORD = "xxxx xxxx xxxx xxxx"
+  TWILIO_SID       = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  TWILIO_AUTH_TOKEN = "your_auth_token"
+  TWILIO_FROM      = "whatsapp:+14155238886"   # Twilio sandbox or approved number
+"""
+
+import streamlit as st
+import requests
+import json
+import smtplib
+import re
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from datetime import datetime, date, timedelta
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BANK INFO TEMPLATES (from CHI Portal)
+# ─────────────────────────────────────────────────────────────────────────────
+
+BANK_INFO = {
+    "3p": """
+<h3 style="color:#1976d2;">Τραπεζικοί Λογαριασμοί</h3>
+<p style="font-size:13px;color:#555;"><strong>ΔΙΚΑΙΟΥΧΟΣ: 3P INSURANCE AGENTS AE · ΑΦΜ 800478440</strong></p>
+<table style="width:100%;border-collapse:collapse;font-size:13px;">
+<tr style="background:#f5f5f5;"><td style="padding:8px;border:1px solid #ddd;"><strong>ALPHA BANK</strong></td><td style="padding:8px;border:1px solid #ddd;">GR4801401340134002320003540</td></tr>
+<tr><td style="padding:8px;border:1px solid #ddd;"><strong>ΕΘΝΙΚΗ ΤΡΑΠΕΖΑ</strong></td><td style="padding:8px;border:1px solid #ddd;">GR3901108910000089147029808</td></tr>
+<tr style="background:#f5f5f5;"><td style="padding:8px;border:1px solid #ddd;"><strong>EUROBANK</strong></td><td style="padding:8px;border:1px solid #ddd;">GR3302602210000370200676490</td></tr>
+<tr><td style="padding:8px;border:1px solid #ddd;"><strong>ΠΕΙΡΑΙΩΣ</strong></td><td style="padding:8px;border:1px solid #ddd;">GR6201720890005089072164520</td></tr>
+</table>""",
+
+    "ca": """
+<h3 style="color:#1976d2;">Τραπεζικοί Λογαριασμοί</h3>
+<p style="font-size:13px;color:#555;"><strong>ΔΙΚΑΙΟΥΧΟΣ: CA Insurance Agents · ΑΦΜ 800338387</strong></p>
+<table style="width:100%;border-collapse:collapse;font-size:13px;">
+<tr style="background:#f5f5f5;"><td style="padding:8px;border:1px solid #ddd;"><strong>ALPHA BANK</strong></td><td style="padding:8px;border:1px solid #ddd;">GR4101401460146002320015029</td></tr>
+<tr><td style="padding:8px;border:1px solid #ddd;"><strong>EUROBANK</strong></td><td style="padding:8px;border:1px solid #ddd;">GR6802600270000300201693054</td></tr>
+<tr style="background:#f5f5f5;"><td style="padding:8px;border:1px solid #ddd;"><strong>ΕΘΝΙΚΗ ΤΡΑΠΕΖΑ</strong></td><td style="padding:8px;border:1px solid #ddd;">GR7301106690000066900657306</td></tr>
+</table>""",
+
+    "bu": """
+<h3 style="color:#1976d2;">Κωδικός Πληρωμής RF</h3>
+<p style="font-size:13px;color:#555;"><strong>BROKERS UNION Α.Ε. · ΑΦΜ 800319742</strong></p>
+<div style="background:#e3f2fd;padding:20px;border-radius:8px;text-align:center;margin:15px 0;">
+<p style="margin:0 0 10px 0;font-size:14px;color:#666;">Κωδικός RF για πληρωμή σε οποιαδήποτε τράπεζα:</p>
+<p style="margin:0;font-size:20px;font-weight:bold;color:#1565c0;font-family:monospace;">{rf_code}</p>
+</div>""",
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _portal_url():
+    return st.secrets.get("PORTAL_API_URL", "").rstrip("/")
+
+def _portal_key():
+    return st.secrets.get("PORTAL_API_KEY", "")
+
+def _api_get(path, params=None):
+    """Call CHI Portal REST API. Returns (data, error_str)."""
+    base = _portal_url()
+    key  = _portal_key()
+    if not base:
+        return None, "PORTAL_API_URL not set in Streamlit secrets."
+    if not key:
+        return None, "PORTAL_API_KEY not set in Streamlit secrets."
+    try:
+        r = requests.get(
+            f"{base}{path}",
+            headers={"X-API-Key": key},
+            params=params,
+            timeout=15,
+        )
+        if r.status_code == 401:
+            return None, "API key rejected — check PORTAL_API_KEY in secrets."
+        if r.status_code != 200:
+            return None, f"Portal returned HTTP {r.status_code}: {r.text[:200]}"
+        return r.json(), None
+    except requests.exceptions.ConnectionError:
+        return None, f"Cannot reach portal at {base} — is it running on Railway?"
+    except Exception as e:
+        return None, f"Request error: {e}"
+
+
+def _days_badge(days):
+    if days <= 2:
+        return f'<span style="background:#dc2626;color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">🔴 {days}d</span>'
+    elif days <= 7:
+        return f'<span style="background:#d97706;color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">🟠 {days}d</span>'
+    elif days <= 14:
+        return f'<span style="background:#ca8a04;color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">🟡 {days}d</span>'
+    else:
+        return f'<span style="background:#16a34a;color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">🟢 {days}d</span>'
+
+
+def _send_gmail(to_email, subject, body_html):
+    """Send email via Gmail SMTP. Returns (ok, msg)."""
+    sender   = st.secrets.get("GMAIL_SENDER", "")
+    password = st.secrets.get("GMAIL_APP_PASSWORD", "").replace(" ", "")
+    if not sender or not password:
+        return False, "GMAIL_SENDER / GMAIL_APP_PASSWORD not set in secrets."
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = sender
+        msg["To"]      = to_email
+        msg.attach(MIMEText(body_html, "html", "utf-8"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender, password)
+            server.sendmail(sender, to_email, msg.as_string())
+        return True, "Sent"
+    except Exception as e:
+        return False, str(e)
+
+
+def _send_whatsapp(to_phone, message_body):
+    """Send WhatsApp via Twilio. Returns (ok, msg)."""
+    sid   = st.secrets.get("TWILIO_SID", "")
+    token = st.secrets.get("TWILIO_AUTH_TOKEN", "")
+    from_ = st.secrets.get("TWILIO_FROM", "whatsapp:+14155238886")
+    if not sid or not token:
+        return False, "TWILIO_SID / TWILIO_AUTH_TOKEN not set in secrets."
+
+    # Normalise phone number
+    phone = re.sub(r"[^\d+]", "", to_phone)
+    if not phone.startswith("+"):
+        phone = "+30" + phone.lstrip("0")  # default Greek country code
+    to_ = f"whatsapp:{phone}"
+
+    try:
+        r = requests.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+            auth=(sid, token),
+            data={"From": from_, "To": to_, "Body": message_body},
+            timeout=15,
+        )
+        if r.status_code in (200, 201):
+            return True, "Sent"
+        return False, f"Twilio error {r.status_code}: {r.json().get('message', r.text[:200])}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _build_email_html(policy, agent="3p"):
+    """Build the HTML renewal email body from policy dict."""
+    client_name  = policy.get("client_name", "Πελάτης")
+    policy_type  = policy.get("type", "Ασφαλιστήριο")
+    provider     = policy.get("insurer", "")
+    premium      = policy.get("premium", "")
+    expiry       = policy.get("expiry_date", policy.get("expiration_date", ""))
+    plate        = policy.get("vehicle_plate", policy.get("license_plate", ""))
+    rf_code      = policy.get("payment_code", "")
+
+    try:
+        exp_date = datetime.strptime(expiry[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except Exception:
+        exp_date = expiry
+
+    premium_str = f"EUR {float(premium):.2f}" if premium else ""
+    plate_str   = f"<p><strong>Αριθμός Κυκλοφορίας:</strong> {plate}</p>" if plate else ""
+
+    bank_html = BANK_INFO.get(agent, BANK_INFO["3p"])
+    if agent == "bu" and rf_code:
+        bank_html = bank_html.format(rf_code=rf_code)
+    elif agent == "bu":
+        bank_html = '<p style="color:#d32f2f;"><strong>⚠️ Παρακαλούμε επικοινωνήστε μαζί μας για κωδικό RF.</strong></p>'
+
+    subject = f"Ανανέωση Ασφαλιστηρίου – {policy_type}"
+    if provider:
+        subject += f" ({provider})"
+
+    body = f"""<html><body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+<div style="max-width:600px;margin:0 auto;padding:20px;">
+
+  <div style="background:#1a237e;padding:20px;border-radius:10px;margin-bottom:25px;text-align:center;">
+    <h2 style="color:white;margin:0;font-size:20px;">CHI Insurance Brokers</h2>
+    <p style="color:#90caf9;margin:6px 0 0 0;font-size:13px;">Ανακοίνωση Ανανέωσης</p>
+  </div>
+
+  <p>Αγαπητέ/ή <strong>{client_name}</strong>,</p>
+
+  <p>Σας ενημερώνουμε ότι το ασφαλιστήριό σας λήγει σύντομα και χρειάζεται ανανέωση:</p>
+
+  <div style="background:#f5f5f5;padding:16px;border-radius:8px;margin:20px 0;border-left:4px solid #1a237e;">
+    <p style="margin:0 0 6px 0;"><strong>Είδος ασφάλισης:</strong> {policy_type}{f" – {provider}" if provider else ""}</p>
+    {plate_str}
+    <p style="margin:0 0 6px 0;"><strong>Ημερομηνία λήξης:</strong> <span style="color:#d32f2f;font-weight:bold;">{exp_date}</span></p>
+    {"<p style='margin:0;'><strong>Ποσό ανανέωσης:</strong> <span style='font-size:18px;font-weight:bold;color:#1a237e;'>" + premium_str + "</span></p>" if premium_str else ""}
+  </div>
+
+  <p>Για να διατηρήσετε την ασφαλιστική σας κάλυψη αδιάλειπτη, παρακαλούμε προχωρήστε στην εξόφληση εγκαίρως.</p>
+
+  {bank_html}
+
+  <div style="margin-top:25px;padding:15px;background:#e8f5e9;border-radius:8px;">
+    <p style="margin:0;font-size:13px;color:#2e7d32;">
+      📞 Για οποιαδήποτε απορία επικοινωνήστε μαζί μας.<br>
+      ✉️ Αυτό το email στάλθηκε από το σύστημα ανανεώσεων CHI Insurance.
+    </p>
+  </div>
+
+  <p style="margin-top:20px;">Με εκτίμηση,<br><strong>CHI Insurance Brokers</strong></p>
+</div>
+</body></html>"""
+
+    return subject, body
+
+
+def _build_whatsapp_message(policy):
+    """Build the WhatsApp plain-text renewal message."""
+    client_name = policy.get("client_name", "")
+    policy_type = policy.get("type", "ασφαλιστήριο")
+    provider    = policy.get("insurer", "")
+    expiry      = policy.get("expiry_date", policy.get("expiration_date", ""))
+    premium     = policy.get("premium", "")
+    days_left   = policy.get("days_left", "")
+
+    try:
+        exp_date = datetime.strptime(expiry[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except Exception:
+        exp_date = expiry
+
+    premium_str = f"EUR {float(premium):.2f}" if premium else ""
+    days_str    = f" ({days_left} ημέρες)" if days_left != "" else ""
+
+    msg = f"""Αγαπητέ/ή {client_name},
+
+Σας ενημερώνουμε ότι το ασφαλιστήριό σας *{policy_type}{f" – {provider}" if provider else ""}* λήγει στις *{exp_date}*{days_str}.
+{"Ποσό ανανέωσης: *" + premium_str + "*" if premium_str else ""}
+
+Παρακαλούμε επικοινωνήστε μαζί μας για την ανανέωση της ασφαλιστικής σας κάλυψης.
+
+📞 CHI Insurance Brokers"""
+
+    return msg.strip()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN RENDERER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_renewals():
+    st.markdown("## 🔄 Renewals — Ανανεώσεις")
+    st.caption("Live data from CHI Insurance Portal · Email & WhatsApp outreach")
+
+    # ── Config check ────────────────────────────────────────────────────────
+    portal_ok  = bool(_portal_url() and _portal_key())
+    gmail_ok   = bool(st.secrets.get("GMAIL_SENDER") and st.secrets.get("GMAIL_APP_PASSWORD"))
+    twilio_ok  = bool(st.secrets.get("TWILIO_SID") and st.secrets.get("TWILIO_AUTH_TOKEN"))
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Portal API",  "✅ Connected" if portal_ok  else "❌ Not set")
+    c2.metric("Gmail",       "✅ Ready"     if gmail_ok   else "❌ Not set")
+    c3.metric("Twilio / WhatsApp", "✅ Ready" if twilio_ok else "❌ Not set")
+
+    if not portal_ok:
+        st.error("Ορίστε **PORTAL_API_URL** και **PORTAL_API_KEY** στα Streamlit secrets πρώτα.")
+        with st.expander("Πώς να ρυθμίσετε"):
+            st.code("""# Streamlit Cloud → Settings → Secrets
+PORTAL_API_URL   = "https://YOUR-APP.up.railway.app"
+PORTAL_API_KEY   = "your-chi-api-key"
+GMAIL_SENDER     = "your@gmail.com"
+GMAIL_APP_PASSWORD = "xxxx xxxx xxxx xxxx"
+TWILIO_SID       = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+TWILIO_AUTH_TOKEN = "your_auth_token"
+TWILIO_FROM      = "whatsapp:+14155238886"
+""", language="toml")
+        return
+
+    st.divider()
+
+    # ── Controls ────────────────────────────────────────────────────────────
+    col_a, col_b, col_c = st.columns([1, 1, 2])
+    with col_a:
+        days_filter = st.selectbox("Εμφάνιση ανανεώσεων", [7, 14, 30, 60, 90],
+                                   index=2, format_func=lambda x: f"Επόμενες {x} μέρες")
+    with col_b:
+        agent_default = st.selectbox("Default Agent", ["3p", "ca", "bu"],
+                                     format_func=lambda x: {"3p": "3P Insurance", "ca": "CA Insurance", "bu": "Brokers Union"}[x])
+    with col_c:
+        refresh = st.button("🔄 Ανανέωση από Portal", type="primary")
+
+    # ── Fetch data ────────────────────────────────────────────────────────
+    cache_key = f"renewals_data_{days_filter}"
+    if refresh or cache_key not in st.session_state:
+        with st.spinner("Φόρτωση από CHI Portal…"):
+            data, err = _api_get("/api/renewals")
+            if err:
+                # fallback: try /api/policies/expiring
+                data2, err2 = _api_get("/api/policies/expiring", {"days": days_filter})
+                if err2:
+                    st.error(f"Portal error: {err}")
+                    return
+                # wrap flat list into renewals format
+                all_p = data2 if isinstance(data2, list) else []
+                urgent   = [p for p in all_p if p.get("days_left", 99) <= 7]
+                soon     = [p for p in all_p if 7 < p.get("days_left", 99) <= 30]
+                upcoming = [p for p in all_p if p.get("days_left", 99) > 30]
+                data = {"urgent": urgent, "soon": soon, "upcoming": upcoming}
+            st.session_state[cache_key] = data
+
+    data = st.session_state.get(cache_key, {})
+
+    urgent   = data.get("urgent",   [])
+    soon     = data.get("soon",     [])
+    upcoming = data.get("upcoming", [])
+
+    # Filter by days_filter
+    def within(items, max_days):
+        return [p for p in items if p.get("days_left", 999) <= max_days]
+
+    all_renewals = within(urgent + soon + upcoming, days_filter)
+
+    # ── Summary KPIs ────────────────────────────────────────────────────────
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Σύνολο",        len(all_renewals))
+    k2.metric("🔴 Επείγοντα ≤7d",  len([p for p in all_renewals if p.get("days_left",99) <= 7]))
+    k3.metric("🟠 Σύντομα ≤14d",   len([p for p in all_renewals if 7 < p.get("days_left",99) <= 14]))
+    k4.metric("🟡 Επόμενο μήνα",   len([p for p in all_renewals if 14 < p.get("days_left",99) <= 30]))
+
+    st.divider()
+
+    if not all_renewals:
+        st.info(f"Δεν υπάρχουν ανανεώσεις για τις επόμενες {days_filter} μέρες.")
+        return
+
+    # ── Per-policy action table ─────────────────────────────────────────────
+    # Track sent status in session
+    if "renewal_sent" not in st.session_state:
+        st.session_state.renewal_sent = {}  # policy_id → {"email": bool, "wa": bool}
+
+    # Group header
+    sections = [
+        ("🔴 Επείγοντα — Λήγουν σε ≤ 7 μέρες",  [p for p in all_renewals if p.get("days_left",99) <= 7],   "#fef2f2"),
+        ("🟠 Σύντομα — Λήγουν σε 8–14 μέρες",   [p for p in all_renewals if 7 < p.get("days_left",99) <= 14], "#fff7ed"),
+        ("🟡 Επόμενος μήνας — 15–30 μέρες",      [p for p in all_renewals if 14 < p.get("days_left",99) <= 30], "#fefce8"),
+        ("🟢 Αργότερα — > 30 μέρες",              [p for p in all_renewals if p.get("days_left",99) > 30],    "#f0fdf4"),
+    ]
+
+    for section_title, policies, bg_color in sections:
+        if not policies:
+            continue
+
+        st.markdown(f"### {section_title}")
+
+        for idx, policy in enumerate(policies):
+            pid       = str(policy.get("id", idx))
+            client    = policy.get("client_name", "—")
+            ptype     = policy.get("type", "—")
+            provider  = policy.get("insurer", "—")
+            email     = policy.get("client_email", "")
+            phone     = policy.get("client_phone", "")
+            premium   = policy.get("premium", "")
+            days_left = policy.get("days_left", "—")
+            expiry    = policy.get("expiry_date", policy.get("expiration_date", ""))
+            plate     = policy.get("vehicle_plate", policy.get("license_plate", ""))
+
+            try:
+                exp_display = datetime.strptime(expiry[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+            except Exception:
+                exp_display = expiry
+
+            premium_display = f"EUR {float(premium):.2f}" if premium else "—"
+            sent_info = st.session_state.renewal_sent.get(pid, {})
+
+            with st.container():
+                st.markdown(
+                    f'<div style="background:{bg_color};border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;margin-bottom:10px;">',
+                    unsafe_allow_html=True,
+                )
+
+                # Row 1: client info + days badge
+                r1a, r1b = st.columns([4, 1])
+                with r1a:
+                    plate_str = f" · 🚗 {plate}" if plate else ""
+                    st.markdown(f"**{client}** · {ptype} · *{provider}*{plate_str}")
+                    st.caption(f"Λήξη: {exp_display} · Ποσό: {premium_display} · 📧 {email or '—'} · 📱 {phone or '—'}")
+                with r1b:
+                    st.markdown(_days_badge(days_left) if isinstance(days_left, int) else f"**{days_left}d**", unsafe_allow_html=True)
+
+                # Row 2: agent selector + action buttons
+                r2a, r2b, r2c, r2d, r2e = st.columns([1.2, 1, 1, 1, 1.2])
+
+                with r2a:
+                    agent = st.selectbox(
+                        "Agent",
+                        ["3p", "ca", "bu"],
+                        key=f"agent_{pid}",
+                        format_func=lambda x: {"3p": "3P", "ca": "CA", "bu": "BU"}[x],
+                        index=["3p", "ca", "bu"].index(agent_default),
+                        label_visibility="collapsed",
+                    )
+
+                # Generate email preview
+                with r2b:
+                    if st.button("✉️ Προεπισκόπηση", key=f"preview_{pid}", use_container_width=True):
+                        subj, body = _build_email_html(policy, agent)
+                        st.session_state[f"email_preview_{pid}"] = (subj, body)
+
+                # Send email
+                with r2c:
+                    email_sent = sent_info.get("email", False)
+                    btn_label  = "✅ Email" if email_sent else "📤 Email"
+                    if st.button(btn_label, key=f"email_{pid}", use_container_width=True, disabled=email_sent):
+                        if not email:
+                            st.error(f"Δεν υπάρχει email για {client}")
+                        else:
+                            subj, body = _build_email_html(policy, agent)
+                            ok, msg = _send_gmail(email, subj, body)
+                            if ok:
+                                st.session_state.renewal_sent.setdefault(pid, {})["email"] = True
+                                st.success(f"Email → {email}")
+                                st.rerun()
+                            else:
+                                st.error(f"Email αποτυχία: {msg}")
+
+                # Send WhatsApp
+                with r2d:
+                    wa_sent   = sent_info.get("wa", False)
+                    wa_label  = "✅ WA" if wa_sent else "💬 WhatsApp"
+                    if st.button(wa_label, key=f"wa_{pid}", use_container_width=True, disabled=wa_sent):
+                        if not phone:
+                            st.error(f"Δεν υπάρχει τηλέφωνο για {client}")
+                        else:
+                            msg_body = _build_whatsapp_message(policy)
+                            ok, msg  = _send_whatsapp(phone, msg_body)
+                            if ok:
+                                st.session_state.renewal_sent.setdefault(pid, {})["wa"] = True
+                                st.success(f"WhatsApp → {phone}")
+                                st.rerun()
+                            else:
+                                st.error(f"WhatsApp αποτυχία: {msg}")
+
+                # Sent status badge
+                with r2e:
+                    badges = []
+                    if sent_info.get("email"): badges.append("📧 Sent")
+                    if sent_info.get("wa"):    badges.append("💬 Sent")
+                    if badges:
+                        st.success(" · ".join(badges))
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            # Email preview expander
+            preview_key = f"email_preview_{pid}"
+            if preview_key in st.session_state:
+                subj, body = st.session_state[preview_key]
+                with st.expander(f"📧 Email preview — {client}", expanded=True):
+                    st.markdown(f"**Subject:** {subj}")
+                    # Show editable email address
+                    ec1, ec2 = st.columns([3, 1])
+                    with ec1:
+                        override_email = st.text_input("Αποστολή σε:", value=email, key=f"oe_{pid}")
+                    with ec2:
+                        if st.button("📤 Αποστολή", key=f"send_preview_{pid}", type="primary"):
+                            ok, err_msg = _send_gmail(override_email, subj, body)
+                            if ok:
+                                st.session_state.renewal_sent.setdefault(pid, {})["email"] = True
+                                st.success(f"✅ Εστάλη στο {override_email}")
+                                del st.session_state[preview_key]
+                                st.rerun()
+                            else:
+                                st.error(err_msg)
+                    st.components.v1.html(body, height=500, scrolling=True)
+
+    st.divider()
+
+    # ── Bulk Send ──────────────────────────────────────────────────────────
+    st.markdown("### 📦 Μαζική Αποστολή")
+    bc1, bc2, bc3 = st.columns(3)
+
+    with bc1:
+        if st.button("📤 Email σε ΟΛΟΥΣ (επείγοντα ≤7d)", use_container_width=True):
+            targets = [p for p in urgent if p.get("client_email")]
+            if not targets:
+                st.warning("Δεν υπάρχουν επείγοντα με email.")
+            else:
+                ok_count, fail_count = 0, 0
+                prog = st.progress(0)
+                for i, p in enumerate(targets):
+                    pid = str(p.get("id", i))
+                    subj, body = _build_email_html(p, agent_default)
+                    ok, _ = _send_gmail(p["client_email"], subj, body)
+                    if ok:
+                        st.session_state.renewal_sent.setdefault(pid, {})["email"] = True
+                        ok_count += 1
+                    else:
+                        fail_count += 1
+                    prog.progress((i + 1) / len(targets))
+                st.success(f"✅ {ok_count} emails εστάλησαν · ❌ {fail_count} αποτυχίες")
+                st.rerun()
+
+    with bc2:
+        if st.button("💬 WhatsApp σε ΟΛΟΥΣ (επείγοντα ≤7d)", use_container_width=True):
+            targets = [p for p in urgent if p.get("client_phone")]
+            if not targets:
+                st.warning("Δεν υπάρχουν επείγοντα με τηλέφωνο.")
+            else:
+                ok_count, fail_count = 0, 0
+                prog = st.progress(0)
+                for i, p in enumerate(targets):
+                    pid = str(p.get("id", i))
+                    msg_body = _build_whatsapp_message(p)
+                    ok, _ = _send_whatsapp(p["client_phone"], msg_body)
+                    if ok:
+                        st.session_state.renewal_sent.setdefault(pid, {})["wa"] = True
+                        ok_count += 1
+                    else:
+                        fail_count += 1
+                    prog.progress((i + 1) / len(targets))
+                st.success(f"✅ {ok_count} WhatsApp εστάλησαν · ❌ {fail_count} αποτυχίες")
+                st.rerun()
+
+    with bc3:
+        if st.button("🔁 Reset Sent Status", use_container_width=True):
+            st.session_state.renewal_sent = {}
+            st.rerun()
