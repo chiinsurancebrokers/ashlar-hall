@@ -1222,12 +1222,15 @@ TWILIO_FROM       = "whatsapp:+14155238886"
 
 def render_quotes():
     st.markdown("## 📊 Quote Engine")
-    st.caption("Live 2025 rates · Morgan Price · April · IMG · Instant comparison")
+    st.caption("Live 2025 rates · Morgan Price · April · IMG · PDF extraction · PPTX generation")
 
     tab_live, tab_pdf, tab_results = st.tabs([
-        "⚡ Instant Quote", "📤 Upload & Analyse PDF", "📋 Saved Results"
+        "⚡ Instant Quote (Rate Tables)",
+        "📄 PDF → AI Extraction → PPTX",
+        "📋 Saved Results",
     ])
 
+    # ══ TAB 1: INSTANT LIVE QUOTE ══════════════════════════════════════════
     with tab_live:
         if not RATES_LOADED:
             st.warning("rate_tables.py not found in repo. Add it alongside app.py.")
@@ -1239,7 +1242,7 @@ def render_quotes():
             q_name = st.text_input("Client name", placeholder="Katia Totikidou")
             q_age  = st.number_input("Age", min_value=0, max_value=80, value=45)
         with qc2:
-            q_area = st.radio("Coverage area", ["Area 1 — Europe (excl USA)", "Area 2 — Worldwide incl USA"])
+            q_area   = st.radio("Coverage area", ["Area 1 — Europe (excl USA)", "Area 2 — Worldwide incl USA"])
             area_key = "area1" if "Area 1" in q_area else "area2"
         with qc3:
             q_notes = st.text_area("Client priorities / notes", height=100,
@@ -1255,13 +1258,14 @@ def render_quotes():
                 st.session_state.quote_members.append({"name": m_name, "age": m_age})
                 st.rerun()
         for i, m in enumerate(st.session_state.quote_members):
-            mc1, mc2 = st.columns([4,1])
+            mc1, mc2 = st.columns([4, 1])
             mc1.markdown(f"👤 **{m['name']}** — Age {m['age']}")
             if mc2.button("✕", key=f"del_m_{i}") and len(st.session_state.quote_members) > 1:
-                st.session_state.quote_members.pop(i); st.rerun()
+                st.session_state.quote_members.pop(i)
+                st.rerun()
 
         st.markdown("### Plans to compare")
-        all_plans = [(c, p, n, cov, ded) for c, p, n, cov, ded in RATE_PLANS]
+        all_plans = list(RATE_PLANS)
         selected_plans = st.multiselect("Select plans",
             options=[p[2] for p in all_plans],
             default=["Morgan Price Standard", "Morgan Price Comprehensive",
@@ -1271,19 +1275,24 @@ def render_quotes():
             if not st.session_state.quote_members:
                 st.warning("Add at least one member.")
             else:
-                results = []
+                results  = []
                 plan_map = {p[2]: p for p in all_plans}
                 for plan_name in selected_plans:
-                    if plan_name not in plan_map: continue
+                    if plan_name not in plan_map:
+                        continue
                     carrier, plan_key, display, coverage, ded_note = plan_map[plan_name]
                     total = 0; member_rates = []; valid = True
                     for m in st.session_state.quote_members:
                         prem = lookup_premium(carrier, plan_key, m["age"], area_key)
-                        if prem is None: valid = False; break
-                        total += prem; member_rates.append((m["name"], m["age"], prem))
+                        if prem is None:
+                            valid = False; break
+                        total += prem
+                        member_rates.append((m["name"], m["age"], prem))
                     if valid:
-                        results.append({"plan": display, "carrier": carrier, "total": total,
-                                        "members": member_rates, "coverage": coverage, "deductible": ded_note})
+                        results.append({
+                            "plan": display, "carrier": carrier, "total": total,
+                            "members": member_rates, "coverage": coverage, "deductible": ded_note
+                        })
                 results.sort(key=lambda x: x["total"])
                 st.session_state["quote_results"] = results
                 st.session_state["quote_client"]  = q_name
@@ -1293,73 +1302,327 @@ def render_quotes():
 
         if st.session_state.get("quote_results"):
             results   = st.session_state["quote_results"]
-            client    = st.session_state.get("quote_client","Client")
-            area_disp = st.session_state.get("quote_area","Area 1")
-            members   = st.session_state.get("quote_members",[])
+            client    = st.session_state.get("quote_client", "Client")
+            area_disp = st.session_state.get("quote_area", "Area 1")
+            members   = st.session_state.get("quote_members", [])
             st.markdown("---")
             st.markdown(f"### 📋 Quote Comparison — {client or 'Client'}")
             st.caption(f"{area_disp} · {len(members)} member(s) · 2025 rates")
             cheapest = results[0]["total"]
             for i, r in enumerate(results):
-                diff = r["total"] - cheapest
-                badge = "🥇" if i==0 else "🥈" if i==1 else "🥉" if i==2 else "  "
+                diff     = r["total"] - cheapest
+                badge    = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "  "
                 diff_str = f"+€{diff:,.0f}/yr" if diff > 0 else "✅ Lowest"
-                color = "#EDFBF0" if i==0 else "white"
-                with st.container():
-                    st.markdown(f"""<div style="background:{color};border:1px solid #E8E0D5;border-radius:12px;padding:16px 20px;margin-bottom:10px">
-                        <div style="display:flex;justify-content:space-between;align-items:center">
-                            <div><span style="font-size:18px">{badge}</span>
-                            <strong style="font-size:16px;margin-left:8px">{r["plan"]}</strong>
-                            <span style="font-size:12px;color:#6B7280;margin-left:10px">{r["deductible"]}</span></div>
-                            <div style="text-align:right">
-                            <div style="font-size:22px;font-weight:800;color:#1C1410">€{r["total"]:,.0f}/yr</div>
-                            <div style="font-size:12px;color:#6B7280">{diff_str}</div></div>
-                        </div>
-                        <div style="margin-top:10px;font-size:12px;color:#6B7280">
-                        {" · ".join(f"{m[0]}: €{m[2]:,.0f}" for m in r["members"])}</div>
-                    </div>""", unsafe_allow_html=True)
+                color    = "#EDFBF0" if i == 0 else "white"
+                st.markdown(f"""<div style="background:{color};border:1px solid #E8E0D5;
+                    border-radius:12px;padding:16px 20px;margin-bottom:10px">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div><span style="font-size:18px">{badge}</span>
+                        <strong style="font-size:16px;margin-left:8px">{r["plan"]}</strong>
+                        <span style="font-size:12px;color:#6B7280;margin-left:10px">{r["deductible"]}</span></div>
+                        <div style="text-align:right">
+                        <div style="font-size:22px;font-weight:800;color:#1C1410">€{r["total"]:,.0f}/yr</div>
+                        <div style="font-size:12px;color:#6B7280">{diff_str}</div></div>
+                    </div>
+                    <div style="margin-top:10px;font-size:12px;color:#6B7280">
+                    {" · ".join(str(m[0]) + ": €" + f"{m[2]:,.0f}" for m in r["members"])}
+                    </div></div>""", unsafe_allow_html=True)
             st.divider()
             ec1, ec2 = st.columns(2)
             with ec1:
-                lines = [f"ASHLAR INSURANCE — Quote Comparison",
-                         f"Client: {client} | {area_disp} | {datetime.now().strftime('%d/%m/%Y')}", ""]
+                members_str = ", ".join(str(m["name"]) + " (" + str(m["age"]) + "y)" for m in members)
+                lines = [
+                    "ASHLAR INSURANCE — Quote Comparison",
+                    "Client: " + str(client) + " | " + str(area_disp) + " | " + datetime.now().strftime("%d/%m/%Y"),
+                    "Members: " + members_str,
+                    "",
+                ]
                 for r in results:
-                    lines.append(f"{r['plan']}: EUR {r['total']:,.0f}/year")
+                    lines.append(r["plan"] + ": EUR " + f"{r['total']:,.0f}/year")
                     for m in r["members"]:
-                        lines.append(f"  {m[0]} (age {m[1]}): EUR {m[2]:,.0f}")
+                        lines.append("  " + str(m[0]) + " (age " + str(m[1]) + "): EUR " + f"{m[2]:,.0f}")
                     lines.append("")
                 lines.append("Rates: Morgan Price EU 2025 / April LT 2025 / IMG GPMI Apr-2025")
                 st.download_button("📥 Download quote", "\n".join(lines), mime="text/plain", use_container_width=True)
             with ec2:
                 if st.button("💬 Send to HAL for narrative", use_container_width=True):
-                    qs = "\n".join(f"{r['plan']}: EUR {r['total']:,.0f}/yr" for r in results)
-                    notes_txt = ("Notes: " + q_notes) if q_notes else ""
-                    msg = f"Quote comparison for {client or 'client'} age {q_age}, {area_disp}:\n\n{qs}\n\n{notes_txt}\n\nWrite a professional email presenting these options and recommending the best fit."
-                    st.session_state.chat_history.append({"role":"user","content":msg})
+                    qs    = "\n".join(r["plan"] + ": EUR " + f"{r['total']:,.0f}/yr" for r in results)
+                    notes = ("Notes: " + q_notes) if q_notes else ""
+                    msg   = ("Quote comparison for " + str(client or "client") + " age " + str(q_age) + ", " + str(area_disp) +
+                             ":\n\n" + qs + "\n\n" + notes +
+                             "\n\nWrite a professional email presenting these options and recommending the best fit.")
+                    st.session_state.chat_history.append({"role": "user", "content": msg})
                     st.session_state.active_module = "hal_chat"
                     st.rerun()
             if st.button("🔄 New quote", key="reset_quote"):
                 for k in ["quote_results","quote_client","quote_notes","quote_area","quote_members"]:
-                    if k in st.session_state: del st.session_state[k]
+                    if k in st.session_state:
+                        del st.session_state[k]
                 st.rerun()
 
+    # ══ TAB 2: FULL PDF ENGINE (chi_quote_engine) ══════════════════════════
     with tab_pdf:
-        st.caption("Upload insurer quote PDFs · Claude extracts & compares")
-        uploaded = st.file_uploader("Upload quote PDFs", type=["pdf"], accept_multiple_files=True)
-        client_age   = st.number_input("Client age", min_value=0, max_value=100, value=45, key="pdf_age")
-        client_notes = st.text_area("Client priorities", key="pdf_notes")
-        if st.button("🚀 Analyse PDFs", type="primary", disabled=not uploaded):
-            api_key = get_api_key()
-            if api_key and uploaded:
-                with st.spinner(f"Analysing {len(uploaded)} quotes..."):
-                    pdf_names = [f.name for f in uploaded]
-                    import anthropic
-                    client = anthropic.Anthropic(api_key=api_key)
-                    r = client.messages.create(model="claude-sonnet-4-6", max_tokens=2000,
-                        system="You are an expert insurance broker.",
-                        messages=[{"role":"user","content":f"Compare these {len(uploaded)} insurance quotes for a {client_age}-year-old: {', '.join(pdf_names)}. Client priorities: {client_notes or 'standard coverage'}. Extract: insurer, plan name, annual premium, key coverage, deductibles, exclusions. Rank from best value to most expensive."}])
-                    st.markdown(r.content[0].text)
+        try:
+            from config       import BROKER_DEFAULTS, INTER_FILE_DELAY
+            from extraction   import compute_score, extract_insurance_data
+            from analysis     import generate_recommendation_analysis
+            from pptx_builder import generate_pptx
+            _QE_LOADED = True
+        except ImportError as _qe_err:
+            _QE_LOADED = False
+            st.error("Quote Engine modules not found: " + str(_qe_err))
+            st.info("Add `config.py`, `extraction.py`, `analysis.py`, `pptx_builder.py` to the HAL repo (same folder as `app.py`).")
 
+        if not _QE_LOADED:
+            return
+
+        import time as _time
+        import hashlib as _hl
+
+        api_key = get_api_key()
+
+        # ── SETTINGS ─────────────────────────────────────────────────────
+        st.markdown("### ⚙️ Ρυθμίσεις Παρουσίασης")
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            st.markdown("**👤 Μεσίτης**")
+            broker_name  = st.text_input("Όνομα",    value=BROKER_DEFAULTS["name"],  key="qe_broker_name")
+            broker_tel   = st.text_input("Τηλέφωνο", value=BROKER_DEFAULTS["tel"],   key="qe_broker_tel")
+            broker_email = st.text_input("Email",     value=BROKER_DEFAULTS["email"], key="qe_broker_email")
+        with r2:
+            st.markdown("**👥 Πελάτης**")
+            client_name = st.text_input("Επώνυμο / Όνομα", placeholder="π.χ. Τοτικίδη Κατία", key="qe_client_name")
+            n_members   = st.number_input("Αριθμός μελών", 1, 6, 2, key="qe_n_members")
+            qe_members  = []
+            for i in range(n_members):
+                mc1, mc2 = st.columns(2)
+                with mc1:
+                    age = st.number_input(f"Ηλικία #{i+1}", 0, 99, 30 if i==0 else 17, key=f"qe_age_{i}")
+                with mc2:
+                    role = st.selectbox("Ρόλος",
+                        ["Κύρια Ασφαλισμένη","Κύριος Ασφαλισμένος","Εξαρτώμενο Μέλος","Σύζυγος"],
+                        key=f"qe_role_{i}")
+                qe_members.append({"age": age, "role": role})
+        with r3:
+            st.markdown("**🖼️ Λογότυπο**")
+            logo_file  = st.file_uploader("PNG / JPG (προαιρετικό)", type=["png","jpg","jpeg"], key="qe_logo")
+            logo_bytes = logo_file.read() if logo_file else None
+
+        st.markdown("---")
+
+        # ── PDF UPLOAD ────────────────────────────────────────────────────
+        st.markdown("### 📄 Φόρτωσε τις Ασφαλιστικές Προσφορές (PDF)")
+        st.info("Φόρτωσε 2–4 PDF προσφορές. Το Claude εξάγει αυτόματα όλα τα στοιχεία.", icon="ℹ️")
+        uploaded_files = st.file_uploader("Επίλεξε PDF αρχεία", type="pdf",
+                                           accept_multiple_files=True, key="qe_pdfs")
+        if not uploaded_files:
+            h1, h2, h3 = st.columns(3)
+            with h1: st.markdown("**1️⃣ Ανέβασε PDFs**\nΌλες οι προσφορές που θέλεις να συγκρίνεις")
+            with h2: st.markdown("**2️⃣ Claude τα αναλύει**\nΕξάγει κεφάλαια, απαλλαγές, καλύψεις")
+            with h3: st.markdown("**3️⃣ Download PPTX**\nΈτοιμη παρουσίαση με το brand σου")
+            return
+
+        if "qe_proposals" not in st.session_state: st.session_state.qe_proposals = {}
+        if "qe_pdf_cache" not in st.session_state: st.session_state.qe_pdf_cache = {}
+
+        if st.button("🤖 Ανάλυση με Claude API", type="primary", disabled=not api_key, key="qe_analyse"):
+            if not api_key:
+                st.error("Χρειάζεσαι Claude API key!")
+            else:
+                progress = st.progress(0, text="Αρχικοποίηση...")
+                st.session_state.qe_proposals = {}
+                total = len(uploaded_files)
+                for idx, uf in enumerate(uploaded_files):
+                    progress.progress(idx / total, text=f"Ανάλυση {idx+1}/{total}: {uf.name}...")
+                    try:
+                        pdf_bytes = uf.read()
+                        pdf_hash  = _hl.md5(pdf_bytes).hexdigest()
+                        if pdf_hash in st.session_state.qe_pdf_cache:
+                            data = st.session_state.qe_pdf_cache[pdf_hash]
+                            st.success(f"⚡ {uf.name} — από cache")
+                        else:
+                            data = extract_insurance_data(pdf_bytes, api_key, filename=uf.name)
+                            st.session_state.qe_pdf_cache[pdf_hash] = data
+                            st.success(f"✅ {uf.name} → {data.get('insurer','')} {data.get('plan_name','')}")
+                        st.session_state.qe_proposals[uf.name] = data
+                    except Exception as e:
+                        st.error(f"❌ Σφάλμα στο {uf.name}: {e}")
+                    if idx < total - 1:
+                        _time.sleep(INTER_FILE_DELAY)
+                progress.progress(1.0, text="✅ Ολοκληρώθηκε!")
+
+        if st.session_state.get("qe_proposals"):
+            proposals_list = list(st.session_state.qe_proposals.values())
+            file_names     = list(st.session_state.qe_proposals.keys())
+
+            st.markdown("---")
+            st.markdown("### 📊 Εξαχθέντα Στοιχεία — Βαθμολογία Κάλυψης")
+            score_cols = st.columns(len(proposals_list))
+            for col, prop in zip(score_cols, proposals_list):
+                sc    = compute_score(prop)
+                emoji = "🟢" if sc >= 7 else ("🟡" if sc >= 5 else "🔴")
+                with col:
+                    st.metric(label=f"{prop.get('insurer','?')} — {prop.get('plan_name','?')[:18]}",
+                              value=f"{sc} / 10", delta=f"{emoji} Βαθμολογία Κάλυψης")
+
+            st.caption("Μπορείς να επεξεργαστείς οποιοδήποτε πεδίο πριν τη δημιουργία.")
+            st.markdown("---")
+
+            edited_proposals = []
+            prop_tabs = st.tabs([f"📋 {p.get('insurer','?')} — {p.get('plan_name','?')[:20]}"
+                                 for p in proposals_list])
+
+            for ptab, prop, fname in zip(prop_tabs, proposals_list, file_names):
+                with ptab:
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.markdown("**📌 Βασικά Στοιχεία**")
+                        prop["insurer"]        = st.text_input("Ασφαλιστική",       prop.get("insurer",""),            key=f"ins_{fname}")
+                        prop["plan_name"]      = st.text_input("Πλάνο",             prop.get("plan_name",""),          key=f"plan_{fname}")
+                        prop["annual_premium"] = st.text_input("Ετήσιο Ασφάλιστρο", str(prop.get("annual_premium","")),key=f"prem_{fname}")
+                        cur_val = prop.get("currency","EUR") or "EUR"
+                        cur_list = ["EUR","USD","GBP"]
+                        prop["currency"]       = st.selectbox("Νόμισμα", cur_list,
+                                                    index=cur_list.index(cur_val) if cur_val in cur_list else 0,
+                                                    key=f"cur_{fname}")
+                        prop["deductible"]     = st.text_input("Απαλλαγή",          prop.get("deductible",""),         key=f"ded_{fname}")
+                        prop["max_coverage"]   = st.text_input("Μέγιστο Κεφάλαιο",  str(prop.get("max_coverage","")), key=f"maxcov_{fname}")
+                        prop["geography"]      = st.text_input("Γεωγραφία",          prop.get("geography",""),          key=f"geo_{fname}")
+                        prop["hospital_class"] = st.text_input("Θέση Νοσηλείας",    prop.get("hospital_class",""),     key=f"hosp_{fname}")
+                        prop["waiting_period"] = st.text_input("Αναμονή",            prop.get("waiting_period",""),     key=f"wait_{fname}")
+                        prop["preexisting"]    = st.text_input("Προϋπ. Παθήσεις",   prop.get("preexisting",""),        key=f"preex_{fname}")
+                    with col2:
+                        st.markdown("**✅ Καλύψεις**")
+                        prop["inpatient"]               = st.text_input("Νοσηλεία",             prop.get("inpatient",""),               key=f"inp_{fname}")
+                        prop["outpatient_limit"]        = st.text_input("Εξωνοσοκ. Όριο",      str(prop.get("outpatient_limit","")),   key=f"outp_{fname}")
+                        prop["outpatient_pct"]          = st.text_input("Εξωνοσοκ. %",          str(prop.get("outpatient_pct") or ""),  key=f"outpct_{fname}")
+                        prop["mri_ct_pet"]              = st.text_input("MRI / CT / PET",       prop.get("mri_ct_pet",""),              key=f"mri_{fname}")
+                        prop["cancer"]                  = st.text_input("Καρκίνος",              prop.get("cancer",""),                  key=f"can_{fname}")
+                        prop["physiotherapy"]           = st.text_input("Φυσιοθεραπεία",         prop.get("physiotherapy",""),           key=f"physio_{fname}")
+                        prop["chronic_conditions"]      = st.text_input("Χρόνιες Παθήσεις",     prop.get("chronic_conditions",""),      key=f"chron_{fname}")
+                        prop["evacuation_repatriation"] = st.text_input("Εκκένωση / Μεταφορά",  prop.get("evacuation_repatriation",""), key=f"evac_{fname}")
+                        prop["psychiatric_inpatient"]   = st.text_input("Ψυχ. Νοσηλεία",        prop.get("psychiatric_inpatient",""),   key=f"psyin_{fname}")
+                        prop["psychiatric_outpatient"]  = st.text_input("Ψυχ. Εξωτερικά",      prop.get("psychiatric_outpatient",""),  key=f"psyout_{fname}")
+                    with col3:
+                        st.markdown("**➕ Πρόσθετα & Παρατηρήσεις**")
+                        prop["dental_emergency"]   = st.text_input("Οδοντ. Έκτακτη",        prop.get("dental_emergency",""),   key=f"dent_{fname}")
+                        prop["wellness_screening"] = st.text_input("Προληπτικός Έλεγχος",    prop.get("wellness_screening",""), key=f"well_{fname}")
+                        prop["cancer_screening"]   = st.text_input("Έλεγχος Καρκίνου",       prop.get("cancer_screening",""),   key=f"canscr_{fname}")
+                        prop["organ_transplant"]   = st.text_input("Μεταμόσχευση Οργάνου",   prop.get("organ_transplant",""),   key=f"organ_{fname}")
+                        prop["hospice_care"]       = st.text_input("Ανακουφιστική Φροντίδα", prop.get("hospice_care",""),       key=f"hosp2_{fname}")
+                        prop["home_nursing"]       = st.text_input("Νοσηλεία Κατ' Οίκον",   prop.get("home_nursing",""),       key=f"homenur_{fname}")
+                        st.markdown("**💳 Τρόπος Πληρωμής**")
+                        freq_options = ["Μηνιαία","Τριμηνιαία","Εξαμηνιαία","Ετήσια"]
+                        cur_freq = prop.get("payment_frequency") or "Ετήσια"
+                        if cur_freq not in freq_options: cur_freq = "Ετήσια"
+                        prop["payment_frequency"] = st.selectbox("Συχνότητα πληρωμής", freq_options,
+                            index=freq_options.index(cur_freq), key=f"freq_{fname}")
+                        st.markdown("**📝 Παρατηρήσεις**")
+                        notes_raw  = prop.get("key_notes") or []
+                        notes_str  = "\n".join(notes_raw) if isinstance(notes_raw, list) else str(notes_raw)
+                        edited_notes = st.text_area("Μία παρατήρηση ανά γραμμή", notes_str,
+                            height=120, key=f"notes_{fname}")
+                        prop["key_notes"] = [n.strip() for n in edited_notes.splitlines() if n.strip()]
+                    edited_proposals.append(prop)
+
+            # ── RECOMMENDED ───────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("### 🎯 Επιλογή Πρότασης")
+            insurer_labels = [
+                p.get("insurer","") + " — " + p.get("plan_name","") + " (" + p.get("currency","€") + str(p.get("annual_premium","—")) + ")"
+                for p in edited_proposals
+            ]
+            rec_idx = st.selectbox("Ποια πρόταση ως **ΠΡΟΤΕΙΝΟΜΕΝΗ**;",
+                range(len(insurer_labels)), format_func=lambda i: insurer_labels[i], key="qe_rec_idx")
+
+            # ── AI ANALYSIS ───────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("### 🧠 Ανάλυση & Αιτιολόγηση Πρότασης")
+            st.info("Το Claude αναλύει τις προσφορές και παράγει εξατομικευμένη αιτιολόγηση.", icon="💡")
+
+            if "qe_analysis" not in st.session_state:
+                st.session_state.qe_analysis = None
+
+            if st.button("🔍 Δημιούργησε Ανάλυση", type="secondary",
+                         disabled=not api_key, key="qe_gen_analysis"):
+                if not client_name:
+                    st.warning("Συμπλήρωσε το όνομα του πελάτη!")
+                else:
+                    with st.spinner("Δημιουργία ανάλυσης με Claude..."):
+                        try:
+                            st.session_state.qe_analysis = generate_recommendation_analysis(
+                                proposals=edited_proposals, recommended_idx=rec_idx,
+                                client_name=client_name, client_members=qe_members, api_key=api_key,
+                            )
+                            st.success("✅ Ανάλυση ολοκληρώθηκε!")
+                        except Exception as e:
+                            st.error(f"❌ Σφάλμα: {e}")
+
+            analysis = st.session_state.get("qe_analysis")
+            if analysis:
+                st.markdown(
+                    "<div style='background:#1C3F5E;border-radius:10px;padding:1.2em 1.6em;margin-bottom:1em'>"
+                    "<p style='color:#F59E0B;font-size:1.2em;font-weight:700;margin:0'>"
+                    + analysis.get("headline","") + "</p></div>",
+                    unsafe_allow_html=True
+                )
+                st.markdown("#### 📝 Αιτιολόγηση")
+                st.markdown(analysis.get("main_rationale",""))
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.markdown("#### ✅ Βασικοί Λόγοι")
+                    for reason in analysis.get("key_reasons",[]): st.markdown(f"- {reason}")
+                    st.markdown("#### 🎯 Κριτήρια")
+                    for factor in analysis.get("decision_factors",[]): st.markdown(f"- {factor}")
+                with col_b:
+                    st.markdown("#### 📊 Αξιολόγηση")
+                    tag_colors = {"ΑΡΙΣΤΟ":"#27AE60","ΚΑΛΟ":"#00B4D8","ΜΕΣΑΙΟ":"#E67E22","ΠΕΡΙΟΡΙΣΜΕΝΟ":"#E74C3C"}
+                    for v in analysis.get("plan_verdicts",[]):
+                        color = tag_colors.get(v.get("tag",""),"#666")
+                        st.markdown(
+                            "<div style='border-left:4px solid " + color + ";background:#F4F9FF;"
+                            "border-radius:4px;padding:0.6em 1em;margin-bottom:0.5em'>"
+                            "<strong>" + v.get("insurer","") + " — " + v.get("plan","") + "</strong>"
+                            "<span style='background:" + color + ";color:white;border-radius:4px;"
+                            "padding:2px 8px;font-size:0.75em;margin-left:8px'>" + v.get("tag","") + "</span><br/>"
+                            "<span style='color:#444;font-size:0.9em'>" + v.get("verdict","") + "</span></div>",
+                            unsafe_allow_html=True
+                        )
+                    if analysis.get("key_concerns"):
+                        st.markdown("#### ⚠️ Σημεία Προσοχής")
+                        for c in analysis.get("key_concerns",[]): st.markdown(f"- {c}")
+
+            # ── GENERATE PPTX ─────────────────────────────────────────────
+            st.markdown("---")
+            if st.button("🎨 Δημιουργία Παρουσίασης PPTX", type="primary", key="qe_gen_pptx"):
+                if not client_name:
+                    st.warning("Συμπλήρωσε το όνομα του πελάτη!")
+                else:
+                    with st.spinner("Δημιουργία παρουσίασης..."):
+                        try:
+                            pptx_bytes = generate_pptx(
+                                client_name=client_name, client_members=qe_members,
+                                proposals=edited_proposals, recommended_idx=rec_idx,
+                                broker_name=broker_name, broker_tel=broker_tel,
+                                broker_email=broker_email, logo_bytes=logo_bytes,
+                                analysis=st.session_state.get("qe_analysis"),
+                            )
+                            fname_out = client_name.replace(" ","_") + "_Insurance_" + datetime.now().strftime("%Y%m") + ".pptx"
+                            st.download_button(
+                                label="⬇️ Download Παρουσίαση", data=pptx_bytes,
+                                file_name=fname_out,
+                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                            )
+                            st.success("✅ '" + fname_out + "' είναι έτοιμη!")
+                        except Exception as e:
+                            import traceback
+                            st.error("Σφάλμα: " + str(e))
+                            st.code(traceback.format_exc())
+
+        elif uploaded_files and not st.session_state.get("qe_proposals"):
+            st.info("👆 Πάτα 'Ανάλυση με Claude API' για να εξαχθούν τα στοιχεία από τα PDFs.")
+
+    # ══ TAB 3: SAVED RESULTS ═══════════════════════════════════════════════
     with tab_results:
         st.info("Quotes generated in the Instant Quote tab appear here. Use 'Send to HAL' to draft a client email.")
 
