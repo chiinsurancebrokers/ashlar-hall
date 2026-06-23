@@ -799,22 +799,43 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     code_exec_system = system + """
 
 CODE EXECUTION — you have a sandboxed Python/Bash environment (no internet access inside it).
-Use it whenever a request needs an actual computed or generated artifact rather than a description:
-- Generating a real PDF, PPTX, or other file (e.g. ReportLab, python-pptx are pre-installed)
-- Precise calculations, data processing, or anything error-prone to do by reasoning alone
-After creating a file in the sandbox, ALWAYS emit it back to the user by running, e.g.:
+You MUST use it — not just describe what code would do — whenever the user asks for:
+- An actual file: PDF, PPTX, Excel, image, etc. (ReportLab, python-pptx, openpyxl, Pillow are pre-installed)
+- A real computed result: precise calculations, data processing, anything error-prone by reasoning alone
+Do NOT paste a Python script in your text reply and tell the user to run it themselves — that is the
+WRONG behavior for this assistant. Instead, write the script INTO THE SANDBOX, RUN it there, and hand
+back the finished artifact. After creating a file in the sandbox, ALWAYS emit it back by running, e.g.:
   echo "===FILE:report.pdf===" && base64 report.pdf && echo "===ENDFILE==="
-so the surrounding application can detect, decode, and offer it as a download. Do this for every
-file you create that the user should receive. Don't just say a file was created — emit it."""
-                    response = client.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=4096,
+so the surrounding application can detect, decode, and offer it as a download. Do this for every file
+you create that the user should receive. If you find yourself about to write a code block in your text
+reply for the user to copy, stop — run it in the sandbox instead."""
+                    response = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                        betas=["code-execution-2025-08-25"],
                     )
+                    all_blocks = list(response.content)
+
+                    # Code execution on a non-trivial task (e.g. building a multi-section PDF) can
+                    # pause mid-turn; resubmitting lets Claude continue rather than the user seeing a
+                    # cut-off result. Accumulate blocks from every turn — the file/text Claude produced
+                    # before a pause must not be dropped when a later turn's response replaces `response`.
+                    _continue_attempts = 0
+                    while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
+                        messages = messages + [{"role": "assistant", "content": response.content}]
+                        response = client.beta.messages.create(
+                            model="claude-sonnet-4-6", max_tokens=8192,
+                            system=code_exec_system, messages=messages,
+                            tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                            betas=["code-execution-2025-08-25"],
+                        )
+                        all_blocks.extend(response.content)
+                        _continue_attempts += 1
 
                     reply_parts = []
                     generated_files = []  # list of (filename, raw_bytes)
-                    for block in response.content:
+                    for block in all_blocks:
                         if getattr(block, "type", None) == "text":
                             reply_parts.append(block.text)
                         elif getattr(block, "type", None) == "bash_code_execution_tool_result":
