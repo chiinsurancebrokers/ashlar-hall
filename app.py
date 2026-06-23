@@ -214,6 +214,17 @@ def search_conversations(conv_ws, query, limit=20):
 def summarise_memory_for_context(recent_msgs, max_msgs=MEMORY_MAX_INJECT):
     if not recent_msgs:
         return ""
+    # Drop stale HAL replies that paste a fenced ```python/```pptx code block instead of
+    # running it — these predate code execution being wired up and, if replayed into context,
+    # act as a strong few-shot example pulling new replies back toward the old "paste, don't
+    # run" behavior, overriding the explicit instruction not to do that.
+    def _is_stale_pasted_code(m):
+        return m["role"] == "assistant" and bool(
+            re.search(r"```(?:python|py)?\s*\n.{200,}", m["content"], re.DOTALL)
+        )
+    recent_msgs = [m for m in recent_msgs if not _is_stale_pasted_code(m)]
+    if not recent_msgs:
+        return ""
     msgs = recent_msgs[-max_msgs:]
     lines = [f"\n\n=== ROLLING MEMORY ({MEMORY_WINDOW_DAYS} days) — your recent business conversations ==="]
     current_session = None
@@ -808,7 +819,12 @@ back the finished artifact. After creating a file in the sandbox, ALWAYS emit it
   echo "===FILE:report.pdf===" && base64 report.pdf && echo "===ENDFILE==="
 so the surrounding application can detect, decode, and offer it as a download. Do this for every file
 you create that the user should receive. If you find yourself about to write a code block in your text
-reply for the user to copy, stop — run it in the sandbox instead."""
+reply for the user to copy, stop — run it in the sandbox instead.
+
+IMPORTANT — if the ROLLING MEMORY section above contains earlier HAL replies that pasted Python/code as
+text instead of running it, those are recorded mistakes from before code execution was wired up. Do NOT
+treat them as a style to follow. This instruction always overrides that pattern, no matter how many
+times it appears in memory or chat history above."""
                     response = client.beta.messages.create(
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
