@@ -1109,10 +1109,18 @@ times it appears in memory or chat history above."""
 
                 reply_parts = []
                 generated_files = []  # list of (filename, raw_bytes)
+                tool_diagnostics = []  # human-readable trace of each tool call
                 for block in all_blocks:
                     btype = getattr(block, "type", None)
                     if btype == "text":
                         reply_parts.append(block.text)
+                        continue
+
+                    # Track which tools HAL invoked, so if nothing visible comes out
+                    # we can show the user what was attempted instead of going silent.
+                    if btype in ("server_tool_use", "tool_use"):
+                        tool_name = getattr(block, "name", "?")
+                        tool_diagnostics.append(f"→ invoked `{tool_name}`")
                         continue
 
                     # Code execution returns TWO different result block types:
@@ -1120,42 +1128,70 @@ times it appears in memory or chat history above."""
                     #   • code_execution_tool_result       — when HAL runs a Python script
                     # The SINGLE-SCRIPT EXECUTION rule pushes HAL toward Python, which
                     # means most file emissions land in the Python block type. Parsing
-                    # only bash would silently drop every PDF HAL builds from Python —
-                    # the user sees "(no text response)" even though the file was made.
+                    # only bash would silently drop every PDF HAL builds from Python.
                     if btype not in ("bash_code_execution_tool_result",
                                      "code_execution_tool_result"):
                         continue
 
                     content = getattr(block, "content", None)
                     stdout = getattr(content, "stdout", "") if content else ""
+                    stderr = getattr(content, "stderr", "") if content else ""
+                    retcode = getattr(content, "return_code", None) if content else None
+                    err_type = getattr(content, "type", None) if content else None  # 'code_execution_tool_result_error' on failure
+
+                    files_before = len(generated_files)
                     for fname, b64data in re.findall(
                         r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
                     ):
                         try:
                             generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
-                        except Exception:
-                            pass  # malformed emit — skip, text reply still shows below
+                        except Exception as _decode_e:
+                            tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
 
                     # Python code_execution also returns files via content.content as
                     # CodeExecutionOutput entries (file_id, type="code_execution_output").
-                    # If HAL ever uses that path instead of base64-stdout, surface it too.
                     inner = getattr(content, "content", None) or []
                     for out in inner:
                         if getattr(out, "type", None) == "code_execution_output":
                             fid = getattr(out, "file_id", "") or ""
-                            # We don't have the file bytes here (would need a second API
-                            # call to fetch by file_id), so just log a marker into stdout.
-                            # Falling through is safer than crashing.
                             if fid:
-                                reply_parts.append(f"[file produced: {fid}]")
+                                tool_diagnostics.append(f"📁 file output (file_id={fid}) — fetch path not yet wired")
 
-                if reply_parts:
+                    files_this_block = len(generated_files) - files_before
+                    # Diagnostic line for this code execution result
+                    if err_type and "error" in str(err_type).lower():
+                        tool_diagnostics.append(
+                            f"❌ execution error ({btype}): {stderr.strip()[:500] or 'no stderr'}"
+                        )
+                    elif retcode not in (None, 0):
+                        tool_diagnostics.append(
+                            f"⚠️ exit {retcode} ({btype}) — stderr: {stderr.strip()[:300] or '(empty)'}"
+                        )
+                    elif files_this_block == 0 and stderr.strip():
+                        tool_diagnostics.append(
+                            f"ℹ️ {btype} ran OK but emitted no file. stderr: {stderr.strip()[:300]}"
+                        )
+
+                if reply_parts and generated_files:
                     reply = "\n".join(reply_parts).strip()
+                elif reply_parts and not generated_files:
+                    # HAL wrote text but no file came out. If we have diagnostics, add them.
+                    reply = "\n".join(reply_parts).strip()
+                    if tool_diagnostics:
+                        reply += "\n\n---\n**Διαγνωστικά / Diagnostics:**\n" + "\n".join(tool_diagnostics)
                 elif generated_files:
                     _file_chips = " · ".join(f"📎 **{fn}**" for fn, _ in generated_files)
                     reply = f"Έτοιμο. / Done. {_file_chips} — διαθέσιμο για λήψη παρακάτω."
                 else:
-                    reply = "⚠️ Δεν ελήφθη απάντηση από τον HAL. Πάτησε Retry / Regenerate παρακάτω, ή ξαναδιατύπωσε. / No response — try Retry / Regenerate below, or rephrase."
+                    # Truly nothing came back. Show whatever we know about what HAL tried.
+                    if tool_diagnostics:
+                        reply = (
+                            "⚠️ Ο HAL δεν επέστρεψε κείμενο ούτε αρχείο. Τι έτρεξε:\n\n"
+                            + "\n".join(tool_diagnostics)
+                            + "\n\n_Πάτησε Retry / Regenerate παρακάτω._"
+                        )
+                    else:
+                        reply = "⚠️ Δεν ελήφθη απάντηση από τον HAL. Πάτησε Retry / Regenerate παρακάτω. / No response — try Retry / Regenerate below."
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
                 st.session_state["hal_last_files"] = generated_files  # replace, even if empty — avoid showing stale files from a prior turn
                 if not is_private:
