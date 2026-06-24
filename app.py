@@ -1110,20 +1110,52 @@ times it appears in memory or chat history above."""
                 reply_parts = []
                 generated_files = []  # list of (filename, raw_bytes)
                 for block in all_blocks:
-                    if getattr(block, "type", None) == "text":
+                    btype = getattr(block, "type", None)
+                    if btype == "text":
                         reply_parts.append(block.text)
-                    elif getattr(block, "type", None) == "bash_code_execution_tool_result":
-                        content = getattr(block, "content", None)
-                        stdout = getattr(content, "stdout", "") if content else ""
-                        for fname, b64data in re.findall(
-                            r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
-                        ):
-                            try:
-                                generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
-                            except Exception:
-                                pass  # malformed emit — skip, text reply still shows below
+                        continue
 
-                reply = "\n".join(reply_parts).strip() or "(no text response)"
+                    # Code execution returns TWO different result block types:
+                    #   • bash_code_execution_tool_result  — when HAL runs a bash command
+                    #   • code_execution_tool_result       — when HAL runs a Python script
+                    # The SINGLE-SCRIPT EXECUTION rule pushes HAL toward Python, which
+                    # means most file emissions land in the Python block type. Parsing
+                    # only bash would silently drop every PDF HAL builds from Python —
+                    # the user sees "(no text response)" even though the file was made.
+                    if btype not in ("bash_code_execution_tool_result",
+                                     "code_execution_tool_result"):
+                        continue
+
+                    content = getattr(block, "content", None)
+                    stdout = getattr(content, "stdout", "") if content else ""
+                    for fname, b64data in re.findall(
+                        r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
+                    ):
+                        try:
+                            generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
+                        except Exception:
+                            pass  # malformed emit — skip, text reply still shows below
+
+                    # Python code_execution also returns files via content.content as
+                    # CodeExecutionOutput entries (file_id, type="code_execution_output").
+                    # If HAL ever uses that path instead of base64-stdout, surface it too.
+                    inner = getattr(content, "content", None) or []
+                    for out in inner:
+                        if getattr(out, "type", None) == "code_execution_output":
+                            fid = getattr(out, "file_id", "") or ""
+                            # We don't have the file bytes here (would need a second API
+                            # call to fetch by file_id), so just log a marker into stdout.
+                            # Falling through is safer than crashing.
+                            if fid:
+                                reply_parts.append(f"[file produced: {fid}]")
+
+                if reply_parts:
+                    reply = "\n".join(reply_parts).strip()
+                elif generated_files:
+                    _file_chips = " · ".join(f"📎 **{fn}**" for fn, _ in generated_files)
+                    reply = f"Έτοιμο. / Done. {_file_chips} — διαθέσιμο για λήψη παρακάτω."
+                else:
+                    reply = "⚠️ Δεν ελήφθη απάντηση από τον HAL. Πάτησε Retry / Regenerate παρακάτω, ή ξαναδιατύπωσε. / No response — try Retry / Regenerate below, or rephrase."
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
                 st.session_state["hal_last_files"] = generated_files  # replace, even if empty — avoid showing stale files from a prior turn
                 if not is_private:
