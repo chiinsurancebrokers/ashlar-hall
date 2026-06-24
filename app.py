@@ -1027,7 +1027,7 @@ times it appears in memory or chat history above."""
                     model="claude-sonnet-4-6", max_tokens=8192,
                     system=code_exec_system, messages=messages,
                     tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                    betas=["code-execution-2025-08-25"],
+                    betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
                 )
                 all_blocks = list(response.content)
 
@@ -1042,7 +1042,7 @@ times it appears in memory or chat history above."""
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                        betas=["code-execution-2025-08-25"],
+                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
                     )
                     all_blocks.extend(response.content)
                     _continue_attempts += 1
@@ -1091,7 +1091,7 @@ times it appears in memory or chat history above."""
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                        betas=["code-execution-2025-08-25"],
+                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
                     )
                     all_blocks.extend(response.content)
                     _nudge_attempts += 1
@@ -1102,7 +1102,7 @@ times it appears in memory or chat history above."""
                             model="claude-sonnet-4-6", max_tokens=8192,
                             system=code_exec_system, messages=messages,
                             tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                            betas=["code-execution-2025-08-25"],
+                            betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
                         )
                         all_blocks.extend(response.content)
                         _continue_attempts += 1
@@ -1150,12 +1150,42 @@ times it appears in memory or chat history above."""
 
                     # Python code_execution also returns files via content.content as
                     # CodeExecutionOutput entries (file_id, type="code_execution_output").
+                    # The SINGLE-SCRIPT EXECUTION rule in the system prompt pushes HAL
+                    # toward Python — when HAL builds a PDF in a Python script and
+                    # writes it to disk, the file does NOT come back as base64 in stdout
+                    # the way bash heredocs do. Instead it lands in Anthropic's Files
+                    # API and is referenced by file_id. We must fetch it explicitly via
+                    # client.beta.files.download(file_id). Without this fetch, every
+                    # Python-produced PDF silently vanishes — HAL runs successfully,
+                    # the file exists server-side, but the user sees a blank screen.
                     inner = getattr(content, "content", None) or []
                     for out in inner:
                         if getattr(out, "type", None) == "code_execution_output":
                             fid = getattr(out, "file_id", "") or ""
-                            if fid:
-                                tool_diagnostics.append(f"📁 file output (file_id={fid}) — fetch path not yet wired")
+                            if not fid:
+                                continue
+                            try:
+                                meta = client.beta.files.retrieve_metadata(
+                                    fid, betas=["files-api-2025-04-14"]
+                                )
+                                fname = (
+                                    getattr(meta, "filename", None)
+                                    or getattr(meta, "name", None)
+                                    or f"file_{fid[:8]}"
+                                )
+                                resp = client.beta.files.download(
+                                    fid, betas=["files-api-2025-04-14"]
+                                )
+                                # SDK returns BinaryAPIResponse — exposes .read()
+                                file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
+                                generated_files.append((fname, file_bytes))
+                                tool_diagnostics.append(
+                                    f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes)"
+                                )
+                            except Exception as _fetch_e:
+                                tool_diagnostics.append(
+                                    f"⚠️ file_id={fid} fetch failed: {_fetch_e}"
+                                )
 
                     files_this_block = len(generated_files) - files_before
                     # Diagnostic line for this code execution result
