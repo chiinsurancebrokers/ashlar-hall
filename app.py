@@ -969,232 +969,6 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
             try:
                 client = anthropic.Anthropic(api_key=api_key)
                 messages = _hal_build_api_messages(st.session_state.chat_history)
-
-                def _latest_user_message():
-                    for _m in reversed(st.session_state.chat_history):
-                        if _m.get("role") == "user":
-                            return _m
-                    return {}
-
-                def _latest_user_text():
-                    return (_latest_user_message().get("content") or "")
-
-                def _latest_user_has_attachments():
-                    return bool(_latest_user_message().get("attachments") or [])
-
-                def _looks_like_pdf_request(text):
-                    _t = (text or "").lower()
-                    _strong_pdf_words = (
-                        "pdf", "report", "αναφορά", "αναφορα", "ανάλυση", "αναλυση",
-                        "σύγκριση", "συγκριση", "compare", "comparison", "vs", "versus",
-                        "παράγω", "παραγω", "generate a pdf", "φτιάξε pdf", "φτιαξε pdf",
-                        "δημιούργησε pdf", "δημιουργησε pdf", "ασφαλισ", "policy", "policies",
-                        "voyager", "europesure", "supreme", "platinum", "retain", "switch",
-                    )
-                    # In HAL, uploaded PDFs + any comparison/insurance wording should enter local PDF mode.
-                    return any(_k in _t for _k in _strong_pdf_words) or (_latest_user_has_attachments() and len(_t.strip()) > 0)
-
-                def _build_pdf_from_text(title, text):
-                    """Local deterministic PDF builder. This avoids relying on Anthropic's
-                    server-side code_execution file-return protocol, which can return only
-                    server_tool_use blocks in some beta/API states.
-                    """
-                    from io import BytesIO
-                    import html as _html
-                    from reportlab.lib import colors
-                    from reportlab.lib.enums import TA_LEFT
-                    from reportlab.lib.pagesizes import A4
-                    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-                    from reportlab.lib.units import cm
-                    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, PageBreak
-                    from reportlab.pdfbase import pdfmetrics
-                    from reportlab.pdfbase.ttfonts import TTFont
-                    from reportlab.pdfbase.pdfmetrics import registerFontFamily
-
-                    def _register_font_safe():
-                        """Return (regular_font_name, bold_font_name).
-                        Never leave the PDF builder depending on an unregistered font.
-                        On Streamlit/Railway images the DejaVu path may differ, so we
-                        try multiple locations and fall back to Helvetica rather than crashing.
-                        """
-                        import os as _os
-                        import glob as _glob
-                        import subprocess as _subprocess
-
-                        regular_candidates = [
-                            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                            "/usr/local/share/fonts/DejaVuSans.ttf",
-                            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-                            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-                            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-                        ]
-                        bold_candidates = [
-                            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                            "/usr/local/share/fonts/DejaVuSans-Bold.ttf",
-                            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-                            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-                            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-                        ]
-
-                        # Ask fontconfig for a Greek-capable font when available.
-                        try:
-                            fc = _subprocess.run(
-                                ["fc-match", "-f", "%{file}\n", "DejaVu Sans:lang=el"],
-                                capture_output=True, text=True, timeout=2,
-                            )
-                            if fc.returncode == 0 and fc.stdout.strip():
-                                regular_candidates.insert(0, fc.stdout.strip().splitlines()[0])
-                        except Exception:
-                            pass
-
-                        regular_candidates += _glob.glob("/usr/share/fonts/**/DejaVuSans.ttf", recursive=True)
-                        regular_candidates += _glob.glob("/usr/share/fonts/**/NotoSans-Regular.ttf", recursive=True)
-                        bold_candidates += _glob.glob("/usr/share/fonts/**/DejaVuSans-Bold.ttf", recursive=True)
-                        bold_candidates += _glob.glob("/usr/share/fonts/**/NotoSans-Bold.ttf", recursive=True)
-
-                        regular_path = next((x for x in regular_candidates if x and _os.path.exists(x)), None)
-                        bold_path = next((x for x in bold_candidates if x and _os.path.exists(x)), None)
-
-                        if not regular_path:
-                            # Last-resort fallback: avoids crashes, but Greek accents may not render perfectly.
-                            return "Helvetica", "Helvetica-Bold"
-
-                        normal_name = "HALGreekRegular"
-                        bold_name = "HALGreekBold" if bold_path else normal_name
-
-                        try:
-                            if normal_name not in pdfmetrics.getRegisteredFontNames():
-                                pdfmetrics.registerFont(TTFont(normal_name, regular_path))
-                        except Exception:
-                            return "Helvetica", "Helvetica-Bold"
-
-                        if bold_path:
-                            try:
-                                if bold_name not in pdfmetrics.getRegisteredFontNames():
-                                    pdfmetrics.registerFont(TTFont(bold_name, bold_path))
-                            except Exception:
-                                bold_name = normal_name
-
-                        try:
-                            registerFontFamily(normal_name, normal=normal_name, bold=bold_name, italic=normal_name, boldItalic=bold_name)
-                        except Exception:
-                            pass
-
-                        return normal_name, bold_name
-
-                    normal_font, bold_font = _register_font_safe()
-
-                    buf = BytesIO()
-                    doc = SimpleDocTemplate(
-                        buf, pagesize=A4,
-                        rightMargin=1.4*cm, leftMargin=1.4*cm,
-                        topMargin=1.35*cm, bottomMargin=1.2*cm,
-                        title=title or "HAL Report",
-                    )
-                    styles = getSampleStyleSheet()
-                    base = ParagraphStyle(
-                        "HALBase", parent=styles["BodyText"], fontName=normal_font, fontSize=9.2,
-                        leading=12.6, alignment=TA_LEFT, spaceAfter=5,
-                    )
-                    h1 = ParagraphStyle(
-                        "HALH1", parent=base, fontName=normal_font, fontSize=15, leading=19,
-                        textColor=colors.HexColor("#1C1410"), spaceBefore=8, spaceAfter=8,
-                    )
-                    h2 = ParagraphStyle(
-                        "HALH2", parent=base, fontName=normal_font, fontSize=12.2, leading=15.5,
-                        textColor=colors.HexColor("#4A3728"), spaceBefore=7, spaceAfter=5,
-                    )
-                    small = ParagraphStyle(
-                        "HALSmall", parent=base, fontName=normal_font, fontSize=8.2, leading=10.5,
-                        textColor=colors.HexColor("#5F5147"),
-                    )
-
-                    def _md_inline(line):
-                        line = _html.escape(line)
-                        line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)
-                        line = re.sub(r"__(.+?)__", r"<b>\1</b>", line)
-                        return line
-
-                    story = []
-                    story.append(Paragraph(_html.escape(title or "HAL Report"), h1))
-                    story.append(Paragraph(datetime.now().strftime("Generated: %d/%m/%Y %H:%M"), small))
-                    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#C9A96E"), spaceBefore=4, spaceAfter=10))
-
-                    for raw in (text or "").splitlines():
-                        line = raw.rstrip()
-                        if not line.strip():
-                            story.append(Spacer(1, 5))
-                            continue
-                        if line.strip() in ("---", "***"):
-                            story.append(HRFlowable(width="100%", thickness=.6, color=colors.HexColor("#E8E0D5"), spaceBefore=5, spaceAfter=7))
-                            continue
-                        if line.startswith("# "):
-                            story.append(Paragraph(_md_inline(line[2:].strip()), h1))
-                        elif line.startswith("## "):
-                            story.append(Paragraph(_md_inline(line[3:].strip()), h2))
-                        elif line.startswith("### "):
-                            story.append(Paragraph(_md_inline(line[4:].strip()), h2))
-                        elif line.lstrip().startswith(("- ", "* ", "• ")):
-                            item = line.lstrip()[2:].strip()
-                            story.append(Paragraph("• " + _md_inline(item), base))
-                        elif re.match(r"^\s*\d+[\.)]\s+", line):
-                            story.append(Paragraph(_md_inline(line.strip()), base))
-                        elif line.strip().startswith("|") and line.strip().endswith("|"):
-                            # Render markdown table rows safely as compact text.
-                            compact = " | ".join(c.strip() for c in line.strip().strip("|").split("|"))
-                            if not set(compact.replace(" ", "")) <= set("-|:"):
-                                story.append(Paragraph(_md_inline(compact), small))
-                        else:
-                            story.append(Paragraph(_md_inline(line.strip()), base))
-
-                    def _footer(canvas, doc_obj):
-                        canvas.saveState()
-                        canvas.setFont(normal_font, 7)
-                        canvas.setFillColor(colors.HexColor("#7A6A5A"))
-                        canvas.drawString(1.4*cm, .75*cm, "HAL · Ashlar Insurance")
-                        canvas.drawRightString(A4[0]-1.4*cm, .75*cm, f"Page {doc_obj.page}")
-                        canvas.restoreState()
-
-                    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
-                    return buf.getvalue()
-
-                # Stable path for client-facing PDF/report requests:
-                # ask Claude for the full report as text, then build the PDF locally.
-                # This avoids the fragile server-side code_execution result-block protocol.
-                if _looks_like_pdf_request(_latest_user_text()):
-                    pdf_system = system + """
-
-PDF REPORT MODE — Do NOT use code execution. Produce the complete client-facing report as clean Markdown text only.
-Use bilingual Greek first / English second unless the user explicitly asks otherwise.
-Use clear headings, comparison tables in Markdown, caveats, winner tally, and final RETAIN/SWITCH recommendation.
-Do not say that you are creating a PDF; just write the full report content.
-"""
-                    st.caption("PDF mode: asking HAL for report text, then building the PDF locally...")
-                    pdf_response = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=8192,
-                        system=pdf_system, messages=messages,
-                        betas=["files-api-2025-04-14"],
-                    )
-                    report_text = "\n".join(
-                        getattr(b, "text", "") for b in pdf_response.content
-                        if getattr(b, "type", "") == "text"
-                    ).strip()
-                    if not report_text:
-                        report_text = "HAL generated no text for this report. Please retry with shorter source files."
-                    fname = "HAL_Insurance_Report_" + datetime.now().strftime("%Y%m%d_%H%M") + ".pdf"
-                    pdf_bytes = _build_pdf_from_text("HAL Insurance Report", report_text)
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": "Έτοιμο. / Done. 📎 **" + fname + "** — διαθέσιμο για λήψη παρακάτω."
-                    })
-                    st.session_state["hal_last_files"] = [(fname, pdf_bytes)]
-                    if not is_private:
-                        conv_ws = st.session_state.get("_conv_ws")
-                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", report_text[:45000])
-                    return
-
                 code_exec_system = system + """
 
 CODE EXECUTION — you have a sandboxed Python/Bash environment (no internet access inside it).
@@ -1215,7 +989,6 @@ text (client names, insurer names, Greek body text), register DejaVuSans BEFORE 
 
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-                    from reportlab.pdfbase.pdfmetrics import registerFontFamily
     pdfmetrics.registerFont(TTFont("GF",     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
     pdfmetrics.registerFont(TTFont("GFBold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
 
@@ -1258,27 +1031,13 @@ times it appears in memory or chat history above."""
                 )
                 all_blocks = list(response.content)
 
-                def _safe_assistant_text_content(content_blocks):
-                    """Return ONLY plain assistant text for follow-up API messages.
-                    Do not re-send raw code_execution/server_tool_use blocks; the API
-                    rejects an assistant tool-use block unless the exact paired
-                    tool_result block is also present in the correct protocol shape.
-                    """
-                    parts = []
-                    for _b in content_blocks or []:
-                        if getattr(_b, "type", None) == "text":
-                            _txt = getattr(_b, "text", "") or ""
-                            if _txt.strip():
-                                parts.append(_txt.strip())
-                    return "\n".join(parts).strip() or "Continuing after code execution attempt."
-
                 # Code execution on a non-trivial task (e.g. building a multi-section PDF) can
                 # pause mid-turn; resubmitting lets Claude continue rather than the user seeing a
                 # cut-off result. Accumulate blocks from every turn — the file/text Claude produced
                 # before a pause must not be dropped when a later turn's response replaces `response`.
                 _continue_attempts = 0
                 while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
-                    messages = messages + [{"role": "assistant", "content": _safe_assistant_text_content(response.content)}]
+                    messages = messages + [{"role": "assistant", "content": response.content}]
                     response = client.beta.messages.create(
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
@@ -1319,7 +1078,7 @@ times it appears in memory or chat history above."""
                     if not any(p in _text_so_far for p in _intent_phrases):
                         break  # no intent to build → don't nudge; HAL legitimately just chatted
                     messages = messages + [
-                        {"role": "assistant", "content": _safe_assistant_text_content(response.content)},
+                        {"role": "assistant", "content": response.content},
                         {"role": "user", "content": (
                             "Συνέχισε — εκτέλεσε ΤΩΡΑ το script στο sandbox και παρήγαγε το αρχείο. "
                             "Continue — actually invoke code_execution now and produce the file. "
@@ -1338,7 +1097,7 @@ times it appears in memory or chat history above."""
                     _nudge_attempts += 1
                     # If this continuation itself paused, drain the pause_turn loop again.
                     while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
-                        messages = messages + [{"role": "assistant", "content": _safe_assistant_text_content(response.content)}]
+                        messages = messages + [{"role": "assistant", "content": response.content}]
                         response = client.beta.messages.create(
                             model="claude-sonnet-4-6", max_tokens=8192,
                             system=code_exec_system, messages=messages,
@@ -1351,159 +1110,100 @@ times it appears in memory or chat history above."""
                 reply_parts = []
                 generated_files = []  # list of (filename, raw_bytes)
                 tool_diagnostics = []  # human-readable trace of each tool call
-                _seen_file_ids = set()
+                for block in all_blocks:
+                    btype = getattr(block, "type", None)
+                    if btype == "text":
+                        reply_parts.append(block.text)
+                        continue
 
-                def _obj_get(obj, name, default=None):
-                    """Works with Anthropic SDK objects and dicts."""
-                    if obj is None:
-                        return default
-                    if isinstance(obj, dict):
-                        return obj.get(name, default)
-                    return getattr(obj, name, default)
+                    # Track which tools HAL invoked, so if nothing visible comes out
+                    # we can show the user what was attempted instead of going silent.
+                    if btype in ("server_tool_use", "tool_use"):
+                        tool_name = getattr(block, "name", "?")
+                        tool_diagnostics.append(f"→ invoked `{tool_name}`")
+                        continue
 
-                def _to_plain(obj):
-                    """Convert SDK/Pydantic blocks to plain dict/list where possible."""
-                    if obj is None or isinstance(obj, (str, int, float, bool)):
-                        return obj
-                    if isinstance(obj, (list, tuple)):
-                        return [_to_plain(x) for x in obj]
-                    if isinstance(obj, dict):
-                        return {k: _to_plain(v) for k, v in obj.items()}
-                    if hasattr(obj, "model_dump"):
+                    # Code execution returns TWO different result block types:
+                    #   • bash_code_execution_tool_result  — when HAL runs a bash command
+                    #   • code_execution_tool_result       — when HAL runs a Python script
+                    # The SINGLE-SCRIPT EXECUTION rule pushes HAL toward Python, which
+                    # means most file emissions land in the Python block type. Parsing
+                    # only bash would silently drop every PDF HAL builds from Python.
+                    if btype not in ("bash_code_execution_tool_result",
+                                     "code_execution_tool_result"):
+                        continue
+
+                    content = getattr(block, "content", None)
+                    stdout = getattr(content, "stdout", "") if content else ""
+                    stderr = getattr(content, "stderr", "") if content else ""
+                    retcode = getattr(content, "return_code", None) if content else None
+                    err_type = getattr(content, "type", None) if content else None  # 'code_execution_tool_result_error' on failure
+
+                    files_before = len(generated_files)
+                    for fname, b64data in re.findall(
+                        r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
+                    ):
                         try:
-                            return _to_plain(obj.model_dump())
-                        except Exception:
-                            pass
-                    if hasattr(obj, "dict"):
-                        try:
-                            return _to_plain(obj.dict())
-                        except Exception:
-                            pass
-                    return obj
+                            generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
+                        except Exception as _decode_e:
+                            tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
 
-                def _download_file_id(fid, suggested_name=None, source="file_id"):
-                    if not fid or fid in _seen_file_ids:
-                        return
-                    _seen_file_ids.add(fid)
-                    try:
-                        meta = client.beta.files.retrieve_metadata(
-                            fid, betas=["files-api-2025-04-14"]
-                        )
-                        fname = (
-                            suggested_name
-                            or getattr(meta, "filename", None)
-                            or getattr(meta, "name", None)
-                            or f"file_{fid[:8]}"
-                        )
-                        resp = client.beta.files.download(
-                            fid, betas=["files-api-2025-04-14"]
-                        )
-                        file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
-                        generated_files.append((fname, file_bytes))
+                    # Code execution returns file outputs via content.content as
+                    # CodeExecutionOutput entries with a file_id. Two block types
+                    # carry this — they differ ONLY in the type tag, NOT the shape:
+                    #   • type="bash_code_execution_output"   → bash sub-tool
+                    #   • type="code_execution_output"        → python sub-tool
+                    # The diagnostic the user reported ("→ invoked bash_code_execution"
+                    # alone) was the smoking gun: bash WAS invoked, the result block
+                    # was reached, the file_id was sitting inside it — but the parser
+                    # was only matching the python tag, so the bash file silently
+                    # vanished. Both must be fetched via client.beta.files.download.
+                    inner = getattr(content, "content", None) or []
+                    for out in inner:
+                        out_type = getattr(out, "type", None)
+                        if out_type not in ("code_execution_output",
+                                            "bash_code_execution_output"):
+                            continue
+                        fid = getattr(out, "file_id", "") or ""
+                        if not fid:
+                            continue
+                        try:
+                            meta = client.beta.files.retrieve_metadata(
+                                fid, betas=["files-api-2025-04-14"]
+                            )
+                            fname = (
+                                getattr(meta, "filename", None)
+                                or getattr(meta, "name", None)
+                                or f"file_{fid[:8]}"
+                            )
+                            resp = client.beta.files.download(
+                                fid, betas=["files-api-2025-04-14"]
+                            )
+                            # SDK returns BinaryAPIResponse — exposes .read()
+                            file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
+                            generated_files.append((fname, file_bytes))
+                            tool_diagnostics.append(
+                                f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes, via {out_type})"
+                            )
+                        except Exception as _fetch_e:
+                            tool_diagnostics.append(
+                                f"⚠️ file_id={fid} ({out_type}) fetch failed: {_fetch_e}"
+                            )
+
+                    files_this_block = len(generated_files) - files_before
+                    # Diagnostic line for this code execution result
+                    if err_type and "error" in str(err_type).lower():
                         tool_diagnostics.append(
-                            f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes, via {source})"
+                            f"❌ execution error ({btype}): {stderr.strip()[:500] or 'no stderr'}"
                         )
-                    except Exception as _fetch_e:
-                        tool_diagnostics.append(f"⚠️ file_id={fid} fetch failed: {_fetch_e}")
-
-                def _walk_for_file_ids(obj, source="nested"):
-                    """Recursively find file_id values in any current/future Anthropic block shape."""
-                    obj = _to_plain(obj)
-                    if isinstance(obj, dict):
-                        fid = obj.get("file_id") or obj.get("id") if str(obj.get("type", "")).endswith("_output") else obj.get("file_id")
-                        if fid:
-                            _download_file_id(str(fid), obj.get("filename") or obj.get("name"), source)
-                        for v in obj.values():
-                            _walk_for_file_ids(v, source)
-                    elif isinstance(obj, list):
-                        for v in obj:
-                            _walk_for_file_ids(v, source)
-
-                def _parse_blocks(blocks):
-                    for block in blocks:
-                        btype = _obj_get(block, "type", "")
-                        if btype == "text":
-                            txt = _obj_get(block, "text", "")
-                            if txt:
-                                reply_parts.append(txt)
-                            continue
-
-                        if btype in ("server_tool_use", "tool_use"):
-                            tool_name = _obj_get(block, "name", "?")
-                            tool_diagnostics.append(f"→ invoked `{tool_name}`")
-                            continue
-
-                        # Be liberal: Anthropic may return bash/python/text_editor tool results.
-                        # Docs list bash_code_execution_tool_result and text_editor_code_execution_tool_result;
-                        # streaming examples also show code_execution_tool_result.
-                        if not str(btype).endswith("_tool_result"):
-                            _walk_for_file_ids(block, source=btype or "block")
-                            continue
-
-                        content = _obj_get(block, "content", None)
-                        ctype = _obj_get(content, "type", "")
-                        stdout = _obj_get(content, "stdout", "") or ""
-                        stderr = _obj_get(content, "stderr", "") or ""
-                        retcode = _obj_get(content, "return_code", None)
-                        error_code = _obj_get(content, "error_code", "") or ""
-
-                        files_before = len(generated_files)
-
-                        # Primary path: file emitted as base64 sentinel in stdout.
-                        for fname, b64data in re.findall(
-                            r'===FILE:(.+?)===\s*\n(.*?)\n===ENDFILE===', stdout, re.DOTALL
-                        ):
-                            try:
-                                generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
-                                tool_diagnostics.append(f"✓ decoded `{fname.strip()}` from stdout base64")
-                            except Exception as _decode_e:
-                                tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
-
-                        # Secondary path: generated output file references anywhere in the result.
-                        _walk_for_file_ids(content, source=btype)
-
-                        files_this_block = len(generated_files) - files_before
-                        if error_code:
-                            tool_diagnostics.append(f"❌ execution error ({btype}): {error_code}")
-                        elif ctype and "error" in str(ctype).lower():
-                            tool_diagnostics.append(
-                                f"❌ execution error ({btype}): {stderr.strip()[:500] or error_code or 'no stderr'}"
-                            )
-                        elif retcode not in (None, 0):
-                            tool_diagnostics.append(
-                                f"⚠️ exit {retcode} ({btype}) — stderr: {stderr.strip()[:300] or '(empty)'}"
-                            )
-                        elif files_this_block == 0 and stderr.strip():
-                            tool_diagnostics.append(
-                                f"ℹ️ {btype} ran OK but emitted no file. stderr: {stderr.strip()[:300]}"
-                            )
-
-                _parse_blocks(all_blocks)
-
-                # Last-resort recovery: a tool ran, but no file came back. Ask the same
-                # sandbox turn to list files and emit any generated PDF/DOCX/XLSX/PPTX as base64.
-                # This fixes cases where Claude created the PDF but forgot the ===FILE=== wrapper,
-                # or used text_editor/bash output shapes that do not expose a file_id.
-                if not generated_files and _has_tool_activity(all_blocks):
-                    messages = messages + [
-                        {"role": "assistant", "content": _safe_assistant_text_content(response.content)},
-                        {"role": "user", "content": (
-                            "Το εργαλείο εκτελέστηκε αλλά δεν επέστρεψε downloadable αρχείο. "
-                            "In the SAME code_execution sandbox, run: find/list generated files, "
-                            "then for every .pdf/.docx/.xlsx/.pptx/.png emit exactly: "
-                            "===FILE:filename=== newline base64 file newline ===ENDFILE===. "
-                            "If no file exists, recreate the requested PDF and emit it. No prose."
-                        )},
-                    ]
-                    response = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=8192,
-                        system=code_exec_system, messages=messages,
-                        tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
-                    )
-                    recovery_blocks = list(response.content)
-                    all_blocks.extend(recovery_blocks)
-                    _parse_blocks(recovery_blocks)
+                    elif retcode not in (None, 0):
+                        tool_diagnostics.append(
+                            f"⚠️ exit {retcode} ({btype}) — stderr: {stderr.strip()[:300] or '(empty)'}"
+                        )
+                    elif files_this_block == 0 and stderr.strip():
+                        tool_diagnostics.append(
+                            f"ℹ️ {btype} ran OK but emitted no file. stderr: {stderr.strip()[:300]}"
+                        )
 
                 if reply_parts and generated_files:
                     reply = "\n".join(reply_parts).strip()
