@@ -1148,44 +1148,47 @@ times it appears in memory or chat history above."""
                         except Exception as _decode_e:
                             tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
 
-                    # Python code_execution also returns files via content.content as
-                    # CodeExecutionOutput entries (file_id, type="code_execution_output").
-                    # The SINGLE-SCRIPT EXECUTION rule in the system prompt pushes HAL
-                    # toward Python — when HAL builds a PDF in a Python script and
-                    # writes it to disk, the file does NOT come back as base64 in stdout
-                    # the way bash heredocs do. Instead it lands in Anthropic's Files
-                    # API and is referenced by file_id. We must fetch it explicitly via
-                    # client.beta.files.download(file_id). Without this fetch, every
-                    # Python-produced PDF silently vanishes — HAL runs successfully,
-                    # the file exists server-side, but the user sees a blank screen.
+                    # Code execution returns file outputs via content.content as
+                    # CodeExecutionOutput entries with a file_id. Two block types
+                    # carry this — they differ ONLY in the type tag, NOT the shape:
+                    #   • type="bash_code_execution_output"   → bash sub-tool
+                    #   • type="code_execution_output"        → python sub-tool
+                    # The diagnostic the user reported ("→ invoked bash_code_execution"
+                    # alone) was the smoking gun: bash WAS invoked, the result block
+                    # was reached, the file_id was sitting inside it — but the parser
+                    # was only matching the python tag, so the bash file silently
+                    # vanished. Both must be fetched via client.beta.files.download.
                     inner = getattr(content, "content", None) or []
                     for out in inner:
-                        if getattr(out, "type", None) == "code_execution_output":
-                            fid = getattr(out, "file_id", "") or ""
-                            if not fid:
-                                continue
-                            try:
-                                meta = client.beta.files.retrieve_metadata(
-                                    fid, betas=["files-api-2025-04-14"]
-                                )
-                                fname = (
-                                    getattr(meta, "filename", None)
-                                    or getattr(meta, "name", None)
-                                    or f"file_{fid[:8]}"
-                                )
-                                resp = client.beta.files.download(
-                                    fid, betas=["files-api-2025-04-14"]
-                                )
-                                # SDK returns BinaryAPIResponse — exposes .read()
-                                file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
-                                generated_files.append((fname, file_bytes))
-                                tool_diagnostics.append(
-                                    f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes)"
-                                )
-                            except Exception as _fetch_e:
-                                tool_diagnostics.append(
-                                    f"⚠️ file_id={fid} fetch failed: {_fetch_e}"
-                                )
+                        out_type = getattr(out, "type", None)
+                        if out_type not in ("code_execution_output",
+                                            "bash_code_execution_output"):
+                            continue
+                        fid = getattr(out, "file_id", "") or ""
+                        if not fid:
+                            continue
+                        try:
+                            meta = client.beta.files.retrieve_metadata(
+                                fid, betas=["files-api-2025-04-14"]
+                            )
+                            fname = (
+                                getattr(meta, "filename", None)
+                                or getattr(meta, "name", None)
+                                or f"file_{fid[:8]}"
+                            )
+                            resp = client.beta.files.download(
+                                fid, betas=["files-api-2025-04-14"]
+                            )
+                            # SDK returns BinaryAPIResponse — exposes .read()
+                            file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
+                            generated_files.append((fname, file_bytes))
+                            tool_diagnostics.append(
+                                f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes, via {out_type})"
+                            )
+                        except Exception as _fetch_e:
+                            tool_diagnostics.append(
+                                f"⚠️ file_id={fid} ({out_type}) fetch failed: {_fetch_e}"
+                            )
 
                     files_this_block = len(generated_files) - files_before
                     # Diagnostic line for this code execution result
