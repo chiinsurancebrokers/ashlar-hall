@@ -969,6 +969,156 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
             try:
                 client = anthropic.Anthropic(api_key=api_key)
                 messages = _hal_build_api_messages(st.session_state.chat_history)
+
+                def _latest_user_text():
+                    for _m in reversed(st.session_state.chat_history):
+                        if _m.get("role") == "user":
+                            return (_m.get("content") or "")
+                    return ""
+
+                def _looks_like_pdf_request(text):
+                    _t = (text or "").lower()
+                    return any(_k in _t for _k in (
+                        "pdf", "report", "αναφορά", "αναφορα", "ανάλυση", "αναλυση",
+                        "σύγκριση", "συγκριση", "παράγω", "παραγω", "generate a pdf",
+                        "φτιάξε pdf", "φτιαξε pdf", "δημιούργησε pdf", "δημιουργησε pdf",
+                    ))
+
+                def _build_pdf_from_text(title, text):
+                    """Local deterministic PDF builder. This avoids relying on Anthropic's
+                    server-side code_execution file-return protocol, which can return only
+                    server_tool_use blocks in some beta/API states.
+                    """
+                    from io import BytesIO
+                    import html as _html
+                    from reportlab.lib import colors
+                    from reportlab.lib.enums import TA_LEFT
+                    from reportlab.lib.pagesizes import A4
+                    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+                    from reportlab.lib.units import cm
+                    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, PageBreak
+                    from reportlab.pdfbase import pdfmetrics
+                    from reportlab.pdfbase.ttfonts import TTFont
+
+                    font_regular = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                    font_bold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                    try:
+                        pdfmetrics.registerFont(TTFont("GF", font_regular))
+                    except Exception:
+                        pass
+                    try:
+                        pdfmetrics.registerFont(TTFont("GFBold", font_bold))
+                    except Exception:
+                        pass
+
+                    buf = BytesIO()
+                    doc = SimpleDocTemplate(
+                        buf, pagesize=A4,
+                        rightMargin=1.4*cm, leftMargin=1.4*cm,
+                        topMargin=1.35*cm, bottomMargin=1.2*cm,
+                        title=title or "HAL Report",
+                    )
+                    styles = getSampleStyleSheet()
+                    base = ParagraphStyle(
+                        "HALBase", parent=styles["BodyText"], fontName="GF", fontSize=9.2,
+                        leading=12.6, alignment=TA_LEFT, spaceAfter=5,
+                    )
+                    h1 = ParagraphStyle(
+                        "HALH1", parent=base, fontName="GFBold", fontSize=15, leading=19,
+                        textColor=colors.HexColor("#1C1410"), spaceBefore=8, spaceAfter=8,
+                    )
+                    h2 = ParagraphStyle(
+                        "HALH2", parent=base, fontName="GFBold", fontSize=12.2, leading=15.5,
+                        textColor=colors.HexColor("#4A3728"), spaceBefore=7, spaceAfter=5,
+                    )
+                    small = ParagraphStyle(
+                        "HALSmall", parent=base, fontName="GF", fontSize=8.2, leading=10.5,
+                        textColor=colors.HexColor("#5F5147"),
+                    )
+
+                    def _md_inline(line):
+                        line = _html.escape(line)
+                        line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)
+                        line = re.sub(r"__(.+?)__", r"<b>\1</b>", line)
+                        return line
+
+                    story = []
+                    story.append(Paragraph(_html.escape(title or "HAL Report"), h1))
+                    story.append(Paragraph(datetime.now().strftime("Generated: %d/%m/%Y %H:%M"), small))
+                    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#C9A96E"), spaceBefore=4, spaceAfter=10))
+
+                    for raw in (text or "").splitlines():
+                        line = raw.rstrip()
+                        if not line.strip():
+                            story.append(Spacer(1, 5))
+                            continue
+                        if line.strip() in ("---", "***"):
+                            story.append(HRFlowable(width="100%", thickness=.6, color=colors.HexColor("#E8E0D5"), spaceBefore=5, spaceAfter=7))
+                            continue
+                        if line.startswith("# "):
+                            story.append(Paragraph(_md_inline(line[2:].strip()), h1))
+                        elif line.startswith("## "):
+                            story.append(Paragraph(_md_inline(line[3:].strip()), h2))
+                        elif line.startswith("### "):
+                            story.append(Paragraph(_md_inline(line[4:].strip()), h2))
+                        elif line.lstrip().startswith(("- ", "* ", "• ")):
+                            item = line.lstrip()[2:].strip()
+                            story.append(Paragraph("• " + _md_inline(item), base))
+                        elif re.match(r"^\s*\d+[\.)]\s+", line):
+                            story.append(Paragraph(_md_inline(line.strip()), base))
+                        elif line.strip().startswith("|") and line.strip().endswith("|"):
+                            # Render markdown table rows safely as compact text.
+                            compact = " | ".join(c.strip() for c in line.strip().strip("|").split("|"))
+                            if not set(compact.replace(" ", "")) <= set("-|:"):
+                                story.append(Paragraph(_md_inline(compact), small))
+                        else:
+                            story.append(Paragraph(_md_inline(line.strip()), base))
+
+                    def _footer(canvas, doc_obj):
+                        canvas.saveState()
+                        canvas.setFont("GF", 7)
+                        canvas.setFillColor(colors.HexColor("#7A6A5A"))
+                        canvas.drawString(1.4*cm, .75*cm, "HAL · Ashlar Insurance")
+                        canvas.drawRightString(A4[0]-1.4*cm, .75*cm, f"Page {doc_obj.page}")
+                        canvas.restoreState()
+
+                    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+                    return buf.getvalue()
+
+                # Stable path for client-facing PDF/report requests:
+                # ask Claude for the full report as text, then build the PDF locally.
+                # This avoids the fragile server-side code_execution result-block protocol.
+                if _looks_like_pdf_request(_latest_user_text()):
+                    pdf_system = system + """
+
+PDF REPORT MODE — Do NOT use code execution. Produce the complete client-facing report as clean Markdown text only.
+Use bilingual Greek first / English second unless the user explicitly asks otherwise.
+Use clear headings, comparison tables in Markdown, caveats, winner tally, and final RETAIN/SWITCH recommendation.
+Do not say that you are creating a PDF; just write the full report content.
+"""
+                    pdf_response = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
+                        system=pdf_system, messages=messages,
+                        betas=["files-api-2025-04-14"],
+                    )
+                    report_text = "\n".join(
+                        getattr(b, "text", "") for b in pdf_response.content
+                        if getattr(b, "type", "") == "text"
+                    ).strip()
+                    if not report_text:
+                        report_text = "HAL generated no text for this report. Please retry with shorter source files."
+                    fname = "HAL_Insurance_Report_" + datetime.now().strftime("%Y%m%d_%H%M") + ".pdf"
+                    pdf_bytes = _build_pdf_from_text("HAL Insurance Report", report_text)
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": "Έτοιμο. / Done. 📎 **" + fname + "** — διαθέσιμο για λήψη παρακάτω."
+                    })
+                    st.session_state["hal_last_files"] = [(fname, pdf_bytes)]
+                    if not is_private:
+                        conv_ws = st.session_state.get("_conv_ws")
+                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", report_text[:45000])
+                    return
+
                 code_exec_system = system + """
 
 CODE EXECUTION — you have a sandboxed Python/Bash environment (no internet access inside it).
