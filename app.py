@@ -1110,100 +1110,159 @@ times it appears in memory or chat history above."""
                 reply_parts = []
                 generated_files = []  # list of (filename, raw_bytes)
                 tool_diagnostics = []  # human-readable trace of each tool call
-                for block in all_blocks:
-                    btype = getattr(block, "type", None)
-                    if btype == "text":
-                        reply_parts.append(block.text)
-                        continue
+                _seen_file_ids = set()
 
-                    # Track which tools HAL invoked, so if nothing visible comes out
-                    # we can show the user what was attempted instead of going silent.
-                    if btype in ("server_tool_use", "tool_use"):
-                        tool_name = getattr(block, "name", "?")
-                        tool_diagnostics.append(f"→ invoked `{tool_name}`")
-                        continue
+                def _obj_get(obj, name, default=None):
+                    """Works with Anthropic SDK objects and dicts."""
+                    if obj is None:
+                        return default
+                    if isinstance(obj, dict):
+                        return obj.get(name, default)
+                    return getattr(obj, name, default)
 
-                    # Code execution returns TWO different result block types:
-                    #   • bash_code_execution_tool_result  — when HAL runs a bash command
-                    #   • code_execution_tool_result       — when HAL runs a Python script
-                    # The SINGLE-SCRIPT EXECUTION rule pushes HAL toward Python, which
-                    # means most file emissions land in the Python block type. Parsing
-                    # only bash would silently drop every PDF HAL builds from Python.
-                    if btype not in ("bash_code_execution_tool_result",
-                                     "code_execution_tool_result"):
-                        continue
-
-                    content = getattr(block, "content", None)
-                    stdout = getattr(content, "stdout", "") if content else ""
-                    stderr = getattr(content, "stderr", "") if content else ""
-                    retcode = getattr(content, "return_code", None) if content else None
-                    err_type = getattr(content, "type", None) if content else None  # 'code_execution_tool_result_error' on failure
-
-                    files_before = len(generated_files)
-                    for fname, b64data in re.findall(
-                        r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
-                    ):
+                def _to_plain(obj):
+                    """Convert SDK/Pydantic blocks to plain dict/list where possible."""
+                    if obj is None or isinstance(obj, (str, int, float, bool)):
+                        return obj
+                    if isinstance(obj, (list, tuple)):
+                        return [_to_plain(x) for x in obj]
+                    if isinstance(obj, dict):
+                        return {k: _to_plain(v) for k, v in obj.items()}
+                    if hasattr(obj, "model_dump"):
                         try:
-                            generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
-                        except Exception as _decode_e:
-                            tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
-
-                    # Code execution returns file outputs via content.content as
-                    # CodeExecutionOutput entries with a file_id. Two block types
-                    # carry this — they differ ONLY in the type tag, NOT the shape:
-                    #   • type="bash_code_execution_output"   → bash sub-tool
-                    #   • type="code_execution_output"        → python sub-tool
-                    # The diagnostic the user reported ("→ invoked bash_code_execution"
-                    # alone) was the smoking gun: bash WAS invoked, the result block
-                    # was reached, the file_id was sitting inside it — but the parser
-                    # was only matching the python tag, so the bash file silently
-                    # vanished. Both must be fetched via client.beta.files.download.
-                    inner = getattr(content, "content", None) or []
-                    for out in inner:
-                        out_type = getattr(out, "type", None)
-                        if out_type not in ("code_execution_output",
-                                            "bash_code_execution_output"):
-                            continue
-                        fid = getattr(out, "file_id", "") or ""
-                        if not fid:
-                            continue
+                            return _to_plain(obj.model_dump())
+                        except Exception:
+                            pass
+                    if hasattr(obj, "dict"):
                         try:
-                            meta = client.beta.files.retrieve_metadata(
-                                fid, betas=["files-api-2025-04-14"]
-                            )
-                            fname = (
-                                getattr(meta, "filename", None)
-                                or getattr(meta, "name", None)
-                                or f"file_{fid[:8]}"
-                            )
-                            resp = client.beta.files.download(
-                                fid, betas=["files-api-2025-04-14"]
-                            )
-                            # SDK returns BinaryAPIResponse — exposes .read()
-                            file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
-                            generated_files.append((fname, file_bytes))
+                            return _to_plain(obj.dict())
+                        except Exception:
+                            pass
+                    return obj
+
+                def _download_file_id(fid, suggested_name=None, source="file_id"):
+                    if not fid or fid in _seen_file_ids:
+                        return
+                    _seen_file_ids.add(fid)
+                    try:
+                        meta = client.beta.files.retrieve_metadata(
+                            fid, betas=["files-api-2025-04-14"]
+                        )
+                        fname = (
+                            suggested_name
+                            or getattr(meta, "filename", None)
+                            or getattr(meta, "name", None)
+                            or f"file_{fid[:8]}"
+                        )
+                        resp = client.beta.files.download(
+                            fid, betas=["files-api-2025-04-14"]
+                        )
+                        file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
+                        generated_files.append((fname, file_bytes))
+                        tool_diagnostics.append(
+                            f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes, via {source})"
+                        )
+                    except Exception as _fetch_e:
+                        tool_diagnostics.append(f"⚠️ file_id={fid} fetch failed: {_fetch_e}")
+
+                def _walk_for_file_ids(obj, source="nested"):
+                    """Recursively find file_id values in any current/future Anthropic block shape."""
+                    obj = _to_plain(obj)
+                    if isinstance(obj, dict):
+                        fid = obj.get("file_id") or obj.get("id") if str(obj.get("type", "")).endswith("_output") else obj.get("file_id")
+                        if fid:
+                            _download_file_id(str(fid), obj.get("filename") or obj.get("name"), source)
+                        for v in obj.values():
+                            _walk_for_file_ids(v, source)
+                    elif isinstance(obj, list):
+                        for v in obj:
+                            _walk_for_file_ids(v, source)
+
+                def _parse_blocks(blocks):
+                    for block in blocks:
+                        btype = _obj_get(block, "type", "")
+                        if btype == "text":
+                            txt = _obj_get(block, "text", "")
+                            if txt:
+                                reply_parts.append(txt)
+                            continue
+
+                        if btype in ("server_tool_use", "tool_use"):
+                            tool_name = _obj_get(block, "name", "?")
+                            tool_diagnostics.append(f"→ invoked `{tool_name}`")
+                            continue
+
+                        # Be liberal: Anthropic may return bash/python/text_editor tool results.
+                        # Docs list bash_code_execution_tool_result and text_editor_code_execution_tool_result;
+                        # streaming examples also show code_execution_tool_result.
+                        if not str(btype).endswith("_tool_result"):
+                            _walk_for_file_ids(block, source=btype or "block")
+                            continue
+
+                        content = _obj_get(block, "content", None)
+                        ctype = _obj_get(content, "type", "")
+                        stdout = _obj_get(content, "stdout", "") or ""
+                        stderr = _obj_get(content, "stderr", "") or ""
+                        retcode = _obj_get(content, "return_code", None)
+                        error_code = _obj_get(content, "error_code", "") or ""
+
+                        files_before = len(generated_files)
+
+                        # Primary path: file emitted as base64 sentinel in stdout.
+                        for fname, b64data in re.findall(
+                            r'===FILE:(.+?)===\s*\n(.*?)\n===ENDFILE===', stdout, re.DOTALL
+                        ):
+                            try:
+                                generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
+                                tool_diagnostics.append(f"✓ decoded `{fname.strip()}` from stdout base64")
+                            except Exception as _decode_e:
+                                tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
+
+                        # Secondary path: generated output file references anywhere in the result.
+                        _walk_for_file_ids(content, source=btype)
+
+                        files_this_block = len(generated_files) - files_before
+                        if error_code:
+                            tool_diagnostics.append(f"❌ execution error ({btype}): {error_code}")
+                        elif ctype and "error" in str(ctype).lower():
                             tool_diagnostics.append(
-                                f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes, via {out_type})"
+                                f"❌ execution error ({btype}): {stderr.strip()[:500] or error_code or 'no stderr'}"
                             )
-                        except Exception as _fetch_e:
+                        elif retcode not in (None, 0):
                             tool_diagnostics.append(
-                                f"⚠️ file_id={fid} ({out_type}) fetch failed: {_fetch_e}"
+                                f"⚠️ exit {retcode} ({btype}) — stderr: {stderr.strip()[:300] or '(empty)'}"
+                            )
+                        elif files_this_block == 0 and stderr.strip():
+                            tool_diagnostics.append(
+                                f"ℹ️ {btype} ran OK but emitted no file. stderr: {stderr.strip()[:300]}"
                             )
 
-                    files_this_block = len(generated_files) - files_before
-                    # Diagnostic line for this code execution result
-                    if err_type and "error" in str(err_type).lower():
-                        tool_diagnostics.append(
-                            f"❌ execution error ({btype}): {stderr.strip()[:500] or 'no stderr'}"
-                        )
-                    elif retcode not in (None, 0):
-                        tool_diagnostics.append(
-                            f"⚠️ exit {retcode} ({btype}) — stderr: {stderr.strip()[:300] or '(empty)'}"
-                        )
-                    elif files_this_block == 0 and stderr.strip():
-                        tool_diagnostics.append(
-                            f"ℹ️ {btype} ran OK but emitted no file. stderr: {stderr.strip()[:300]}"
-                        )
+                _parse_blocks(all_blocks)
+
+                # Last-resort recovery: a tool ran, but no file came back. Ask the same
+                # sandbox turn to list files and emit any generated PDF/DOCX/XLSX/PPTX as base64.
+                # This fixes cases where Claude created the PDF but forgot the ===FILE=== wrapper,
+                # or used text_editor/bash output shapes that do not expose a file_id.
+                if not generated_files and _has_tool_activity(all_blocks):
+                    messages = messages + [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": (
+                            "Το εργαλείο εκτελέστηκε αλλά δεν επέστρεψε downloadable αρχείο. "
+                            "In the SAME code_execution sandbox, run: find/list generated files, "
+                            "then for every .pdf/.docx/.xlsx/.pptx/.png emit exactly: "
+                            "===FILE:filename=== newline base64 file newline ===ENDFILE===. "
+                            "If no file exists, recreate the requested PDF and emit it. No prose."
+                        )},
+                    ]
+                    response = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
+                        system=code_exec_system, messages=messages,
+                        tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
+                    )
+                    recovery_blocks = list(response.content)
+                    all_blocks.extend(recovery_blocks)
+                    _parse_blocks(recovery_blocks)
 
                 if reply_parts and generated_files:
                     reply = "\n".join(reply_parts).strip()
