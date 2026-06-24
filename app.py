@@ -1027,7 +1027,7 @@ times it appears in memory or chat history above."""
                     model="claude-sonnet-4-6", max_tokens=8192,
                     system=code_exec_system, messages=messages,
                     tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                    betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
+                    betas=["code-execution-2025-08-25"],
                 )
                 all_blocks = list(response.content)
 
@@ -1042,7 +1042,7 @@ times it appears in memory or chat history above."""
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
+                        betas=["code-execution-2025-08-25"],
                     )
                     all_blocks.extend(response.content)
                     _continue_attempts += 1
@@ -1091,7 +1091,7 @@ times it appears in memory or chat history above."""
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
+                        betas=["code-execution-2025-08-25"],
                     )
                     all_blocks.extend(response.content)
                     _nudge_attempts += 1
@@ -1102,7 +1102,7 @@ times it appears in memory or chat history above."""
                             model="claude-sonnet-4-6", max_tokens=8192,
                             system=code_exec_system, messages=messages,
                             tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                            betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
+                            betas=["code-execution-2025-08-25"],
                         )
                         all_blocks.extend(response.content)
                         _continue_attempts += 1
@@ -1148,47 +1148,14 @@ times it appears in memory or chat history above."""
                         except Exception as _decode_e:
                             tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
 
-                    # Code execution returns file outputs via content.content as
-                    # CodeExecutionOutput entries with a file_id. Two block types
-                    # carry this — they differ ONLY in the type tag, NOT the shape:
-                    #   • type="bash_code_execution_output"   → bash sub-tool
-                    #   • type="code_execution_output"        → python sub-tool
-                    # The diagnostic the user reported ("→ invoked bash_code_execution"
-                    # alone) was the smoking gun: bash WAS invoked, the result block
-                    # was reached, the file_id was sitting inside it — but the parser
-                    # was only matching the python tag, so the bash file silently
-                    # vanished. Both must be fetched via client.beta.files.download.
+                    # Python code_execution also returns files via content.content as
+                    # CodeExecutionOutput entries (file_id, type="code_execution_output").
                     inner = getattr(content, "content", None) or []
                     for out in inner:
-                        out_type = getattr(out, "type", None)
-                        if out_type not in ("code_execution_output",
-                                            "bash_code_execution_output"):
-                            continue
-                        fid = getattr(out, "file_id", "") or ""
-                        if not fid:
-                            continue
-                        try:
-                            meta = client.beta.files.retrieve_metadata(
-                                fid, betas=["files-api-2025-04-14"]
-                            )
-                            fname = (
-                                getattr(meta, "filename", None)
-                                or getattr(meta, "name", None)
-                                or f"file_{fid[:8]}"
-                            )
-                            resp = client.beta.files.download(
-                                fid, betas=["files-api-2025-04-14"]
-                            )
-                            # SDK returns BinaryAPIResponse — exposes .read()
-                            file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
-                            generated_files.append((fname, file_bytes))
-                            tool_diagnostics.append(
-                                f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes, via {out_type})"
-                            )
-                        except Exception as _fetch_e:
-                            tool_diagnostics.append(
-                                f"⚠️ file_id={fid} ({out_type}) fetch failed: {_fetch_e}"
-                            )
+                        if getattr(out, "type", None) == "code_execution_output":
+                            fid = getattr(out, "file_id", "") or ""
+                            if fid:
+                                tool_diagnostics.append(f"📁 file output (file_id={fid}) — fetch path not yet wired")
 
                     files_this_block = len(generated_files) - files_before
                     # Diagnostic line for this code execution result
