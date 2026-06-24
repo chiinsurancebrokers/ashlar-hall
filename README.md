@@ -73,6 +73,31 @@ streamlit run app.py
 
 ---
 
+## Changelog — Multi-file attachments in HAL Assistant
+
+The HAL Assistant chat (the top-level "Chat with HAL" view, not the Quote Engine module) now accepts file attachments directly. Drop one or more PDFs, images, CSV/TXT/JSON/MD files into the panel above the chat input, then ask HAL anything — `"compare these two quotes"`, `"summarise this T&C in Greek"`, `"which of these screenshots has the lower deductible?"`. Files stay in conversation history so follow-up questions work without re-uploading.
+
+**Added**
+- `_hal_build_api_messages()` helper in `app.py` — translates `chat_history` entries into Anthropic API content blocks. PDFs go through `extraction.smart_pdf_to_text()` first when they're large (saves tokens, identical strategy to Quote Engine), otherwise sent as base64 `document` blocks. Images become base64 `image` blocks. Text-ish files (txt/csv/json/md) are inlined as labelled text blocks. Plain text messages stay strings, so token cost only grows when files are actually attached.
+- `_hal_mime_for()` helper — pins MIME from file extension because `UploadedFile.type` is sometimes empty or generic, which would mis-route a PDF to the text branch.
+- Always-visible attachment panel above the chat input: a `st.file_uploader(accept_multiple_files=True)` on the left, a live "staged files" list with size summary and a "Clear staged files" button on the right.
+- Chat history renderer shows a small `📎 filename.pdf` chip line above each user turn that had attachments, so the conversation visibly remembers what was sent.
+- System prompt for the business mode picked up a `FILE ATTACHMENTS` section telling HAL to do the task directly (produce the comparison table / summary / recommendation) instead of redirecting the user to the Quote Engine module.
+- Voice tab (Groq/Whisper + ElevenLabs path) also routes through `_hal_build_api_messages()`, so a voice follow-up after a file upload still sees the attached files in context.
+- The "🗑 Clear conversation" button now also clears any staged-but-unsent files and remounts the uploader, so the next session starts clean.
+
+**Design choices**
+- Files are attached to the **next** user message, not held in a global "context" — this makes intent explicit (you see exactly which turn carries which files) and keeps token cost predictable.
+- Uploader is rebuilt with a `key=f"hal_file_uploader_{nonce}"` and the nonce is bumped after each send. Streamlit's `file_uploader` has no public clear-API; bumping the key is the standard idiom for forcing a fresh widget instance.
+- No upload size cap is enforced in the app — Streamlit's own `server.maxUploadSize` (default 200 MB) and Claude's API limits handle that. Per the spec decision in the design conversation: "let Claude/Streamlit decide".
+- Google Sheets memory log records `[attached: a.pdf, b.pdf]` after the user's text so the rolling memory window remembers context even though it can't store the binaries themselves.
+
+**Verified**
+- Helper unit tests pass for: plain text passthrough, PDF+image+text ordering, CSV inlining, MIME extension fallback, empty-prompt placeholder, non-UTF8 byte tolerance, mixed history (only flagged turns expand), and base64 roundtrip.
+- `python -m py_compile app.py` clean.
+
+---
+
 ## Changelog — Bug-fix pass
 
 This package is a cleaned-up version of the original upload. Changes made:
