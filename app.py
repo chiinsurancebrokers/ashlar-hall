@@ -1010,13 +1010,21 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     _t = (text or "").lower()
                     _strong_pdf_words = (
                         "pdf", "report", "αναφορά", "αναφορα", "ανάλυση", "αναλυση",
-                        "σύγκριση", "συγκριση", "compare", "comparison", "vs", "versus",
+                        "σύγκριση", "συγκριση", "compare", "comparison",
                         "παράγω", "παραγω", "generate a pdf", "φτιάξε pdf", "φτιαξε pdf",
-                        "δημιούργησε pdf", "δημιουργησε pdf", "ασφαλισ", "policy", "policies",
-                        "voyager", "europesure", "supreme", "platinum", "retain", "switch",
+                        "δημιούργησε pdf", "δημιουργησε pdf",
                     )
-                    # In HAL, uploaded PDFs + any comparison/insurance wording should enter local PDF mode.
-                    return any(_k in _t for _k in _strong_pdf_words) or (_latest_user_has_attachments() and len(_t.strip()) > 0)
+                    # PDF path triggers when: (a) explicit PDF/report/comparison keyword present,
+                    # OR (b) user has attachments AND wrote something (not just a language reply).
+                    # NOTE: generic words like "policy", "voyager", "retain" removed to prevent
+                    # follow-up chat messages from accidentally re-triggering PDF generation.
+                    _is_lang_reply = any(x in _t for x in [
+                        "bilingual", "english", "αγγλικ", "greek", "ελληνικ", "μόνο", "only"
+                    ])
+                    return (
+                        any(_k in _t for _k in _strong_pdf_words)
+                        or (_latest_user_has_attachments() and len(_t.strip()) > 0 and not _is_lang_reply)
+                    )
 
                 def _build_pdf_from_text(title, text):
                     """Local deterministic PDF builder for comparison reports.
