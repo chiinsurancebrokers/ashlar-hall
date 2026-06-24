@@ -37,6 +37,7 @@ except ImportError:
 
 # Λέξεις-κλειδιά που δείχνουν χρήσιμη ασφαλιστική σελίδα
 _HIGH_VALUE = [
+    # Greek keywords
     "ασφάλιστρο", "ασφαλίστρου", "ασφαλίστρων", "ασφαλίστρα",
     "κάλυψη", "κάλυψης", "καλύψεις", "καλύπτεται", "καλύπτονται",
     "παροχές", "παροχή", "παροχών",
@@ -47,14 +48,26 @@ _HIGH_VALUE = [
     "χημειοθεραπεία", "ακτινοθεραπεία",
     "εξωνοσοκομειακ", "εξωτερικ",
     "διαγνωστικ", "φυσιοθεραπεί",
-    "premium", "deductible", "coverage",
     "πλάνο", "πρόγραμμα",
-    # Πεδία τιμολόγησης / ασφαλίστρου
     "ανάλυση ασφαλίστρων", "βασικά στοιχεία προγράμματος",
     "συνολικό καθαρό", "σύνολο δόσης", "σύνολο πρώτης δόσης",
     "καθαρό ασφάλιστρο", "ετήσιο καθαρό", "δικαίωμα",
     "συχνότητα πληρωμής", "τρόπος πληρωμής",
     "full health", "full επείγοντα",
+    # English insurance policy wording keywords
+    "premium", "deductible", "coverage", "benefit", "benefits",
+    "cancellation", "curtailment", "medical expenses", "repatriation",
+    "baggage", "personal effects", "personal accident", "liability",
+    "travel delay", "missed departure", "winter sports",
+    "excess", "insured", "insurer", "underwriter",
+    "pre-existing", "pre-existing condition", "medical condition",
+    "emergency", "dental", "hospital", "evacuation",
+    "trip", "journey", "policy", "schedule of benefits",
+    "table of benefits", "section", "limit", "sub-limit",
+    "gadget", "disruption", "abandonment", "legal expenses",
+    "we will pay", "we will not pay", "exclusion", "condition",
+    "sum insured", "indemnity", "claimant", "claim",
+    "annual", "single trip", "multi-trip", "worldwide",
 ]
 
 # Λέξεις που μειώνουν αξία σελίδας
@@ -79,7 +92,7 @@ _LOW_VALUE = [
 # Όρια για smart extraction
 _SIZE_THRESHOLD_BYTES = 60_000   # > 60 KB → χρήση text extraction
 _PAGE_THRESHOLD       = 6        # > 6 σελίδες → χρήση text extraction
-_MAX_CHARS_TO_CLAUDE  = 16_000   # Μέγιστοι χαρακτήρες προς Claude
+_MAX_CHARS_TO_CLAUDE  = 40_000   # Μέγιστοι χαρακτήρες προς Claude (αυξήθηκε για αγγλικά policy wordings)
 
 
 # ─── ΒΑΘΜΟΛΟΓΗΣΗ ΣΕΛΙΔΑΣ ────────────────────────────────────────────
@@ -132,7 +145,7 @@ def smart_pdf_to_text(pdf_bytes: bytes, filename: str = "") -> str | None:
 
         # ── Επιλογή σελίδων ──
         # 1. Πάντα κράτα τις πρώτες 2 σελίδες (εξώφυλλο + βασικά)
-        must_keep = {1, 2}
+        must_keep = {1, 2, 3}  # Keep first 3 pages (cover + schedule + key sections)
         selected_pages = []
         total_chars    = 0
 
@@ -143,7 +156,7 @@ def smart_pdf_to_text(pdf_bytes: bytes, filename: str = "") -> str | None:
                 total_chars += len(tx)
 
         # Μετά υπόλοιπες με score > 0 (ταξινομημένες κατά score φθίνον)
-        rest = [(pg, sc, tx) for pg, sc, tx in scored if pg not in must_keep and sc > 0]
+        rest = [(pg, sc, tx) for pg, sc, tx in scored if pg not in must_keep and sc >= 0 and tx]
         rest.sort(key=lambda x: -x[1])
 
         for pg, sc, tx in rest:
