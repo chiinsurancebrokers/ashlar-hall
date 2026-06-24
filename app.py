@@ -674,9 +674,9 @@ FILE ATTACHMENTS — users can attach multiple files (PDFs, images, CSV, TXT) to
 
 REPORT vs CHAT — judge from context whether the right answer is a quick chat reply or a generated PDF deliverable. Produce a PDF when: (a) the user uploads multiple policies/quotes for side-by-side analysis, (b) they explicitly ask for a "report", "PDF", "ανάλυση", "σύγκριση", "αναφορά", "document", (c) the output is structured data with more than ~6 rows that would be unreadable as chat, or (d) the deliverable is something they would forward to a client. Otherwise reply in chat. When unsure, ask in one short line: "PDF ή απάντηση εδώ;" / "PDF or quick answer?"
 
-INSURANCE COMPARISON REPORTS — structure: header (insurer + product per side) → per-section table appropriate to the type (travel: medical/cancellation/delay/baggage/personal accident/liability/optional; health: inpatient/outpatient/diagnostics/dental/pharmacy/geographic/excess; motor: third-party/own damage/theft/fire/legal/no-claims) → per-line winner tag (✓ CURRENT / ✓ ΤΡΕΧΟΝ in green, ✓ PROPOSED / ✓ ΠΡΟΤΕΙΝΟΜΕΝΟ in blue, = TIE / = ΙΣΟΠΑΛΙΑ in grey) → winner tally → RETAIN/SWITCH recommendation with numbered reasons ① ② ③. If a PDF is partial (e.g. only the Table of Benefits page provided), state it explicitly in a "Key Caveat / Σημαντική Επιφύλαξη" section. NEVER invent numbers — write "Δεν αναφέρεται / Not stated" when data is absent.
+INSURANCE COMPARISON REPORTS — structure: header (insurer + product per side) → per-section table appropriate to the type (travel: medical/cancellation/delay/baggage/personal accident/liability/optional; health: inpatient/outpatient/diagnostics/dental/pharmacy/geographic/excess; motor: third-party/own damage/theft/fire/legal/no-claims) → per-line winner tag (✓ CURRENT / ✓ ΤΡΕΧΟΝ in green, ✓ ALTERNATIVE / ✓ ΕΝΑΛΛΑΚΤΙΚΟ in blue, = TIE / = ΙΣΟΠΑΛΙΑ in grey) → winner tally → RETAIN/SWITCH recommendation with numbered reasons ① ② ③. If a PDF is partial (e.g. only the Table of Benefits page provided), state it explicitly in a "Key Caveat / Σημαντική Επιφύλαξη" section. NEVER invent numbers — write "Δεν αναφέρεται / Not stated" when data is absent. IMPORTANT: Never use the word "Proposed" or "Προτεινόμενο" — the second policy is always an "Alternative" / "Εναλλακτικό" being compared, not a recommendation.
 
-LANGUAGE FOR CLIENT-FACING REPORTS — default to bilingual (Greek section first, English section below, each half self-contained with its own header/table/summary/recommendation, separated by a coloured horizontal rule). This serves both Greek nationals and international expats from one document. Switch to single-language only if the user asks, or if context makes the audience unambiguous (e.g. message is in English and client name is non-Greek).
+LANGUAGE FOR CLIENT-FACING REPORTS — default to bilingual (English section first, Greek section below, each half self-contained with its own header/table/summary/recommendation, separated by a coloured horizontal rule). This serves both international expats and Greek nationals from one document. Switch to single-language only if the user asks, or if context makes the audience unambiguous.
 
 MEMORY — IMPORTANT:
 You have persistent memory of business conversations from the last 7 days (rolling window). This memory is automatically injected into your context below as "=== ROLLING MEMORY ===". USE IT actively.
@@ -1228,13 +1228,13 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     def _looks_like_header(row):
                         joined = " ".join(row).lower()
                         return any(x in joined for x in [
-                            "benefit", "feature", "current", "proposed", "winner", "verdict",
-                            "παροχ", "τρέχ", "τρεχ", "προτειν", "νικητ", "ετυμηγορ"
+                            "benefit", "feature", "current", "proposed", "alternative", "winner", "verdict",
+                            "παροχ", "τρέχ", "τρεχ", "προτειν", "εναλλ", "νικητ", "ετυμηγορ"
                         ])
 
                     def _verdict_bg(txt):
                         t = (txt or "").lower()
-                        if "proposed" in t or "προτειν" in t or "eur" in t or "europ" in t:
+                        if "alternative" in t or "εναλλ" in t or "proposed" in t or "προτειν" in t or "eur" in t or "europ" in t:
                             return LIGHT_ORANGE
                         if "current" in t or "τρέχ" in t or "τρεχ" in t or "voy" in t or "voyager" in t:
                             return LIGHT_GREEN
@@ -1380,7 +1380,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     summary_cells = [
                         Paragraph("<b>Client:</b> " + _html.escape(_clean(client_name or "Not stated")), body),
                         Paragraph("<b>Current:</b> " + _html.escape(_clean(current_name or "Current policy")), body),
-                        Paragraph("<b>Proposed:</b> " + _html.escape(_clean(proposed_name or "Proposed policy")), body),
+                        Paragraph("<b>Alternative:</b> " + _html.escape(_clean(proposed_name or "Alternative policy")), body),
                     ]
                     summary = Table([summary_cells], colWidths=[available_w*.30, available_w*.35, available_w*.35])
                     summary.setStyle(TableStyle([
@@ -1483,7 +1483,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
 PDF REPORT MODE — Do NOT use code execution. Produce the complete client-facing report as clean Markdown text only.
 For insurance comparisons, be compact and table-first, matching a professional comparison PDF style: header data, sectioned Markdown tables, winner tally, and RETAIN/SWITCH recommendation.
 Use bilingual Greek first / English second ONLY if the user explicitly asks for bilingual / δίγλωσσο. Otherwise use the user's language, and for travel-policy client reports default to English if the source policies are English.
-Use Markdown tables with 4 columns whenever possible: BENEFIT / FEATURE | CURRENT | PROPOSED | VERDICT.
+Use Markdown tables with 4 columns whenever possible: BENEFIT / FEATURE | CURRENT | ALTERNATIVE | VERDICT. Never use the word "Proposed" — always "Alternative".
 Keep caveats explicit, never invent missing limits, and avoid long prose that duplicates the table.
 Do not say that you are creating a PDF; just write the full report content.
 """
