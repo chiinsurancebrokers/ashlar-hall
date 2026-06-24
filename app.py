@@ -970,19 +970,29 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                 client = anthropic.Anthropic(api_key=api_key)
                 messages = _hal_build_api_messages(st.session_state.chat_history)
 
-                def _latest_user_text():
+                def _latest_user_message():
                     for _m in reversed(st.session_state.chat_history):
                         if _m.get("role") == "user":
-                            return (_m.get("content") or "")
-                    return ""
+                            return _m
+                    return {}
+
+                def _latest_user_text():
+                    return (_latest_user_message().get("content") or "")
+
+                def _latest_user_has_attachments():
+                    return bool(_latest_user_message().get("attachments") or [])
 
                 def _looks_like_pdf_request(text):
                     _t = (text or "").lower()
-                    return any(_k in _t for _k in (
+                    _strong_pdf_words = (
                         "pdf", "report", "αναφορά", "αναφορα", "ανάλυση", "αναλυση",
-                        "σύγκριση", "συγκριση", "παράγω", "παραγω", "generate a pdf",
-                        "φτιάξε pdf", "φτιαξε pdf", "δημιούργησε pdf", "δημιουργησε pdf",
-                    ))
+                        "σύγκριση", "συγκριση", "compare", "comparison", "vs", "versus",
+                        "παράγω", "παραγω", "generate a pdf", "φτιάξε pdf", "φτιαξε pdf",
+                        "δημιούργησε pdf", "δημιουργησε pdf", "ασφαλισ", "policy", "policies",
+                        "voyager", "europesure", "supreme", "platinum", "retain", "switch",
+                    )
+                    # In HAL, uploaded PDFs + any comparison/insurance wording should enter local PDF mode.
+                    return any(_k in _t for _k in _strong_pdf_words) or (_latest_user_has_attachments() and len(_t.strip()) > 0)
 
                 def _build_pdf_from_text(title, text):
                     """Local deterministic PDF builder. This avoids relying on Anthropic's
@@ -1096,6 +1106,7 @@ Use bilingual Greek first / English second unless the user explicitly asks other
 Use clear headings, comparison tables in Markdown, caveats, winner tally, and final RETAIN/SWITCH recommendation.
 Do not say that you are creating a PDF; just write the full report content.
 """
+                    st.caption("PDF mode: asking HAL for report text, then building the PDF locally...")
                     pdf_response = client.beta.messages.create(
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=pdf_system, messages=messages,
