@@ -969,6 +969,536 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
             try:
                 client = anthropic.Anthropic(api_key=api_key)
                 messages = _hal_build_api_messages(st.session_state.chat_history)
+
+                def _latest_user_message():
+                    for _m in reversed(st.session_state.chat_history):
+                        if _m.get("role") == "user":
+                            return _m
+                    return {}
+
+                def _latest_user_text():
+                    return (_latest_user_message().get("content") or "")
+
+                def _latest_user_has_attachments():
+                    return bool(_latest_user_message().get("attachments") or [])
+
+                def _looks_like_pdf_request(text):
+                    _t = (text or "").lower()
+                    _strong_pdf_words = (
+                        "pdf", "report", "αναφορά", "αναφορα", "ανάλυση", "αναλυση",
+                        "σύγκριση", "συγκριση", "compare", "comparison", "vs", "versus",
+                        "παράγω", "παραγω", "generate a pdf", "φτιάξε pdf", "φτιαξε pdf",
+                        "δημιούργησε pdf", "δημιουργησε pdf", "ασφαλισ", "policy", "policies",
+                        "voyager", "europesure", "supreme", "platinum", "retain", "switch",
+                    )
+                    # In HAL, uploaded PDFs + any comparison/insurance wording should enter local PDF mode.
+                    return any(_k in _t for _k in _strong_pdf_words) or (_latest_user_has_attachments() and len(_t.strip()) > 0)
+
+                def _build_pdf_from_text(title, text):
+                    """Local deterministic PDF builder for comparison reports.
+
+                    v7: render Markdown tables as real ReportLab tables and use a
+                    branded comparison layout, rather than flattening table rows into
+                    paragraph text. This keeps the output close to the original
+                    travel_comparison.pdf style.
+                    """
+                    from io import BytesIO
+                    import html as _html
+                    from reportlab.lib import colors
+                    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+                    from reportlab.lib.pagesizes import A4
+                    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+                    from reportlab.lib.units import cm
+                    from reportlab.platypus import (
+                        SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table,
+                        TableStyle, KeepTogether
+                    )
+                    from reportlab.pdfbase import pdfmetrics
+                    from reportlab.pdfbase.ttfonts import TTFont
+                    from reportlab.pdfbase.pdfmetrics import registerFontFamily
+
+                    NAVY = colors.HexColor("#17294A")
+                    BLUE = colors.HexColor("#1D67B7")
+                    ORANGE = colors.HexColor("#E84A00")
+                    GOLD = colors.HexColor("#C9A94C")
+                    LIGHT_BLUE = colors.HexColor("#E7F2FF")
+                    LIGHT_GREEN = colors.HexColor("#E7F6EA")
+                    LIGHT_ORANGE = colors.HexColor("#FFF2D8")
+                    LIGHT_GREY = colors.HexColor("#EEF2F5")
+                    CREAM = colors.HexColor("#FFF8DF")
+                    GRID = colors.HexColor("#D2D8DE")
+                    TEXT = colors.HexColor("#1F2937")
+
+                    def _register_font_safe():
+                        """Register Unicode fonts that support Greek.
+
+                        Important:
+                        - Never use ReportLab's Helvetica/Times/Courier for Greek.
+                        - Avoid short names like GF/GFBold because ReportLab may try to
+                          infer a missing family and raise:
+                          "Can't map determine family/bold/italic".
+                        - On Streamlit Cloud / Linux, DejaVu is usually available. If it is
+                          not, we also try Noto, Liberation, FreeSans, and Matplotlib's
+                          bundled DejaVu before failing with a clear error.
+                        """
+                        import os as _os
+                        import glob as _glob
+                        import subprocess as _subprocess
+
+                        def _add_if_exists(target, value):
+                            if value and isinstance(value, str) and _os.path.exists(value) and value not in target:
+                                target.append(value)
+
+                        regular_candidates = []
+                        bold_candidates = []
+
+                        # 1) Known Linux / Streamlit / Docker paths
+                        for _p in [
+                            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                            "/usr/local/share/fonts/DejaVuSans.ttf",
+                            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                            "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
+                            "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+                            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+                        ]:
+                            _add_if_exists(regular_candidates, _p)
+
+                        for _p in [
+                            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                            "/usr/local/share/fonts/DejaVuSans-Bold.ttf",
+                            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+                            "/usr/share/fonts/opentype/noto/NotoSans-Bold.ttf",
+                            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+                            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+                        ]:
+                            _add_if_exists(bold_candidates, _p)
+
+                        # 2) Ask fontconfig for Greek-capable fonts if available
+                        for _query, _dest in [
+                            ("DejaVu Sans:lang=el", regular_candidates),
+                            ("Noto Sans:lang=el", regular_candidates),
+                            ("Liberation Sans:lang=el", regular_candidates),
+                        ]:
+                            try:
+                                _fc = _subprocess.run(
+                                    ["fc-match", "-f", "%{file}\n", _query],
+                                    capture_output=True, text=True, timeout=2,
+                                )
+                                if _fc.returncode == 0:
+                                    _add_if_exists(_dest, _fc.stdout.strip().splitlines()[0])
+                            except Exception:
+                                pass
+
+                        # 3) Matplotlib bundles DejaVu in many Python deployments
+                        try:
+                            from matplotlib import font_manager as _fm
+                            _add_if_exists(regular_candidates, _fm.findfont("DejaVu Sans", fallback_to_default=False))
+                            _add_if_exists(bold_candidates, _fm.findfont("DejaVu Sans:bold", fallback_to_default=False))
+                        except Exception:
+                            pass
+
+                        # 4) Last-resort recursive scan
+                        for _pattern in [
+                            "/usr/share/fonts/**/DejaVuSans.ttf",
+                            "/usr/share/fonts/**/NotoSans-Regular.ttf",
+                            "/usr/share/fonts/**/LiberationSans-Regular.ttf",
+                            "/usr/share/fonts/**/FreeSans.ttf",
+                        ]:
+                            for _p in _glob.glob(_pattern, recursive=True):
+                                _add_if_exists(regular_candidates, _p)
+
+                        for _pattern in [
+                            "/usr/share/fonts/**/DejaVuSans-Bold.ttf",
+                            "/usr/share/fonts/**/NotoSans-Bold.ttf",
+                            "/usr/share/fonts/**/LiberationSans-Bold.ttf",
+                            "/usr/share/fonts/**/FreeSansBold.ttf",
+                        ]:
+                            for _p in _glob.glob(_pattern, recursive=True):
+                                _add_if_exists(bold_candidates, _p)
+
+                        regular_path = next((x for x in regular_candidates if _os.path.exists(x)), None)
+                        bold_path = next((x for x in bold_candidates if _os.path.exists(x)), None) or regular_path
+
+                        if not regular_path:
+                            raise RuntimeError(
+                                "No Greek-capable TrueType font found. "
+                                "For Streamlit Cloud add a packages.txt file containing: fonts-dejavu-core"
+                            )
+
+                        normal_name = "HALGreekUnicodeRegular"
+                        bold_name = "HALGreekUnicodeBold"
+
+                        if normal_name not in pdfmetrics.getRegisteredFontNames():
+                            pdfmetrics.registerFont(TTFont(normal_name, regular_path))
+                        if bold_name not in pdfmetrics.getRegisteredFontNames():
+                            pdfmetrics.registerFont(TTFont(bold_name, bold_path))
+
+                        # Map the family explicitly so <b>...</b> inside Paragraph
+                        # works without ReportLab trying to guess "bold/italic".
+                        registerFontFamily(
+                            "HALGreekUnicode",
+                            normal=normal_name,
+                            bold=bold_name,
+                            italic=normal_name,
+                            boldItalic=bold_name,
+                        )
+                        return normal_name, bold_name
+
+                    normal_font, bold_font = _register_font_safe()
+                    page_w, page_h = A4
+                    left_margin = right_margin = 0.9 * cm
+                    top_margin = 0.9 * cm
+                    bottom_margin = 1.0 * cm
+                    available_w = page_w - left_margin - right_margin
+
+                    styles = getSampleStyleSheet()
+                    body = ParagraphStyle(
+                        "HALBodyV7", parent=styles["BodyText"], fontName=normal_font,
+                        fontSize=8.4, leading=10.4, textColor=TEXT, alignment=TA_LEFT,
+                        spaceAfter=4,
+                    )
+                    small = ParagraphStyle(
+                        "HALSmallV7", parent=body, fontName=normal_font,
+                        fontSize=7.1, leading=8.6, textColor=colors.HexColor("#52616B"),
+                    )
+                    h1 = ParagraphStyle(
+                        "HALH1V7", parent=body, fontName=bold_font,
+                        fontSize=17.5, leading=21, textColor=colors.white,
+                    )
+                    h2 = ParagraphStyle(
+                        "HALH2V7", parent=body, fontName=bold_font,
+                        fontSize=10.8, leading=13, textColor=NAVY,
+                        spaceBefore=7, spaceAfter=5,
+                    )
+                    table_header = ParagraphStyle(
+                        "HALTableHeaderV7", parent=body, fontName=bold_font,
+                        fontSize=7.8, leading=9.1, textColor=colors.white,
+                        alignment=TA_CENTER,
+                    )
+                    cell = ParagraphStyle(
+                        "HALTableCellV7", parent=body, fontName=normal_font,
+                        fontSize=7.15, leading=8.6, alignment=TA_CENTER,
+                    )
+                    cell_left = ParagraphStyle(
+                        "HALTableCellLeftV7", parent=cell, alignment=TA_LEFT,
+                    )
+                    cell_bold = ParagraphStyle(
+                        "HALTableCellBoldV7", parent=cell, fontName=bold_font,
+                    )
+
+                    def _clean(s):
+                        s = (s or "").replace("\uf0a7", "■")
+                        # Avoid glyphs that caused boxes in some ReportLab/PDF extractors.
+                        repl = {
+                            "✓": "OK", "✔": "OK", "✗": "NO", "✈": "-", "⚕": "+",
+                            "🚗": "-", "①": "1)", "②": "2)", "③": "3)", "④": "4)",
+                            "⑤": "5)", "⑥": "6)", "⑦": "7)", "⑧": "8)", "⑨": "9)", "⑩": "10)",
+                        }
+                        for a, b in repl.items():
+                            s = s.replace(a, b)
+                        return s.strip()
+
+                    def _inline(s):
+                        s = _html.escape(_clean(s))
+                        s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+                        s = re.sub(r"__(.+?)__", r"<b>\1</b>", s)
+                        return s
+
+                    def _p(s, style=body):
+                        return Paragraph(_inline(s), style)
+
+                    def _is_separator_row(line):
+                        compact = line.strip().strip("|").replace(" ", "")
+                        return bool(compact) and set(compact) <= set("-:|")
+
+                    def _parse_table(lines):
+                        rows = []
+                        for ln in lines:
+                            if _is_separator_row(ln):
+                                continue
+                            parts = [c.strip() for c in ln.strip().strip("|").split("|")]
+                            if len(parts) >= 2:
+                                rows.append(parts)
+                        if not rows:
+                            return None
+                        max_cols = max(len(r) for r in rows)
+                        rows = [r + [""] * (max_cols - len(r)) for r in rows]
+                        return rows
+
+                    def _looks_like_header(row):
+                        joined = " ".join(row).lower()
+                        return any(x in joined for x in [
+                            "benefit", "feature", "current", "proposed", "winner", "verdict",
+                            "παροχ", "τρέχ", "τρεχ", "προτειν", "νικητ", "ετυμηγορ"
+                        ])
+
+                    def _verdict_bg(txt):
+                        t = (txt or "").lower()
+                        if "proposed" in t or "προτειν" in t or "eur" in t or "europ" in t:
+                            return LIGHT_ORANGE
+                        if "current" in t or "τρέχ" in t or "τρεχ" in t or "voy" in t or "voyager" in t:
+                            return LIGHT_GREEN
+                        if "tie" in t or "ισοπαλ" in t or "=" in t:
+                            return LIGHT_GREY
+                        return colors.white
+
+                    def _table_from_rows(rows):
+                        if not rows:
+                            return []
+                        ncols = len(rows[0])
+                        header = _looks_like_header(rows[0])
+                        data = []
+                        for ri, row in enumerate(rows):
+                            out_row = []
+                            for ci, val in enumerate(row):
+                                sty = table_header if ri == 0 and header else (cell_left if ci == 0 else cell)
+                                out_row.append(Paragraph(_inline(val), sty))
+                            data.append(out_row)
+
+                        if ncols >= 4:
+                            widths = [available_w * .32, available_w * .27, available_w * .27, available_w * .14]
+                            widths = widths[:ncols]
+                        elif ncols == 3:
+                            widths = [available_w * .34, available_w * .33, available_w * .33]
+                        elif ncols == 2:
+                            widths = [available_w * .34, available_w * .66]
+                        else:
+                            widths = [available_w / ncols] * ncols
+
+                        tbl = Table(data, colWidths=widths, repeatRows=1 if header else 0, hAlign="LEFT")
+                        ts = TableStyle([
+                            ("GRID", (0, 0), (-1, -1), 0.35, GRID),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                            ("TOPPADDING", (0, 0), (-1, -1), 5),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                        ])
+                        start_data = 0
+                        if header:
+                            for ci in range(ncols):
+                                bg = NAVY
+                                if ncols >= 4 and ci == 1:
+                                    bg = BLUE
+                                elif ncols >= 4 and ci == 2:
+                                    bg = ORANGE
+                                elif ncols >= 4 and ci == 3:
+                                    bg = GOLD
+                                ts.add("BACKGROUND", (ci, 0), (ci, 0), bg)
+                            ts.add("TEXTCOLOR", (0, 0), (-1, 0), colors.white)
+                            ts.add("FONTNAME", (0, 0), (-1, 0), bold_font)
+                            start_data = 1
+                        for ri in range(start_data, len(rows)):
+                            if ri % 2 == start_data % 2:
+                                ts.add("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#F7F7F7"))
+                            if ncols >= 4:
+                                ts.add("BACKGROUND", (ncols - 1, ri), (ncols - 1, ri), _verdict_bg(rows[ri][ncols - 1]))
+                                ts.add("FONTNAME", (ncols - 1, ri), (ncols - 1, ri), bold_font)
+                        tbl.setStyle(ts)
+                        return [tbl, Spacer(1, 7)]
+
+                    def _section_bar(text_value):
+                        label = _clean(text_value).strip("# ").strip()
+                        if label.startswith("■"):
+                            label = label.lstrip("■ ").strip()
+                        bar = Table(
+                            [[Paragraph(_html.escape("■ " + label.upper()), ParagraphStyle(
+                                "HALSectionBarTextV7", parent=body, fontName=bold_font,
+                                fontSize=9.3, leading=11, textColor=colors.white,
+                            ))]],
+                            colWidths=[available_w], hAlign="LEFT"
+                        )
+                        bar.setStyle(TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+                            ("TOPPADDING", (0, 0), (-1, -1), 5),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                        ]))
+                        return KeepTogether([Spacer(1, 5), bar, Spacer(1, 3)])
+
+                    def _extract_summary(source):
+                        current = proposed = client = ""
+                        for line in source.splitlines():
+                            low = line.lower()
+                            if "insured persons" in low or "ασφαλισ" in low:
+                                if "|" in line:
+                                    parts = [p.strip() for p in line.strip("|").split("|")]
+                                    if len(parts) >= 3 and not client:
+                                        client = parts[1]
+                            if "product" in low or "προϊόν" in low or "προϊ" in low:
+                                if "|" in line:
+                                    parts = [p.strip() for p in line.strip("|").split("|")]
+                                    if len(parts) >= 3:
+                                        current, proposed = parts[1], parts[2]
+                        return client, current, proposed
+
+                    source_text = text or ""
+                    title_text = title or "HAL Insurance Report"
+                    if re.search(r"voyager|europesure|travel insurance|ταξιδ", source_text, re.I):
+                        title_text = "TRAVEL INSURANCE COMPARISON"
+                    elif re.search(r"insurance comparison|σύγκριση ασφαλισ", source_text, re.I):
+                        title_text = "INSURANCE POLICY COMPARISON"
+
+                    buf = BytesIO()
+                    doc = SimpleDocTemplate(
+                        buf, pagesize=A4, rightMargin=right_margin, leftMargin=left_margin,
+                        topMargin=top_margin, bottomMargin=bottom_margin,
+                        title=title_text,
+                    )
+                    story = []
+
+                    header = Table(
+                        [[Paragraph(_html.escape(title_text), h1), Paragraph("Prepared by Ashlar Insurance", ParagraphStyle(
+                            "HALPreparedV7", parent=body, fontName=normal_font, fontSize=10.5,
+                            leading=13, textColor=colors.white, alignment=TA_CENTER,
+                        ))]],
+                        colWidths=[available_w * .68, available_w * .32]
+                    )
+                    header.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                        ("TOPPADDING", (0, 0), (-1, -1), 12),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ]))
+                    story.append(header)
+                    story.append(Spacer(1, 8))
+
+                    client_name, current_name, proposed_name = _extract_summary(source_text)
+                    summary_cells = [
+                        Paragraph("<b>Client:</b> " + _html.escape(_clean(client_name or "Not stated")), body),
+                        Paragraph("<b>Current:</b> " + _html.escape(_clean(current_name or "Current policy")), body),
+                        Paragraph("<b>Proposed:</b> " + _html.escape(_clean(proposed_name or "Proposed policy")), body),
+                    ]
+                    summary = Table([summary_cells], colWidths=[available_w*.30, available_w*.35, available_w*.35])
+                    summary.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, -1), CREAM),
+                        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#D6C276")),
+                        ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D6C276")),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                        ("TOPPADDING", (0, 0), (-1, -1), 6),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ]))
+                    story.append(summary)
+                    story.append(Spacer(1, 10))
+
+                    lines = source_text.splitlines()
+                    i = 0
+                    while i < len(lines):
+                        raw = lines[i].rstrip()
+                        stripped = raw.strip()
+                        if not stripped:
+                            story.append(Spacer(1, 3))
+                            i += 1
+                            continue
+
+                        if stripped.startswith("|") and "|" in stripped[1:]:
+                            table_lines = []
+                            while i < len(lines) and lines[i].strip().startswith("|") and "|" in lines[i].strip()[1:]:
+                                table_lines.append(lines[i].strip())
+                                i += 1
+                            rows = _parse_table(table_lines)
+                            story.extend(_table_from_rows(rows))
+                            continue
+
+                        # Use section bars for lettered sections, explicit square sections, and recommendation blocks.
+                        if (
+                            re.match(r"^[A-ZΑ-Ω]\.?\s+", stripped)
+                            or stripped.startswith("■")
+                            or stripped.upper().startswith("RECOMMENDATION")
+                            or "ΣΥΣΤΑΣΗ" in stripped.upper()
+                            or "WINNER TALLY" in stripped.upper()
+                            or "ΑΠΟΤΕΛΕΣΜΑ" in stripped.upper()
+                        ):
+                            story.append(_section_bar(stripped.lstrip("# ")))
+                            i += 1
+                            continue
+
+                        if stripped.startswith("#"):
+                            txt = stripped.lstrip("# ").strip()
+                            if len(txt) > 0:
+                                story.append(Paragraph(_inline(txt), h2))
+                            i += 1
+                            continue
+
+                        if "caveat" in stripped.lower() or "επιφύλαξη" in stripped.lower() or "critical" in stripped.lower() or "κρίσιμη" in stripped.lower():
+                            call = Table([[Paragraph(_inline(stripped), small)]], colWidths=[available_w])
+                            call.setStyle(TableStyle([
+                                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF6D8")),
+                                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E5C55B")),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                            ]))
+                            story.append(call)
+                            story.append(Spacer(1, 5))
+                            i += 1
+                            continue
+
+                        if stripped in ("---", "***"):
+                            story.append(HRFlowable(width="100%", thickness=.6, color=GRID, spaceBefore=5, spaceAfter=7))
+                            i += 1
+                            continue
+
+                        if stripped.startswith(("- ", "* ", "• ")):
+                            story.append(Paragraph("• " + _inline(stripped[2:].strip()), body))
+                        else:
+                            story.append(Paragraph(_inline(stripped), body))
+                        i += 1
+
+                    def _footer(canvas, doc_obj):
+                        canvas.saveState()
+                        canvas.setFont(normal_font, 7)
+                        canvas.setFillColor(colors.HexColor("#6B7780"))
+                        canvas.drawString(left_margin, .55 * cm, "Prepared by HAL / Ashlar Insurance - ashlar-assurance.com")
+                        canvas.drawRightString(page_w - right_margin, .55 * cm, "Page %d" % doc_obj.page)
+                        canvas.restoreState()
+
+                    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+                    return buf.getvalue()
+
+                # Stable path for client-facing PDF/report requests:
+                # ask Claude for the full report as text, then build the PDF locally.
+                # This avoids the fragile server-side code_execution result-block protocol.
+                if _looks_like_pdf_request(_latest_user_text()):
+                    pdf_system = system + """
+
+PDF REPORT MODE — Do NOT use code execution. Produce the complete client-facing report as clean Markdown text only.
+For insurance comparisons, be compact and table-first, matching a professional comparison PDF style: header data, sectioned Markdown tables, winner tally, and RETAIN/SWITCH recommendation.
+Use bilingual Greek first / English second ONLY if the user explicitly asks for bilingual / δίγλωσσο. Otherwise use the user's language, and for travel-policy client reports default to English if the source policies are English.
+Use Markdown tables with 4 columns whenever possible: BENEFIT / FEATURE | CURRENT | PROPOSED | VERDICT.
+Keep caveats explicit, never invent missing limits, and avoid long prose that duplicates the table.
+Do not say that you are creating a PDF; just write the full report content.
+"""
+                    st.caption("PDF mode: asking HAL for report text, then building the PDF locally...")
+                    pdf_response = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
+                        system=pdf_system, messages=messages,
+                        betas=["files-api-2025-04-14"],
+                    )
+                    report_text = "\n".join(
+                        getattr(b, "text", "") for b in pdf_response.content
+                        if getattr(b, "type", "") == "text"
+                    ).strip()
+                    if not report_text:
+                        report_text = "HAL generated no text for this report. Please retry with shorter source files."
+                    fname = "HAL_Insurance_Report_" + datetime.now().strftime("%Y%m%d_%H%M") + ".pdf"
+                    pdf_bytes = _build_pdf_from_text("HAL Insurance Report", report_text)
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": "Έτοιμο. / Done. 📎 **" + fname + "** — διαθέσιμο για λήψη παρακάτω."
+                    })
+                    st.session_state["hal_last_files"] = [(fname, pdf_bytes)]
+                    if not is_private:
+                        conv_ws = st.session_state.get("_conv_ws")
+                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", report_text[:45000])
+                    return
+
                 code_exec_system = system + """
 
 CODE EXECUTION — you have a sandboxed Python/Bash environment (no internet access inside it).
@@ -984,18 +1514,29 @@ you create that the user should receive. If you find yourself about to write a c
 reply for the user to copy, stop — run it in the sandbox instead.
 
 GREEK FONTS IN PDFs — CRITICAL. ReportLab's default fonts (Helvetica, Times-Roman, Courier) DO NOT
-support Greek diacritics (ά έ ή ί ό ύ ώ) — they render as "■". For ANY PDF that might contain Greek
-text (client names, insurer names, Greek body text), register DejaVuSans BEFORE building anything:
+support Greek diacritics (ά έ ή ί ό ύ ώ). For ANY PDF that might contain Greek text, register a Unicode
+TTF font and use it everywhere. Use explicit font names, NOT short aliases such as GF/GFBold:
 
+    import os
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    pdfmetrics.registerFont(TTFont("GF",     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
-    pdfmetrics.registerFont(TTFont("GFBold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
+    from reportlab.pdfbase.pdfmetrics import registerFontFamily
+    REG = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    if not os.path.exists(REG):
+        raise RuntimeError("DejaVuSans.ttf not found — cannot render Greek safely")
+    pdfmetrics.registerFont(TTFont("HALGreekUnicodeRegular", REG))
+    pdfmetrics.registerFont(TTFont("HALGreekUnicodeBold", BOLD if os.path.exists(BOLD) else REG))
+    registerFontFamily(
+        "HALGreekUnicode",
+        normal="HALGreekUnicodeRegular",
+        bold="HALGreekUnicodeBold",
+        italic="HALGreekUnicodeRegular",
+        boldItalic="HALGreekUnicodeBold",
+    )
 
-Then use "GF" / "GFBold" in EVERY ParagraphStyle, TableStyle FONTNAME entry, and canvas.setFont call.
-Never leave a default fontName= in any style. For a quick sanity check after building, open the PDF
-with fitz and confirm "άέή" appear in the extracted text — if "■" shows up, a style is still using
-Helvetica somewhere.
+Then use "HALGreekUnicodeRegular" / "HALGreekUnicodeBold" in EVERY ParagraphStyle, TableStyle FONTNAME
+entry, and canvas.setFont call. Never use Helvetica for Greek.
 
 SINGLE-SCRIPT EXECUTION — when producing a non-trivial PDF, put font setup, content build, AND the
 base64 emission in ONE Python script run via code_execution. Run the whole pipeline top-to-bottom in
@@ -1027,9 +1568,23 @@ times it appears in memory or chat history above."""
                     model="claude-sonnet-4-6", max_tokens=8192,
                     system=code_exec_system, messages=messages,
                     tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                    betas=["code-execution-2025-08-25"],
+                    betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
                 )
                 all_blocks = list(response.content)
+
+                def _safe_assistant_text_content(content_blocks):
+                    """Return ONLY plain assistant text for follow-up API messages.
+                    Do not re-send raw code_execution/server_tool_use blocks; the API
+                    rejects an assistant tool-use block unless the exact paired
+                    tool_result block is also present in the correct protocol shape.
+                    """
+                    parts = []
+                    for _b in content_blocks or []:
+                        if getattr(_b, "type", None) == "text":
+                            _txt = getattr(_b, "text", "") or ""
+                            if _txt.strip():
+                                parts.append(_txt.strip())
+                    return "\n".join(parts).strip() or "Continuing after code execution attempt."
 
                 # Code execution on a non-trivial task (e.g. building a multi-section PDF) can
                 # pause mid-turn; resubmitting lets Claude continue rather than the user seeing a
@@ -1037,12 +1592,12 @@ times it appears in memory or chat history above."""
                 # before a pause must not be dropped when a later turn's response replaces `response`.
                 _continue_attempts = 0
                 while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
-                    messages = messages + [{"role": "assistant", "content": response.content}]
+                    messages = messages + [{"role": "assistant", "content": _safe_assistant_text_content(response.content)}]
                     response = client.beta.messages.create(
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                        betas=["code-execution-2025-08-25"],
+                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
                     )
                     all_blocks.extend(response.content)
                     _continue_attempts += 1
@@ -1078,7 +1633,7 @@ times it appears in memory or chat history above."""
                     if not any(p in _text_so_far for p in _intent_phrases):
                         break  # no intent to build → don't nudge; HAL legitimately just chatted
                     messages = messages + [
-                        {"role": "assistant", "content": response.content},
+                        {"role": "assistant", "content": _safe_assistant_text_content(response.content)},
                         {"role": "user", "content": (
                             "Συνέχισε — εκτέλεσε ΤΩΡΑ το script στο sandbox και παρήγαγε το αρχείο. "
                             "Continue — actually invoke code_execution now and produce the file. "
@@ -1091,18 +1646,18 @@ times it appears in memory or chat history above."""
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                        betas=["code-execution-2025-08-25"],
+                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
                     )
                     all_blocks.extend(response.content)
                     _nudge_attempts += 1
                     # If this continuation itself paused, drain the pause_turn loop again.
                     while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
-                        messages = messages + [{"role": "assistant", "content": response.content}]
+                        messages = messages + [{"role": "assistant", "content": _safe_assistant_text_content(response.content)}]
                         response = client.beta.messages.create(
                             model="claude-sonnet-4-6", max_tokens=8192,
                             system=code_exec_system, messages=messages,
                             tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                            betas=["code-execution-2025-08-25"],
+                            betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
                         )
                         all_blocks.extend(response.content)
                         _continue_attempts += 1
@@ -1110,67 +1665,159 @@ times it appears in memory or chat history above."""
                 reply_parts = []
                 generated_files = []  # list of (filename, raw_bytes)
                 tool_diagnostics = []  # human-readable trace of each tool call
-                for block in all_blocks:
-                    btype = getattr(block, "type", None)
-                    if btype == "text":
-                        reply_parts.append(block.text)
-                        continue
+                _seen_file_ids = set()
 
-                    # Track which tools HAL invoked, so if nothing visible comes out
-                    # we can show the user what was attempted instead of going silent.
-                    if btype in ("server_tool_use", "tool_use"):
-                        tool_name = getattr(block, "name", "?")
-                        tool_diagnostics.append(f"→ invoked `{tool_name}`")
-                        continue
+                def _obj_get(obj, name, default=None):
+                    """Works with Anthropic SDK objects and dicts."""
+                    if obj is None:
+                        return default
+                    if isinstance(obj, dict):
+                        return obj.get(name, default)
+                    return getattr(obj, name, default)
 
-                    # Code execution returns TWO different result block types:
-                    #   • bash_code_execution_tool_result  — when HAL runs a bash command
-                    #   • code_execution_tool_result       — when HAL runs a Python script
-                    # The SINGLE-SCRIPT EXECUTION rule pushes HAL toward Python, which
-                    # means most file emissions land in the Python block type. Parsing
-                    # only bash would silently drop every PDF HAL builds from Python.
-                    if btype not in ("bash_code_execution_tool_result",
-                                     "code_execution_tool_result"):
-                        continue
-
-                    content = getattr(block, "content", None)
-                    stdout = getattr(content, "stdout", "") if content else ""
-                    stderr = getattr(content, "stderr", "") if content else ""
-                    retcode = getattr(content, "return_code", None) if content else None
-                    err_type = getattr(content, "type", None) if content else None  # 'code_execution_tool_result_error' on failure
-
-                    files_before = len(generated_files)
-                    for fname, b64data in re.findall(
-                        r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
-                    ):
+                def _to_plain(obj):
+                    """Convert SDK/Pydantic blocks to plain dict/list where possible."""
+                    if obj is None or isinstance(obj, (str, int, float, bool)):
+                        return obj
+                    if isinstance(obj, (list, tuple)):
+                        return [_to_plain(x) for x in obj]
+                    if isinstance(obj, dict):
+                        return {k: _to_plain(v) for k, v in obj.items()}
+                    if hasattr(obj, "model_dump"):
                         try:
-                            generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
-                        except Exception as _decode_e:
-                            tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
+                            return _to_plain(obj.model_dump())
+                        except Exception:
+                            pass
+                    if hasattr(obj, "dict"):
+                        try:
+                            return _to_plain(obj.dict())
+                        except Exception:
+                            pass
+                    return obj
 
-                    # Python code_execution also returns files via content.content as
-                    # CodeExecutionOutput entries (file_id, type="code_execution_output").
-                    inner = getattr(content, "content", None) or []
-                    for out in inner:
-                        if getattr(out, "type", None) == "code_execution_output":
-                            fid = getattr(out, "file_id", "") or ""
-                            if fid:
-                                tool_diagnostics.append(f"📁 file output (file_id={fid}) — fetch path not yet wired")
+                def _download_file_id(fid, suggested_name=None, source="file_id"):
+                    if not fid or fid in _seen_file_ids:
+                        return
+                    _seen_file_ids.add(fid)
+                    try:
+                        meta = client.beta.files.retrieve_metadata(
+                            fid, betas=["files-api-2025-04-14"]
+                        )
+                        fname = (
+                            suggested_name
+                            or getattr(meta, "filename", None)
+                            or getattr(meta, "name", None)
+                            or f"file_{fid[:8]}"
+                        )
+                        resp = client.beta.files.download(
+                            fid, betas=["files-api-2025-04-14"]
+                        )
+                        file_bytes = resp.read() if hasattr(resp, "read") else bytes(resp)
+                        generated_files.append((fname, file_bytes))
+                        tool_diagnostics.append(
+                            f"✓ fetched `{fname}` from Files API ({len(file_bytes):,} bytes, via {source})"
+                        )
+                    except Exception as _fetch_e:
+                        tool_diagnostics.append(f"⚠️ file_id={fid} fetch failed: {_fetch_e}")
 
-                    files_this_block = len(generated_files) - files_before
-                    # Diagnostic line for this code execution result
-                    if err_type and "error" in str(err_type).lower():
-                        tool_diagnostics.append(
-                            f"❌ execution error ({btype}): {stderr.strip()[:500] or 'no stderr'}"
-                        )
-                    elif retcode not in (None, 0):
-                        tool_diagnostics.append(
-                            f"⚠️ exit {retcode} ({btype}) — stderr: {stderr.strip()[:300] or '(empty)'}"
-                        )
-                    elif files_this_block == 0 and stderr.strip():
-                        tool_diagnostics.append(
-                            f"ℹ️ {btype} ran OK but emitted no file. stderr: {stderr.strip()[:300]}"
-                        )
+                def _walk_for_file_ids(obj, source="nested"):
+                    """Recursively find file_id values in any current/future Anthropic block shape."""
+                    obj = _to_plain(obj)
+                    if isinstance(obj, dict):
+                        fid = obj.get("file_id") or obj.get("id") if str(obj.get("type", "")).endswith("_output") else obj.get("file_id")
+                        if fid:
+                            _download_file_id(str(fid), obj.get("filename") or obj.get("name"), source)
+                        for v in obj.values():
+                            _walk_for_file_ids(v, source)
+                    elif isinstance(obj, list):
+                        for v in obj:
+                            _walk_for_file_ids(v, source)
+
+                def _parse_blocks(blocks):
+                    for block in blocks:
+                        btype = _obj_get(block, "type", "")
+                        if btype == "text":
+                            txt = _obj_get(block, "text", "")
+                            if txt:
+                                reply_parts.append(txt)
+                            continue
+
+                        if btype in ("server_tool_use", "tool_use"):
+                            tool_name = _obj_get(block, "name", "?")
+                            tool_diagnostics.append(f"→ invoked `{tool_name}`")
+                            continue
+
+                        # Be liberal: Anthropic may return bash/python/text_editor tool results.
+                        # Docs list bash_code_execution_tool_result and text_editor_code_execution_tool_result;
+                        # streaming examples also show code_execution_tool_result.
+                        if not str(btype).endswith("_tool_result"):
+                            _walk_for_file_ids(block, source=btype or "block")
+                            continue
+
+                        content = _obj_get(block, "content", None)
+                        ctype = _obj_get(content, "type", "")
+                        stdout = _obj_get(content, "stdout", "") or ""
+                        stderr = _obj_get(content, "stderr", "") or ""
+                        retcode = _obj_get(content, "return_code", None)
+                        error_code = _obj_get(content, "error_code", "") or ""
+
+                        files_before = len(generated_files)
+
+                        # Primary path: file emitted as base64 sentinel in stdout.
+                        for fname, b64data in re.findall(
+                            r'===FILE:(.+?)===\s*\n(.*?)\n===ENDFILE===', stdout, re.DOTALL
+                        ):
+                            try:
+                                generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
+                                tool_diagnostics.append(f"✓ decoded `{fname.strip()}` from stdout base64")
+                            except Exception as _decode_e:
+                                tool_diagnostics.append(f"⚠️ base64 decode failed for `{fname.strip()}`: {_decode_e}")
+
+                        # Secondary path: generated output file references anywhere in the result.
+                        _walk_for_file_ids(content, source=btype)
+
+                        files_this_block = len(generated_files) - files_before
+                        if error_code:
+                            tool_diagnostics.append(f"❌ execution error ({btype}): {error_code}")
+                        elif ctype and "error" in str(ctype).lower():
+                            tool_diagnostics.append(
+                                f"❌ execution error ({btype}): {stderr.strip()[:500] or error_code or 'no stderr'}"
+                            )
+                        elif retcode not in (None, 0):
+                            tool_diagnostics.append(
+                                f"⚠️ exit {retcode} ({btype}) — stderr: {stderr.strip()[:300] or '(empty)'}"
+                            )
+                        elif files_this_block == 0 and stderr.strip():
+                            tool_diagnostics.append(
+                                f"ℹ️ {btype} ran OK but emitted no file. stderr: {stderr.strip()[:300]}"
+                            )
+
+                _parse_blocks(all_blocks)
+
+                # Last-resort recovery: a tool ran, but no file came back. Ask the same
+                # sandbox turn to list files and emit any generated PDF/DOCX/XLSX/PPTX as base64.
+                # This fixes cases where Claude created the PDF but forgot the ===FILE=== wrapper,
+                # or used text_editor/bash output shapes that do not expose a file_id.
+                if not generated_files and _has_tool_activity(all_blocks):
+                    messages = messages + [
+                        {"role": "assistant", "content": _safe_assistant_text_content(response.content)},
+                        {"role": "user", "content": (
+                            "Το εργαλείο εκτελέστηκε αλλά δεν επέστρεψε downloadable αρχείο. "
+                            "In the SAME code_execution sandbox, run: find/list generated files, "
+                            "then for every .pdf/.docx/.xlsx/.pptx/.png emit exactly: "
+                            "===FILE:filename=== newline base64 file newline ===ENDFILE===. "
+                            "If no file exists, recreate the requested PDF and emit it. No prose."
+                        )},
+                    ]
+                    response = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
+                        system=code_exec_system, messages=messages,
+                        tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                        betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
+                    )
+                    recovery_blocks = list(response.content)
+                    all_blocks.extend(recovery_blocks)
+                    _parse_blocks(recovery_blocks)
 
                 if reply_parts and generated_files:
                     reply = "\n".join(reply_parts).strip()
