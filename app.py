@@ -104,6 +104,9 @@ if "hal_uploader_nonce" not in st.session_state:
     # Bumped after a send so the file_uploader widget remounts empty
     # (Streamlit has no public API to clear an uploader without a key change).
     st.session_state.hal_uploader_nonce = 0
+if "hal_pdf_lang_pending" not in st.session_state:
+    # Set to the queued pdf_system prompt text while waiting for language choice.
+    st.session_state.hal_pdf_lang_pending = None
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def check_pin(pin_input):
@@ -674,7 +677,21 @@ FILE ATTACHMENTS — users can attach multiple files (PDFs, images, CSV, TXT) to
 
 REPORT vs CHAT — judge from context whether the right answer is a quick chat reply or a generated PDF deliverable. Produce a PDF when: (a) the user uploads multiple policies/quotes for side-by-side analysis, (b) they explicitly ask for a "report", "PDF", "ανάλυση", "σύγκριση", "αναφορά", "document", (c) the output is structured data with more than ~6 rows that would be unreadable as chat, or (d) the deliverable is something they would forward to a client. Otherwise reply in chat. When unsure, ask in one short line: "PDF ή απάντηση εδώ;" / "PDF or quick answer?"
 
-INSURANCE COMPARISON REPORTS — structure: header (insurer + product per side) → per-section table appropriate to the type (travel: medical/cancellation/delay/baggage/personal accident/liability/optional; health: inpatient/outpatient/diagnostics/dental/pharmacy/geographic/excess; motor: third-party/own damage/theft/fire/legal/no-claims) → per-line winner tag (✓ CURRENT / ✓ ΤΡΕΧΟΝ in green, ✓ ALTERNATIVE / ✓ ΕΝΑΛΛΑΚΤΙΚΟ in blue, = TIE / = ΙΣΟΠΑΛΙΑ in grey) → winner tally → RETAIN/SWITCH recommendation with numbered reasons ① ② ③. If a PDF is partial (e.g. only the Table of Benefits page provided), state it explicitly in a "Key Caveat / Σημαντική Επιφύλαξη" section. NEVER invent numbers — write "Δεν αναφέρεται / Not stated" when data is absent. IMPORTANT: Never use the word "Proposed" or "Προτεινόμενο" — the second policy is always an "Alternative" / "Εναλλακτικό" being compared, not a recommendation.
+INSURANCE COMPARISON REPORTS — structure: header (insurer + product per side) → per-section table appropriate to the type (travel: medical/cancellation/delay/baggage/personal accident/liability/optional; health: inpatient/outpatient/diagnostics/dental/pharmacy/geographic/excess; motor: third-party/own damage/theft/fire/legal/no-claims) → per-line winner tag → winner tally → RETAIN/SWITCH recommendation with numbered reasons ① ② ③. If a PDF is partial (e.g. only the Table of Benefits page provided), state it explicitly in a "Key Caveat / Σημαντική Επιφύλαξη" section. NEVER invent numbers — write "Δεν αναφέρεται / Not stated" when data is absent. IMPORTANT: Never use the word "Proposed" or "Προτεινόμενο" — the second policy is always an "Alternative" / "Εναλλακτικό" being compared, not a recommendation.
+
+VERDICT TAGS — use exactly these in the VERDICT column:
+- ✓+ CURRENT / ✓+ ΤΡΕΧΟΝ (green) — Current policy is materially/significantly better
+- ✓ CURRENT / ✓ ΤΡΕΧΟΝ (green) — Current policy is marginally better
+- ✓+ ALTERNATIVE / ✓+ ΕΝΑΛΛΑΚΤΙΚΟ (blue) — Alternative is materially/significantly better
+- ✓ ALTERNATIVE / ✓ ΕΝΑΛΛΑΚΤΙΚΟ (blue) — Alternative is marginally better
+- = TIE / = ΙΣΟΠΑΛΙΑ (grey) — equivalent or negligible difference
+Use ✓+ when the difference is >20% or clearly significant (e.g. €15,000 vs €50,000 PA, €3,500 vs €7,500 baggage).
+Use ✓ when the difference is real but small (e.g. €35,000 vs €25,000 legal expenses).
+
+DATA ACCURACY RULES:
+- Trip duration: If a policy certificate does not state a per-trip limit, write "Not stated / unlimited" — do NOT copy the other policy's limit.
+- Excess: Show only the effective excess the client has chosen (e.g. "€100"), not the underlying structure or explanation of how it was reached. Analysis of Double-Your-Excess, base excess doubling etc. belongs in an internal note, not the comparison table.
+- Pre-existing condition analysis and medical screening caveats: include in an internal "BROKER NOTES" section at the end, clearly marked as NOT for client distribution. Do not embed this in the client-facing header or key caveat box.
 
 LANGUAGE FOR CLIENT-FACING REPORTS — default to bilingual (English section first, Greek section below, each half self-contained with its own header/table/summary/recommendation, separated by a coloured horizontal rule). This serves both international expats and Greek nationals from one document. Switch to single-language only if the user asks, or if context makes the audience unambiguous.
 
@@ -1236,7 +1253,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                         t = (txt or "").lower()
                         if "alternative" in t or "εναλλ" in t or "proposed" in t or "προτειν" in t or "eur" in t or "europ" in t:
                             return LIGHT_ORANGE
-                        if "current" in t or "τρέχ" in t or "τρεχ" in t or "voy" in t or "voyager" in t:
+                        if "current" in t or "τρέχ" in t or "τρεχ" in t or "τρεχον" in t or "voy" in t or "voyager" in t:
                             return LIGHT_GREEN
                         if "tie" in t or "ισοπαλ" in t or "=" in t:
                             return LIGHT_GREY
@@ -1474,41 +1491,84 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
                     return buf.getvalue()
 
+                # ── LANGUAGE CHOICE HANDLER ─────────────────────────────────────────
+                # Fires when the user replies to the bilingual/english question.
+                if st.session_state.get("hal_pdf_lang_pending"):
+                    _reply = _latest_user_text().lower().strip()
+                    _is_bilingual_reply = any(x in _reply for x in [
+                        "bilingual", "αμφότερ", "και τα δύο", "και τα δυο",
+                        "ελληνικά", "ελληνικα", "greek", "και", "both", "διγλωσσ", "δίγλωσσ"
+                    ])
+                    _is_english_reply = any(x in _reply for x in [
+                        "english", "αγγλικά", "αγγλικα", "mono", "μόνο", "only", "en"
+                    ])
+                    if _is_bilingual_reply or _is_english_reply:
+                        _lang_instruction = (
+                            "Produce the report BILINGUAL: English section first (complete, with all tables and recommendation), "
+                            "then a full Greek (Ελληνική) section below, separated by a horizontal rule. "
+                            "Each section is fully self-contained."
+                            if _is_bilingual_reply else
+                            "Produce the report in ENGLISH ONLY."
+                        )
+                        _base_system = st.session_state.hal_pdf_lang_pending
+                        st.session_state.hal_pdf_lang_pending = None
+                        _pdf_system = _base_system + f"""
+
+PDF REPORT MODE — Do NOT use code execution. Produce the complete client-facing report as clean Markdown text only.
+{_lang_instruction}
+For insurance comparisons, be compact and table-first, matching a professional comparison PDF style: header data, sectioned Markdown tables, winner tally, and RETAIN/SWITCH recommendation.
+Use Markdown tables with 4 columns: BENEFIT / FEATURE | CURRENT | ALTERNATIVE | VERDICT. Never use "Proposed" — always "Alternative".
+VERDICT column: use ✓+ CURRENT, ✓ CURRENT, ✓+ ALTERNATIVE, ✓ ALTERNATIVE, or = TIE. ✓+ = materially better (>20% difference or clearly significant). ✓ = marginally better.
+Trip duration: if not stated on the policy certificate, write "Not stated / unlimited" — never copy the other policy's limit.
+Excess / Franchise: show only the effective excess the client has chosen (single figure e.g. "€100"). No explanation of how it is calculated.
+For Greek titles use "Απαλλαγή" not "Franchise". For English use "Excess" not "Franchise".
+Titles for minors: use "Δίδα" (not "Δκα.") for unmarried girls under 18 in Greek; in English use "Miss".
+Pre-existing condition analysis and medical screening notes: place ONLY in a clearly marked "■ BROKER NOTES (Not for client distribution)" section at the very end.
+Keep caveats explicit, never invent missing limits, avoid long prose that duplicates the table.
+Do not say that you are creating a PDF; just write the full report content.
+"""
+                        # Re-build messages from history (excluding the language-choice exchange)
+                        _pdf_messages = _hal_build_api_messages([
+                            m for m in st.session_state.chat_history
+                            if not (m.get("role") == "assistant" and "Bilingual" in (m.get("content") or ""))
+                            and not (m.get("role") == "user" and m == _latest_user_message())
+                        ])
+                        st.caption("PDF mode: building report...")
+                        _pdf_response = client.beta.messages.create(
+                            model="claude-sonnet-4-6", max_tokens=8192,
+                            system=_pdf_system, messages=_pdf_messages,
+                            betas=["files-api-2025-04-14"],
+                        )
+                        _report_text = "\n".join(
+                            getattr(b, "text", "") for b in _pdf_response.content
+                            if getattr(b, "type", "") == "text"
+                        ).strip()
+                        if not _report_text:
+                            _report_text = "HAL generated no text for this report. Please retry."
+                        _fname = "HAL_Insurance_Report_" + datetime.now().strftime("%Y%m%d_%H%M") + ".pdf"
+                        _pdf_bytes = _build_pdf_from_text("HAL Insurance Report", _report_text)
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "content": "Έτοιμο. / Done. 📎 **" + _fname + "** — διαθέσιμο για λήψη παρακάτω."
+                        })
+                        st.session_state["hal_last_files"] = [(_fname, _pdf_bytes)]
+                        if not is_private:
+                            conv_ws = st.session_state.get("_conv_ws")
+                            save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", _report_text[:45000])
+                        return
+                    # Not a language reply — clear pending and fall through to normal chat
+                    st.session_state.hal_pdf_lang_pending = None
+
                 # Stable path for client-facing PDF/report requests:
                 # ask Claude for the full report as text, then build the PDF locally.
                 # This avoids the fragile server-side code_execution result-block protocol.
                 if _looks_like_pdf_request(_latest_user_text()):
-                    pdf_system = system + """
-
-PDF REPORT MODE — Do NOT use code execution. Produce the complete client-facing report as clean Markdown text only.
-For insurance comparisons, be compact and table-first, matching a professional comparison PDF style: header data, sectioned Markdown tables, winner tally, and RETAIN/SWITCH recommendation.
-Use bilingual Greek first / English second ONLY if the user explicitly asks for bilingual / δίγλωσσο. Otherwise use the user's language, and for travel-policy client reports default to English if the source policies are English.
-Use Markdown tables with 4 columns whenever possible: BENEFIT / FEATURE | CURRENT | ALTERNATIVE | VERDICT. Never use the word "Proposed" — always "Alternative".
-Keep caveats explicit, never invent missing limits, and avoid long prose that duplicates the table.
-Do not say that you are creating a PDF; just write the full report content.
-"""
-                    st.caption("PDF mode: asking HAL for report text, then building the PDF locally...")
-                    pdf_response = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=8192,
-                        system=pdf_system, messages=messages,
-                        betas=["files-api-2025-04-14"],
-                    )
-                    report_text = "\n".join(
-                        getattr(b, "text", "") for b in pdf_response.content
-                        if getattr(b, "type", "") == "text"
-                    ).strip()
-                    if not report_text:
-                        report_text = "HAL generated no text for this report. Please retry with shorter source files."
-                    fname = "HAL_Insurance_Report_" + datetime.now().strftime("%Y%m%d_%H%M") + ".pdf"
-                    pdf_bytes = _build_pdf_from_text("HAL Insurance Report", report_text)
+                    # Store the base system prompt and wait for language choice
+                    st.session_state.hal_pdf_lang_pending = system
                     st.session_state.chat_history.append({
                         "role": "assistant",
-                        "content": "Έτοιμο. / Done. 📎 **" + fname + "** — διαθέσιμο για λήψη παρακάτω."
+                        "content": "📄 Bilingual (English + Greek) ή μόνο English;"
                     })
-                    st.session_state["hal_last_files"] = [(fname, pdf_bytes)]
-                    if not is_private:
-                        conv_ws = st.session_state.get("_conv_ws")
-                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", report_text[:45000])
                     return
 
                 code_exec_system = system + """
