@@ -1301,6 +1301,8 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                         label = _clean(text_value).strip("# ").strip()
                         if label.startswith("■"):
                             label = label.lstrip("■ ").strip()
+                        # _clean maps ✈/✓/etc. to ASCII chars; strip any remaining leading non-alpha chars
+                        label = re.sub(r"^[-–—\s•→]+", "", label).strip()
                         bar = Table(
                             [[Paragraph(_html.escape("■ " + label.upper()), ParagraphStyle(
                                 "HALSectionBarTextV7", parent=body, fontName=bold_font,
@@ -1326,10 +1328,18 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                                     parts = [p.strip() for p in line.strip("|").split("|")]
                                     if len(parts) >= 3 and not client:
                                         client = parts[1]
-                            if "product" in low or "προϊόν" in low or "προϊ" in low:
+                            # Match 'product', 'policy type', 'policy name', or Greek equivalents
+                            if (
+                                "product" in low
+                                or "policy type" in low
+                                or "policy name" in low
+                                or "προϊόν" in low
+                                or "προϊ" in low
+                                or "τύπος ασφαλιστηρίου" in low
+                            ):
                                 if "|" in line:
                                     parts = [p.strip() for p in line.strip("|").split("|")]
-                                    if len(parts) >= 3:
+                                    if len(parts) >= 3 and not _is_separator_row(line):
                                         current, proposed = parts[1], parts[2]
                         return client, current, proposed
 
@@ -1406,9 +1416,11 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                             continue
 
                         # Use section bars for lettered sections, explicit square sections, and recommendation blocks.
+                        # Also catch emoji-prefixed section headers (e.g. ✈ CANCELLATION) that Claude may emit.
                         if (
                             re.match(r"^[A-ZΑ-Ω]\.?\s+", stripped)
                             or stripped.startswith("■")
+                            or re.match(r"^[✈✉📎🔒⚕🚗✓✗•→]\s+[A-ZΑ-Ω]", stripped)
                             or stripped.upper().startswith("RECOMMENDATION")
                             or "ΣΥΣΤΑΣΗ" in stripped.upper()
                             or "WINNER TALLY" in stripped.upper()
