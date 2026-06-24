@@ -1273,7 +1273,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                             data.append(out_row)
 
                         if ncols >= 4:
-                            widths = [available_w * .32, available_w * .27, available_w * .27, available_w * .14]
+                            widths = [available_w * .30, available_w * .25, available_w * .25, available_w * .20]
                             widths = widths[:ncols]
                         elif ncols == 3:
                             widths = [available_w * .34, available_w * .33, available_w * .33]
@@ -1282,7 +1282,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                         else:
                             widths = [available_w / ncols] * ncols
 
-                        tbl = Table(data, colWidths=widths, repeatRows=1 if header else 0, hAlign="LEFT")
+                        tbl = Table(data, colWidths=widths, repeatRows=1 if header else 0, hAlign="LEFT", splitByRow=1)
                         ts = TableStyle([
                             ("GRID", (0, 0), (-1, -1), 0.35, GRID),
                             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -1497,11 +1497,16 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     _reply = _latest_user_text().lower().strip()
                     _is_bilingual_reply = any(x in _reply for x in [
                         "bilingual", "αμφότερ", "και τα δύο", "και τα δυο",
-                        "ελληνικά", "ελληνικα", "greek", "και", "both", "διγλωσσ", "δίγλωσσ"
+                        "ελληνικά", "ελληνικα", "greek", "both", "διγλωσσ", "δίγλωσσ",
+                        "και ελλ", "gr", "ναι", "yes"
                     ])
                     _is_english_reply = any(x in _reply for x in [
-                        "english", "αγγλικά", "αγγλικα", "mono", "μόνο", "only", "en"
+                        "english", "αγγλικά", "αγγλικα", "μόνο αγγλ", "mono angl",
+                        "only english", "only en", "αγγλ", "english only"
                     ])
+                    # English-only wins if both match (e.g. "only english")
+                    if _is_english_reply:
+                        _is_bilingual_reply = False
                     if _is_bilingual_reply or _is_english_reply:
                         _lang_instruction = (
                             "Produce the report BILINGUAL: English section first (complete, with all tables and recommendation), "
@@ -1533,7 +1538,8 @@ Do not say that you are creating a PDF; just write the full report content.
                             if not (m.get("role") == "assistant" and "Bilingual" in (m.get("content") or ""))
                             and not (m.get("role") == "user" and m == _latest_user_message())
                         ])
-                        st.caption("PDF mode: building report...")
+                        st.caption("PDF mode: building detailed report...")
+                        st.caption(f"DEBUG lang: bilingual={_is_bilingual_reply}, english={_is_english_reply}, reply={repr(_reply[:40])}")
                         _pdf_response = client.beta.messages.create(
                             model="claude-sonnet-4-6", max_tokens=8192,
                             system=_pdf_system, messages=_pdf_messages,
@@ -1545,13 +1551,57 @@ Do not say that you are creating a PDF; just write the full report content.
                         ).strip()
                         if not _report_text:
                             _report_text = "HAL generated no text for this report. Please retry."
-                        _fname = "HAL_Insurance_Report_" + datetime.now().strftime("%Y%m%d_%H%M") + ".pdf"
-                        _pdf_bytes = _build_pdf_from_text("HAL Insurance Report", _report_text)
+
+                        # ── Summary PDF (client-facing, 1 page) ──────────────────
+                        st.caption("Building client summary PDF...")
+                        _summary_lang = (
+                            "BILINGUAL: English first, then Greek below a horizontal rule."
+                            if _is_bilingual_reply else "ENGLISH ONLY."
+                        )
+                        _summary_system = _base_system + f"""
+
+PDF REPORT MODE — EXECUTIVE SUMMARY ONLY. Do NOT use code execution.
+Produce a concise 1-page client-facing summary in {_summary_lang}
+Structure (strictly in this order, no section tables):
+1. Header: client name, current policy name + premium, alternative policy name + premium, saving
+2. RECOMMENDATION box: RETAIN / SWITCH / CONDITIONAL — in 1 bold sentence
+3. Top 3–4 reasons FOR the recommendation (numbered, max 2 lines each)
+4. Top 2–3 areas where the alternative is better (bullet points, 1 line each)
+5. One-line action step for the client
+
+Keep total length under 400 words. No detailed section tables. No broker notes. Plain, clear language suitable for a client with no insurance background.
+Do not say you are creating a PDF; just write the summary content.
+"""
+                        _summary_response = client.beta.messages.create(
+                            model="claude-sonnet-4-6", max_tokens=2048,
+                            system=_summary_system, messages=_pdf_messages,
+                            betas=["files-api-2025-04-14"],
+                        )
+                        _summary_text = "\n".join(
+                            getattr(b, "text", "") for b in _summary_response.content
+                            if getattr(b, "type", "") == "text"
+                        ).strip()
+                        if not _summary_text:
+                            _summary_text = "Summary could not be generated. Please use the detailed report."
+
+                        _ts = datetime.now().strftime("%Y%m%d_%H%M")
+                        _fname_detail  = "HAL_Report_Detailed_"  + _ts + ".pdf"
+                        _fname_summary = "HAL_Report_Summary_"   + _ts + ".pdf"
+                        _pdf_detail  = _build_pdf_from_text("HAL Insurance Report", _report_text)
+                        _pdf_summary = _build_pdf_from_text("HAL Insurance Summary", _summary_text)
+
                         st.session_state.chat_history.append({
                             "role": "assistant",
-                            "content": "Έτοιμο. / Done. 📎 **" + _fname + "** — διαθέσιμο για λήψη παρακάτω."
+                            "content": (
+                                "Έτοιμο. / Done.\n\n"
+                                "📋 **" + _fname_detail  + "** — Detailed report (broker use)\n"
+                                "📄 **" + _fname_summary + "** — Client summary (1 page)"
+                            )
                         })
-                        st.session_state["hal_last_files"] = [(_fname, _pdf_bytes)]
+                        st.session_state["hal_last_files"] = [
+                            (_fname_detail,  _pdf_detail),
+                            (_fname_summary, _pdf_summary),
+                        ]
                         if not is_private:
                             conv_ws = st.session_state.get("_conv_ws")
                             save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", _report_text[:45000])
