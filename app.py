@@ -566,115 +566,6 @@ def render_private_home():
                         st.rerun()
 
 
-# ── HAL COMPARISON QUICK-PROMPT ──────────────────────────────────────────────
-# Single bilingual prompt (Greek + English) for the one-click "compare these
-# policies" button. Font setup is now Step 0 — HAL must run the bootstrap cell
-# and print FONT_OK before writing any PDF code. DejaVuSans is hardcoded as
-# the primary candidate (confirmed present in the sandbox), with Liberation and
-# FreeSans as fallbacks. The render-test in Step 0 catches any embed failure
-# before the full PDF is built.
-
-_HAL_COMPARISON_PROMPT = """Compare the attached insurance policies in depth and produce a single official BILINGUAL PDF — Greek first, English below — using BOTH languages throughout. Use code execution with ReportLab. Do NOT just display a table in chat.
-
-═══ STEP 0 — FONT BOOTSTRAP (run this BEFORE any PDF code) ═══
-
-STOP. Run the following Python block in your first code cell and print its output before writing any PDF code. Do not proceed to building the PDF until you see "FONT_OK" printed.
-
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-
-    CANDIDATES = [
-        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-        ("/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-         "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
-        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-    ]
-
-    GREEK_FONT = None
-    GREEK_FONT_BOLD = None
-
-    for reg_path, bold_path in CANDIDATES:
-        try:
-            pdfmetrics.registerFont(TTFont("GF", reg_path))
-            # Quick render test
-            from reportlab.platypus import SimpleDocTemplate, Paragraph
-            from reportlab.lib.styles import ParagraphStyle
-            import io, fitz
-            buf = io.BytesIO()
-            doc = SimpleDocTemplate(buf)
-            style = ParagraphStyle("t", fontName="GF", fontSize=10)
-            doc.build([Paragraph("άέήίόύώ", style)])
-            buf.seek(0)
-            rendered = fitz.open(stream=buf, filetype="pdf")[0].get_text()
-            if all(c in rendered for c in "άέή"):
-                try:
-                    pdfmetrics.registerFont(TTFont("GFBold", bold_path))
-                    GREEK_FONT_BOLD = "GFBold"
-                except Exception:
-                    GREEK_FONT_BOLD = "GF"
-                GREEK_FONT = "GF"
-                print(f"FONT_OK: {reg_path}  bold={'yes' if GREEK_FONT_BOLD == 'GFBold' else 'fallback'}")
-                break
-            else:
-                print(f"FONT_FAIL_RENDER: {reg_path}")
-        except Exception as e:
-            print(f"FONT_FAIL_LOAD: {reg_path} — {e}")
-
-    if GREEK_FONT is None:
-        raise RuntimeError("FATAL: No Greek-capable font found. Cannot build PDF.")
-
-Only after FONT_OK is printed, use GREEK_FONT and GREEK_FONT_BOLD in ALL subsequent text drawing.
-NEVER use Helvetica, Times-Roman, or Courier anywhere.
-
-═══ ANALYSIS METHODOLOGY ═══
-
-A) Auto-detect insurance type (travel / health / motor / home / life) from the PDFs.
-B) Split the comparison into logical sections for that type:
-   • TRAVEL: Policy Structure · Excess/Franchise · Emergency Medical & Repatriation · Cancellation & Curtailment · Travel Delay & Disruption · Baggage · Money & Documents · Personal Accident · Liability & Legal · Optional Covers · Claims
-   • HEALTH: Inpatient · Outpatient · Diagnostics · Dental · Pharmacy · Psychiatric · Physiotherapy · Maternity · Geographic Coverage · Excess · Provider Network
-   • MOTOR: Third Party Liability · Own Damage · Theft · Fire · Natural Perils · Roadside Assistance · Legal · No-Claims Protection
-C) For each row, tag winner:
-   • "✓ CURRENT / ✓ ΤΡΕΧΟΝ" — current policy better
-   • "✓ PROPOSED / ✓ ΠΡΟΤΕΙΝΟΜΕΝΟ" — proposed policy better
-   • "= TIE / = ΙΣΟΠΑΛΙΑ" — equivalent
-   • Missing info: "Not stated / Δεν αναφέρεται" — NEVER invent numbers.
-D) Count winners and write a final recommendation: RETAIN / SWITCH — with numbered reasons ① ② ③
-
-═══ BILINGUAL PDF STRUCTURE ═══
-
-The PDF has two mirrored halves — Greek section first, English section below.
-Each half contains the full comparison independently (header, table, summary, recommendation).
-Use a horizontal rule (thick coloured line) to separate the two halves.
-
-GREEK HALF:
-1. ΚΕΦΑΛΙΔΑ: «ΣΥΓΚΡΙΣΗ ΑΣΦΑΛΙΣΤΗΡΙΩΝ» + σύμβολο τύπου | «Εκπονήθηκε από Ashlar Insurance» | Στοιχεία πελάτη | ΤΡΕΧΟΝ vs ΠΡΟΤΕΙΝΟΜΕΝΟ
-2. ΠΙΝΑΚΑΣ: ΠΑΡΟΧΗ | ΤΡΕΧΟΝ | ΠΡΟΤΕΙΝΟΜΕΝΟ | ΕΤΥΜΗΓΟΡΙΑ  (sections με υπότιτλους «■ ΟΝΟΜΑ ΕΝΟΤΗΤΑΣ»)
-3. ΣΥΝΟΨΗ ΝΙΚΗΤΩΝ: ΤΡΕΧΟΝ υπερτερεί σε X | ΠΡΟΤΕΙΝΟΜΕΝΟ υπερτερεί σε Y | ΙΣΟΠΑΛΙΑ σε Z
-4. ΣΥΣΤΑΣΗ HAL: Τελική απόφαση + Λόγοι ① ② ③ + Πού υπερτερεί η άλλη επιλογή + Σημαντική επιφύλαξη
-5. ΥΠΟΣΕΛΙΔΟ: «Εκπονήθηκε από HAL / Ashlar Insurance · ashlar-assurance.com» + Ημερομηνία
-
-ENGLISH HALF (mirrors Greek exactly):
-1. HEADER: «INSURANCE POLICY COMPARISON» + symbol | «Prepared by Ashlar Insurance» | Client details | CURRENT vs PROPOSED
-2. TABLE: BENEFIT | CURRENT | PROPOSED | VERDICT  (sections: «■ SECTION NAME»)
-3. WINNER SUMMARY: CURRENT wins X | PROPOSED wins Y | TIE Z
-4. HAL RECOMMENDATION: Overall verdict + Reasons ① ② ③ + Where the other option wins + Key Caveat
-5. FOOTER: «Prepared by HAL / Ashlar Insurance · ashlar-assurance.com» + Date
-
-VERDICT COLUMN COLOURS (same in both halves):
-  ✓ CURRENT / ✓ ΤΡΕΧΟΝ  → green background (#d4edda)
-  ✓ PROPOSED / ✓ ΠΡΟΤΕΙΝΟΜΕΝΟ → blue background (#cce5ff)
-  = TIE / = ΙΣΟΠΑΛΙΑ → grey background (#e9ecef)
-
-═══ FINAL INSTRUCTIONS ═══
-
-• A4 portrait (or landscape if table width requires).
-• FIRST write 3-4 lines in chat: insurance type detected, PDFs analysed, what you will produce. THEN run Step 0, THEN build the PDF.
-• If substantive information is missing from a PDF, state it in the Key Caveat / Σημαντική Επιφύλαξη — never fabricate data.
-• Emit the finished PDF: echo "===FILE:comparison_asfaliseon.pdf===" && base64 comparison_asfaliseon.pdf && echo "===ENDFILE===" """
-
-
 def _hal_build_api_messages(chat_history):
     """
     Translate st.session_state.chat_history into the messages list for the
@@ -780,6 +671,12 @@ You specialise in international health insurance brokerage. Key knowledge:
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send.
 
 FILE ATTACHMENTS — users can attach multiple files (PDFs, images, CSV, TXT) to any message. When files are attached, treat the user's text as the question/task about those files. Common tasks include comparing two or more insurance quotes side-by-side, summarising a Terms & Conditions PDF, extracting numbers from screenshots, or building a recommendation from a stack of brochures. Do the task directly in the reply — produce the comparison table, the summary, the recommendation — don't send the user to a different module to do it.
+
+REPORT vs CHAT — judge from context whether the right answer is a quick chat reply or a generated PDF deliverable. Produce a PDF when: (a) the user uploads multiple policies/quotes for side-by-side analysis, (b) they explicitly ask for a "report", "PDF", "ανάλυση", "σύγκριση", "αναφορά", "document", (c) the output is structured data with more than ~6 rows that would be unreadable as chat, or (d) the deliverable is something they would forward to a client. Otherwise reply in chat. When unsure, ask in one short line: "PDF ή απάντηση εδώ;" / "PDF or quick answer?"
+
+INSURANCE COMPARISON REPORTS — structure: header (insurer + product per side) → per-section table appropriate to the type (travel: medical/cancellation/delay/baggage/personal accident/liability/optional; health: inpatient/outpatient/diagnostics/dental/pharmacy/geographic/excess; motor: third-party/own damage/theft/fire/legal/no-claims) → per-line winner tag (✓ CURRENT / ✓ ΤΡΕΧΟΝ in green, ✓ PROPOSED / ✓ ΠΡΟΤΕΙΝΟΜΕΝΟ in blue, = TIE / = ΙΣΟΠΑΛΙΑ in grey) → winner tally → RETAIN/SWITCH recommendation with numbered reasons ① ② ③. If a PDF is partial (e.g. only the Table of Benefits page provided), state it explicitly in a "Key Caveat / Σημαντική Επιφύλαξη" section. NEVER invent numbers — write "Δεν αναφέρεται / Not stated" when data is absent.
+
+LANGUAGE FOR CLIENT-FACING REPORTS — default to bilingual (Greek section first, English section below, each half self-contained with its own header/table/summary/recommendation, separated by a coloured horizontal rule). This serves both Greek nationals and international expats from one document. Switch to single-language only if the user asks, or if context makes the audience unambiguous (e.g. message is in English and client name is non-Greek).
 
 MEMORY — IMPORTANT:
 You have persistent memory of business conversations from the last 7 days (rolling window). This memory is automatically injected into your context below as "=== ROLLING MEMORY ===". USE IT actively.
@@ -1086,6 +983,25 @@ so the surrounding application can detect, decode, and offer it as a download. D
 you create that the user should receive. If you find yourself about to write a code block in your text
 reply for the user to copy, stop — run it in the sandbox instead.
 
+GREEK FONTS IN PDFs — CRITICAL. ReportLab's default fonts (Helvetica, Times-Roman, Courier) DO NOT
+support Greek diacritics (ά έ ή ί ό ύ ώ) — they render as "■". For ANY PDF that might contain Greek
+text (client names, insurer names, Greek body text), register DejaVuSans BEFORE building anything:
+
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    pdfmetrics.registerFont(TTFont("GF",     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
+    pdfmetrics.registerFont(TTFont("GFBold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
+
+Then use "GF" / "GFBold" in EVERY ParagraphStyle, TableStyle FONTNAME entry, and canvas.setFont call.
+Never leave a default fontName= in any style. For a quick sanity check after building, open the PDF
+with fitz and confirm "άέή" appear in the extracted text — if "■" shows up, a style is still using
+Helvetica somewhere.
+
+SINGLE-SCRIPT EXECUTION — when producing a non-trivial PDF, put font setup, content build, AND the
+base64 emission in ONE Python script. Do NOT write a chat sentence like "now building the PDF" between
+code cells — that wastes a turn and you may not get a second one. Run the whole pipeline top-to-bottom
+in a single sandbox call, ending with the ===FILE:===/===ENDFILE=== shell emission.
+
 IMPORTANT — if the ROLLING MEMORY section above contains earlier HAL replies that pasted Python/code as
 text instead of running it, those are recorded mistakes from before code execution was wired up. Do NOT
 treat them as a style to follow. This instruction always overrides that pattern, no matter how many
@@ -1138,56 +1054,6 @@ times it appears in memory or chat history above."""
                     save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", reply)
             except Exception as e:
                 st.session_state.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {str(e)}"})
-
-    # ── BILINGUAL COMPARISON QUICK-PROMPT ────────────────────────────────────
-    # Single button that sends _HAL_COMPARISON_PROMPT (bilingual Greek + English)
-    # to HAL. Font bootstrap runs as Step 0 inside the prompt — HAL must print
-    # FONT_OK before building any PDF, eliminating the Helvetica diacritic bug.
-
-    with st.expander("🇬🇷 / 🇬🇧  Insurance Comparison → PDF  ·  Σύγκριση Ασφαλιστηρίων → PDF", expanded=False):
-        _files_ready = bool(st.session_state.hal_pending_files)
-
-        st.markdown("""
-**Πώς λειτουργεί / How it works**
-
-1. **Ανέβασε τα PDFs** στο πάνελ συνημμένων πάνω — τρέχον συμβόλαιο + προτεινόμενη προσφορά.  
-   **Upload PDFs** in the attachments panel above — current policy + proposed offer.
-2. **Πάτα το κουμπί παρακάτω.** Ο HAL θα παράγει ένα **δίγλωσσο PDF** (Ελληνικά + Αγγλικά).  
-   **Click the button below.** HAL produces a **bilingual PDF** (Greek first, English below).
-3. Για κάθε παροχή: **✓ ΤΡΕΧΟΝ / ✓ CURRENT** · **✓ ΠΡΟΤΕΙΝΟΜΕΝΟ / ✓ PROPOSED** · **= ΙΣΟΠΑΛΙΑ / = TIE**
-4. Τελική **ΣΥΣΤΑΣΗ / RECOMMENDATION** με αριθμημένους λόγους.
-
-> 🔤 Ο HAL επαληθεύει ελληνικές γραμματοσειρές (DejaVuSans) πριν χτίσει το PDF — δεν περνά σε κατασκευή αν δεν εκτυπώσει FONT_OK.  
-> HAL verifies the Greek font (DejaVuSans) before building — will not proceed to PDF construction unless FONT_OK is printed.
-""")
-
-        if not _files_ready:
-            st.info("⬆️ Ανέβασε πρώτα τα PDFs / Upload PDFs first — then click the button.")
-        if st.button(
-            "🚀 Δημιουργία Δίγλωσσου PDF Σύγκρισης / Generate Bilingual Comparison PDF",
-            key="hal_pdf_btn",
-            type="primary",
-            use_container_width=True,
-            disabled=not _files_ready,
-            help="Sends the bilingual structured prompt to HAL and produces a Greek + English comparison PDF.",
-        ):
-            _atts_for_msg = list(st.session_state.hal_pending_files)
-            st.session_state.hal_pending_files = []
-            st.session_state.hal_uploader_nonce += 1
-            st.session_state.chat_history.append({
-                "role": "user",
-                "content": _HAL_COMPARISON_PROMPT,
-                "attachments": _atts_for_msg,
-            })
-            if not is_private:
-                conv_ws = st.session_state.get("_conv_ws")
-                _log_text = (
-                    "[Quick-action: Insurance comparison → Bilingual PDF]\n"
-                    "[attached: " + ", ".join(fn for fn, _, _ in _atts_for_msg) + "]"
-                )
-                save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "user", _log_text)
-            _send_to_hal()
-            st.rerun()
 
     user_input = st.chat_input(_placeholder)
     if user_input:
