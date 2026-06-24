@@ -1031,13 +1031,27 @@ times it appears in memory or chat history above."""
                 )
                 all_blocks = list(response.content)
 
+                def _safe_assistant_text_content(content_blocks):
+                    """Return ONLY plain assistant text for follow-up API messages.
+                    Do not re-send raw code_execution/server_tool_use blocks; the API
+                    rejects an assistant tool-use block unless the exact paired
+                    tool_result block is also present in the correct protocol shape.
+                    """
+                    parts = []
+                    for _b in content_blocks or []:
+                        if getattr(_b, "type", None) == "text":
+                            _txt = getattr(_b, "text", "") or ""
+                            if _txt.strip():
+                                parts.append(_txt.strip())
+                    return "\n".join(parts).strip() or "Continuing after code execution attempt."
+
                 # Code execution on a non-trivial task (e.g. building a multi-section PDF) can
                 # pause mid-turn; resubmitting lets Claude continue rather than the user seeing a
                 # cut-off result. Accumulate blocks from every turn — the file/text Claude produced
                 # before a pause must not be dropped when a later turn's response replaces `response`.
                 _continue_attempts = 0
                 while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
-                    messages = messages + [{"role": "assistant", "content": response.content}]
+                    messages = messages + [{"role": "assistant", "content": _safe_assistant_text_content(response.content)}]
                     response = client.beta.messages.create(
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
@@ -1078,7 +1092,7 @@ times it appears in memory or chat history above."""
                     if not any(p in _text_so_far for p in _intent_phrases):
                         break  # no intent to build → don't nudge; HAL legitimately just chatted
                     messages = messages + [
-                        {"role": "assistant", "content": response.content},
+                        {"role": "assistant", "content": _safe_assistant_text_content(response.content)},
                         {"role": "user", "content": (
                             "Συνέχισε — εκτέλεσε ΤΩΡΑ το script στο sandbox και παρήγαγε το αρχείο. "
                             "Continue — actually invoke code_execution now and produce the file. "
@@ -1097,7 +1111,7 @@ times it appears in memory or chat history above."""
                     _nudge_attempts += 1
                     # If this continuation itself paused, drain the pause_turn loop again.
                     while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
-                        messages = messages + [{"role": "assistant", "content": response.content}]
+                        messages = messages + [{"role": "assistant", "content": _safe_assistant_text_content(response.content)}]
                         response = client.beta.messages.create(
                             model="claude-sonnet-4-6", max_tokens=8192,
                             system=code_exec_system, messages=messages,
@@ -1245,7 +1259,7 @@ times it appears in memory or chat history above."""
                 # or used text_editor/bash output shapes that do not expose a file_id.
                 if not generated_files and _has_tool_activity(all_blocks):
                     messages = messages + [
-                        {"role": "assistant", "content": response.content},
+                        {"role": "assistant", "content": _safe_assistant_text_content(response.content)},
                         {"role": "user", "content": (
                             "Το εργαλείο εκτελέστηκε αλλά δεν επέστρεψε downloadable αρχείο. "
                             "In the SAME code_execution sandbox, run: find/list generated files, "
