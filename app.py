@@ -690,8 +690,15 @@ Use ✓ when the difference is real but small (e.g. €35,000 vs €25,000 legal
 
 DATA ACCURACY RULES:
 - Trip duration: If a policy certificate does not state a per-trip limit, write "Not stated / unlimited" — do NOT copy the other policy's limit.
-- Excess: Show only the effective excess the client has chosen (e.g. "€100"), not the underlying structure or explanation of how it was reached. Analysis of Double-Your-Excess, base excess doubling etc. belongs in an internal note, not the comparison table.
-- Pre-existing condition analysis and medical screening caveats: include in an internal "BROKER NOTES" section at the end, clearly marked as NOT for client distribution. Do not embed this in the client-facing header or key caveat box.
+- Excess (Voyager "Double Your Excess"): The Voyager Supreme base excess is €50. The "Double Your Excess" add-on doubles this to €100 effective. NEVER write €200. The correct effective excess is €100 per person per section.
+- Excess display: Show only the effective figure (e.g. "€100"). No explanation of the doubling mechanism in the comparison table — that belongs in BROKER NOTES only.
+- Pre-existing conditions — EuropeSure accuracy rules (CRITICAL — do not invent or assume):
+  * Rheumatoid Arthritis: IS on EuropeSure's automatic cover list, BUT only if ALL 7 sub-criteria are met (no hospital admissions last 12 months; arthritis does not affect back more than other areas; not taking more than 2 medications; no mobility aids except walking stick; no dislocations or joint replacements; not awaiting surgery; no lung problems). Write "On automatic list — subject to 7 sub-criteria" in the table, not "auto-covered".
+  * Iron Deficiency Anaemia: is NOT on EuropeSure's automatic cover list. Pernicious Anaemia and Folate Deficiency are listed — these are different conditions. Iron Deficiency Anaemia can only be covered under the 24-month catch-all stability clause (stable + controlled for 24 months, no hospital admission or specialist referral for worsening). Write "Not on automatic list — catch-all clause applies if stable 24 months" in the table.
+  * COVID-19 history (resolved): NOT on the EuropeSure list. If fully resolved with no ongoing treatment, may qualify under the 24-month catch-all clause. Write "Not listed — catch-all clause if fully resolved" in the table.
+  * All EuropeSure pre-existing condition coverage is unconfirmed until formal medical declaration is completed at binding. Always note this.
+- Pre-existing condition detailed analysis: place ONLY in "■ BROKER NOTES (Not for client distribution)" at the end. Never embed in the client-facing comparison table beyond the brief status above.
+- Summary PDF verdict: The summary must always include a clear RECOMMENDATION verdict (RETAIN / SWITCH / CONDITIONAL) prominently displayed as a standalone line or box — not buried in prose.
 
 LANGUAGE FOR CLIENT-FACING REPORTS — default to bilingual (English section first, Greek section below, each half self-contained with its own header/table/summary/recommendation, separated by a coloured horizontal rule). This serves both international expats and Greek nationals from one document. Switch to single-language only if the user asks, or if context makes the audience unambiguous.
 
@@ -1491,120 +1498,118 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
                     return buf.getvalue()
 
-                # ── LANGUAGE CHOICE HANDLER ─────────────────────────────────────────
+                # ── SHARED PDF GENERATION HELPER ────────────────────────────────────
+                def _do_generate_pdfs(base_system, bilingual, pdf_messages):
+                    _lang_instruction = (
+                        "Produce the report BILINGUAL: English section first (complete, with all tables "
+                        "and recommendation), then a full Greek (Ελληνική) section below, separated by "
+                        "a horizontal rule. Each section is fully self-contained."
+                        if bilingual else
+                        "Produce the report in ENGLISH ONLY."
+                    )
+                    _summary_lang = (
+                        "BILINGUAL: English first, then Greek below a horizontal rule."
+                        if bilingual else "ENGLISH ONLY."
+                    )
+                    _pdf_sys = base_system + f"""
+
+PDF REPORT MODE — Do NOT use code execution. Produce the complete client-facing report as clean Markdown text only.
+{_lang_instruction}
+For insurance comparisons, be compact and table-first: header data, sectioned Markdown tables, winner tally, RETAIN/SWITCH recommendation.
+Use Markdown tables with 4 columns: BENEFIT / FEATURE | CURRENT | ALTERNATIVE | VERDICT. Never use "Proposed" — always "Alternative".
+VERDICT column: ✓+ CURRENT, ✓ CURRENT, ✓+ ALTERNATIVE, ✓ ALTERNATIVE, or = TIE. ✓+ = materially better (>20% or clearly significant). ✓ = marginally better.
+Trip duration: if not stated on the policy certificate write "Not stated / unlimited" — never copy the other policy's limit.
+Excess (Voyager): base €50, "Double Your Excess" makes it €100 effective. NEVER write €200. Show "€100" only.
+Excess display: single effective figure only (e.g. "€100"). Greek label: "Απαλλαγή". English: "Excess". Never "Franchise".
+Titles for minors: "Δίδα" (not "Δκα.") in Greek; "Miss" in English.
+EuropeSure pre-existing conditions — use ONLY these exact descriptions in the table:
+  - Rheumatoid Arthritis: "On automatic list — subject to 7 sub-criteria" (never "auto-covered")
+  - Iron Deficiency Anaemia: "Not on automatic list — catch-all clause if stable 24 months" (Pernicious Anaemia is listed but is a different condition)
+  - COVID-19 history (resolved): "Not listed — catch-all clause if fully resolved"
+  All EuropeSure pre-existing coverage is unconfirmed until formal declaration at binding.
+Summary PDF: the RECOMMENDATION verdict (RETAIN / SWITCH / CONDITIONAL) must appear as a prominent standalone line — not buried in prose.
+Pre-existing detailed analysis: ONLY in "■ BROKER NOTES (Not for client distribution)" at the very end.
+Never invent missing limits. Do not say you are creating a PDF; just write the report content.
+"""
+                    _sum_sys = base_system + f"""
+
+PDF REPORT MODE — CLIENT EXECUTIVE SUMMARY. Do NOT use code execution.
+Language: {_summary_lang}
+Structure (strictly in this order — no section tables):
+1. Header: client name | current policy name + annual premium | alternative policy name + annual premium | annual saving
+2. RECOMMENDATION LINE: a single prominent line — e.g. "⚖ RECOMMENDATION: RETAIN Voyager Plus Supreme" or "⚖ ΣΎΣΤΑΣΗ: ΔΙΑΤΗΡΗΣΗ Voyager Plus Supreme"
+3. Reasons FOR the recommendation — numbered list, 4–5 reasons, each 2–3 lines of plain explanation (no jargon). Cover: medical screening certainty, disruption/abandonment cover, liability & legal, financial protection, winter sports if relevant.
+4. "Where [Alternative] is genuinely better" — numbered list, 3 items max, 1–2 lines each. Cover: personal accident limits, baggage total, car hire waiver if purchased.
+5. Action step — one short paragraph telling the client exactly what to do next.
+Target length: 450–550 words. No section-by-section tables. No broker notes. Write as if explaining to a well-educated non-insurance client — clear, direct, no hedging.
+Do not say you are creating a PDF; just write the summary content.
+"""
+                    st.caption("PDF: building detailed report...")
+                    _r1 = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
+                        system=_pdf_sys, messages=pdf_messages,
+                        betas=["files-api-2025-04-14"],
+                    )
+                    _report_text = "\n".join(
+                        getattr(b, "text", "") for b in _r1.content
+                        if getattr(b, "type", "") == "text"
+                    ).strip() or "HAL generated no text. Please retry."
+
+                    st.caption("PDF: building client summary...")
+                    _r2 = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=2048,
+                        system=_sum_sys, messages=pdf_messages,
+                        betas=["files-api-2025-04-14"],
+                    )
+                    _summary_text = "\n".join(
+                        getattr(b, "text", "") for b in _r2.content
+                        if getattr(b, "type", "") == "text"
+                    ).strip() or "Summary could not be generated."
+
+                    _ts = datetime.now().strftime("%Y%m%d_%H%M")
+                    _fd = "HAL_Report_Detailed_"  + _ts + ".pdf"
+                    _fs = "HAL_Report_Summary_"   + _ts + ".pdf"
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": (
+                            "Έτοιμο. / Done.\n\n"
+                            "📋 **" + _fd + "** — Detailed report (broker use)\n"
+                            "📄 **" + _fs + "** — Client summary (1 page)"
+                        )
+                    })
+                    st.session_state["hal_last_files"] = [
+                        (_fd, _build_pdf_from_text("HAL Insurance Report",   _report_text)),
+                        (_fs, _build_pdf_from_text("HAL Insurance Summary", _summary_text)),
+                    ]
+                    if not is_private:
+                        conv_ws = st.session_state.get("_conv_ws")
+                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", _report_text[:45000])
+
+                # ── LANGUAGE CHOICE HANDLER ──────────────────────────────────────────
                 # Fires when the user replies to the bilingual/english question.
                 if st.session_state.get("hal_pdf_lang_pending"):
                     _reply = _latest_user_text().lower().strip()
                     _is_bilingual_reply = any(x in _reply for x in [
                         "bilingual", "αμφότερ", "και τα δύο", "και τα δυο",
                         "ελληνικά", "ελληνικα", "greek", "both", "διγλωσσ", "δίγλωσσ",
-                        "και ελλ", "gr", "ναι", "yes"
+                        "και ελλ", "ναι", "yes"
                     ])
                     _is_english_reply = any(x in _reply for x in [
-                        "english", "αγγλικά", "αγγλικα", "μόνο αγγλ", "mono angl",
-                        "only english", "only en", "αγγλ", "english only"
+                        "english", "αγγλικά", "αγγλικα", "μόνο αγγλ",
+                        "only english", "αγγλ", "english only"
                     ])
-                    # English-only wins if both match (e.g. "only english")
                     if _is_english_reply:
                         _is_bilingual_reply = False
                     if _is_bilingual_reply or _is_english_reply:
-                        _lang_instruction = (
-                            "Produce the report BILINGUAL: English section first (complete, with all tables and recommendation), "
-                            "then a full Greek (Ελληνική) section below, separated by a horizontal rule. "
-                            "Each section is fully self-contained."
-                            if _is_bilingual_reply else
-                            "Produce the report in ENGLISH ONLY."
-                        )
                         _base_system = st.session_state.hal_pdf_lang_pending
                         st.session_state.hal_pdf_lang_pending = None
-                        _pdf_system = _base_system + f"""
-
-PDF REPORT MODE — Do NOT use code execution. Produce the complete client-facing report as clean Markdown text only.
-{_lang_instruction}
-For insurance comparisons, be compact and table-first, matching a professional comparison PDF style: header data, sectioned Markdown tables, winner tally, and RETAIN/SWITCH recommendation.
-Use Markdown tables with 4 columns: BENEFIT / FEATURE | CURRENT | ALTERNATIVE | VERDICT. Never use "Proposed" — always "Alternative".
-VERDICT column: use ✓+ CURRENT, ✓ CURRENT, ✓+ ALTERNATIVE, ✓ ALTERNATIVE, or = TIE. ✓+ = materially better (>20% difference or clearly significant). ✓ = marginally better.
-Trip duration: if not stated on the policy certificate, write "Not stated / unlimited" — never copy the other policy's limit.
-Excess / Franchise: show only the effective excess the client has chosen (single figure e.g. "€100"). No explanation of how it is calculated.
-For Greek titles use "Απαλλαγή" not "Franchise". For English use "Excess" not "Franchise".
-Titles for minors: use "Δίδα" (not "Δκα.") for unmarried girls under 18 in Greek; in English use "Miss".
-Pre-existing condition analysis and medical screening notes: place ONLY in a clearly marked "■ BROKER NOTES (Not for client distribution)" section at the very end.
-Keep caveats explicit, never invent missing limits, avoid long prose that duplicates the table.
-Do not say that you are creating a PDF; just write the full report content.
-"""
-                        # Re-build messages from history (excluding the language-choice exchange)
+                        # Exclude the language-choice exchange from messages sent to Claude
                         _pdf_messages = _hal_build_api_messages([
                             m for m in st.session_state.chat_history
                             if not (m.get("role") == "assistant" and "Bilingual" in (m.get("content") or ""))
                             and not (m.get("role") == "user" and m == _latest_user_message())
                         ])
-                        st.caption("PDF mode: building detailed report...")
-                        st.caption(f"DEBUG lang: bilingual={_is_bilingual_reply}, english={_is_english_reply}, reply={repr(_reply[:40])}")
-                        _pdf_response = client.beta.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=8192,
-                            system=_pdf_system, messages=_pdf_messages,
-                            betas=["files-api-2025-04-14"],
-                        )
-                        _report_text = "\n".join(
-                            getattr(b, "text", "") for b in _pdf_response.content
-                            if getattr(b, "type", "") == "text"
-                        ).strip()
-                        if not _report_text:
-                            _report_text = "HAL generated no text for this report. Please retry."
-
-                        # ── Summary PDF (client-facing, 1 page) ──────────────────
-                        st.caption("Building client summary PDF...")
-                        _summary_lang = (
-                            "BILINGUAL: English first, then Greek below a horizontal rule."
-                            if _is_bilingual_reply else "ENGLISH ONLY."
-                        )
-                        _summary_system = _base_system + f"""
-
-PDF REPORT MODE — EXECUTIVE SUMMARY ONLY. Do NOT use code execution.
-Produce a concise 1-page client-facing summary in {_summary_lang}
-Structure (strictly in this order, no section tables):
-1. Header: client name, current policy name + premium, alternative policy name + premium, saving
-2. RECOMMENDATION box: RETAIN / SWITCH / CONDITIONAL — in 1 bold sentence
-3. Top 3–4 reasons FOR the recommendation (numbered, max 2 lines each)
-4. Top 2–3 areas where the alternative is better (bullet points, 1 line each)
-5. One-line action step for the client
-
-Keep total length under 400 words. No detailed section tables. No broker notes. Plain, clear language suitable for a client with no insurance background.
-Do not say you are creating a PDF; just write the summary content.
-"""
-                        _summary_response = client.beta.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=2048,
-                            system=_summary_system, messages=_pdf_messages,
-                            betas=["files-api-2025-04-14"],
-                        )
-                        _summary_text = "\n".join(
-                            getattr(b, "text", "") for b in _summary_response.content
-                            if getattr(b, "type", "") == "text"
-                        ).strip()
-                        if not _summary_text:
-                            _summary_text = "Summary could not be generated. Please use the detailed report."
-
-                        _ts = datetime.now().strftime("%Y%m%d_%H%M")
-                        _fname_detail  = "HAL_Report_Detailed_"  + _ts + ".pdf"
-                        _fname_summary = "HAL_Report_Summary_"   + _ts + ".pdf"
-                        _pdf_detail  = _build_pdf_from_text("HAL Insurance Report", _report_text)
-                        _pdf_summary = _build_pdf_from_text("HAL Insurance Summary", _summary_text)
-
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": (
-                                "Έτοιμο. / Done.\n\n"
-                                "📋 **" + _fname_detail  + "** — Detailed report (broker use)\n"
-                                "📄 **" + _fname_summary + "** — Client summary (1 page)"
-                            )
-                        })
-                        st.session_state["hal_last_files"] = [
-                            (_fname_detail,  _pdf_detail),
-                            (_fname_summary, _pdf_summary),
-                        ]
-                        if not is_private:
-                            conv_ws = st.session_state.get("_conv_ws")
-                            save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", _report_text[:45000])
+                        _do_generate_pdfs(_base_system, _is_bilingual_reply, _pdf_messages)
                         return
                     # Not a language reply — clear pending and fall through to normal chat
                     st.session_state.hal_pdf_lang_pending = None
@@ -1613,13 +1618,38 @@ Do not say you are creating a PDF; just write the summary content.
                 # ask Claude for the full report as text, then build the PDF locally.
                 # This avoids the fragile server-side code_execution result-block protocol.
                 if _looks_like_pdf_request(_latest_user_text()):
-                    # Store the base system prompt and wait for language choice
-                    st.session_state.hal_pdf_lang_pending = system
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": "📄 Bilingual (English + Greek) ή μόνο English;"
-                    })
-                    return
+                    _req_text = _latest_user_text().lower()
+
+                    # Detect inline language preference in the same message
+                    _inline_bilingual = any(x in _req_text for x in [
+                        "bilingual", "greek version", "greek after", "greek coming",
+                        "ελληνικ", "greek and english", "english and greek",
+                        "both languages", "και ελληνικ", "greek below",
+                    ])
+                    _inline_english_only = any(x in _req_text for x in [
+                        "english only", "only english", "μόνο αγγλ", "english version only",
+                    ])
+
+                    if _inline_bilingual or _inline_english_only:
+                        # Language is clear from the request — generate immediately
+                        _is_bilingual_reply  = _inline_bilingual and not _inline_english_only
+                        _is_english_reply    = _inline_english_only or not _inline_bilingual
+                        _base_system         = system
+                        _pdf_messages        = _hal_build_api_messages(st.session_state.chat_history)
+                        # Fall through to the shared generation block below
+                        _do_pdf_generate = True
+                    else:
+                        # Ask the user to choose language
+                        st.session_state.hal_pdf_lang_pending = system
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "content": "📄 Bilingual (English + Greek) ή μόνο English;"
+                        })
+                        return
+                    
+                    if _do_pdf_generate:
+                        _do_generate_pdfs(_base_system, _is_bilingual_reply, _pdf_messages)
+                        return
 
                 code_exec_system = system + """
 
