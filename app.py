@@ -96,6 +96,14 @@ if "session_id" not in st.session_state:
     st.session_state.session_id = datetime.now().strftime("%Y%m%d-%H%M") + "-" + uuid.uuid4().hex[:6]
 if "memory_injected" not in st.session_state:
     st.session_state.memory_injected = False
+if "hal_pending_files" not in st.session_state:
+    # Files staged in the uploader, not yet attached to a sent message.
+    # Each entry: (filename, bytes, mime_type)
+    st.session_state.hal_pending_files = []
+if "hal_uploader_nonce" not in st.session_state:
+    # Bumped after a send so the file_uploader widget remounts empty
+    # (Streamlit has no public API to clear an uploader without a key change).
+    st.session_state.hal_uploader_nonce = 0
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def check_pin(pin_input):
@@ -558,6 +566,88 @@ def render_private_home():
                         st.rerun()
 
 
+def _hal_build_api_messages(chat_history):
+    """
+    Translate st.session_state.chat_history into the messages list for the
+    Anthropic API. Plain text messages stay strings. Messages with an
+    "attachments" field get expanded into a list of content blocks:
+      - PDFs: smart-extracted to text if large (saves tokens), otherwise sent
+        as a base64 `document` block so Claude reads them natively.
+      - Images: base64 `image` blocks.
+      - Text-ish (txt/csv/json/md): inlined as a labelled text block.
+    """
+    api_messages = []
+    for m in chat_history:
+        atts = m.get("attachments") or []
+        if not atts:
+            api_messages.append({"role": m["role"], "content": m["content"]})
+            continue
+
+        blocks = []
+        for fname, fbytes, mime in atts:
+            if mime == "application/pdf":
+                extracted = None
+                try:
+                    from extraction import smart_pdf_to_text
+                    extracted = smart_pdf_to_text(fbytes, fname)
+                except Exception:
+                    extracted = None
+                if extracted:
+                    blocks.append({"type": "text", "text": extracted})
+                else:
+                    blocks.append({
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": base64.standard_b64encode(fbytes).decode("utf-8"),
+                        },
+                    })
+            elif mime.startswith("image/"):
+                blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime,
+                        "data": base64.standard_b64encode(fbytes).decode("utf-8"),
+                    },
+                })
+            else:
+                # Treat as UTF-8 text; errors="replace" so a stray byte never
+                # breaks the whole turn — better degraded than dropped.
+                try:
+                    text = fbytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = fbytes.decode("utf-8", errors="replace")
+                blocks.append({
+                    "type": "text",
+                    "text": f"=== ATTACHED FILE: {fname} ===\n{text}\n=== END {fname} ===",
+                })
+
+        # User's actual prompt goes last so Claude sees the files first, then
+        # the question about them.
+        blocks.append({"type": "text", "text": m["content"] or "(no message text — see attached files)"})
+        api_messages.append({"role": m["role"], "content": blocks})
+    return api_messages
+
+
+def _hal_mime_for(filename: str, fallback: str) -> str:
+    """Streamlit's UploadedFile.type is sometimes empty or generic; pin it from
+    the extension so PDF/image branches in _hal_build_api_messages fire correctly."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        "pdf":  "application/pdf",
+        "png":  "image/png",
+        "jpg":  "image/jpeg", "jpeg": "image/jpeg",
+        "gif":  "image/gif",
+        "webp": "image/webp",
+        "txt":  "text/plain",
+        "csv":  "text/csv",
+        "json": "application/json",
+        "md":   "text/markdown",
+    }.get(ext, fallback or "application/octet-stream")
+
+
 def render_hal_chat():
     import anthropic
 
@@ -579,14 +669,6 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Pantelis Kourbelas is a CLIENT of Ashlar Insurance, NOT the operator.
 
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send.
-
-FILE ATTACHMENTS — users can attach multiple files (PDFs, images, CSV, TXT) to any message. When files are attached, treat the user's text as the question/task about those files. Common tasks include comparing insurance quotes side-by-side, summarising T&C PDFs, extracting numbers from screenshots, building recommendations from brochures. Do the task directly in the reply.
-
-CLIENT-FACING REPORTS ARE ALWAYS BILINGUAL — CRITICAL. Whenever you produce a PDF or any deliverable a client (or Christos for a client) will read — comparisons, analyses, summaries, recommendations — it MUST be written in BOTH Greek and English. The structure is: Greek section first (header → table → summary → recommendation), then a thick coloured horizontal rule, then the English section (same structure, mirrored). Each half is self-contained — a Greek-only reader and an English-only reader both get the full document. This serves Ashlar's mixed clientele (Greek nationals + international expats) from one file. Single-language is the exception, not the rule — switch to it ONLY if the user explicitly says "in Greek only" / "in English only", or if it's clearly an internal-only doc.
-
-INSURANCE COMPARISON STRUCTURE — header (insurer + product per side) → per-section table appropriate to type (TRAVEL: medical/cancellation/delay/baggage/personal accident/liability/optional; HEALTH: inpatient/outpatient/diagnostics/dental/pharmacy/geographic/excess; MOTOR: third-party/own damage/theft/fire/legal/no-claims) → per-line winner tag (✓ CURRENT / ✓ ΤΡΕΧΟΝ green, ✓ PROPOSED / ✓ ΠΡΟΤΕΙΝΟΜΕΝΟ blue, = TIE / = ΙΣΟΠΑΛΙΑ grey) → winner tally → RETAIN/SWITCH recommendation with numbered reasons ① ② ③. If a PDF is partial (e.g. 6 of 59 pages), state it in a "Key Caveat / Σημαντική Επιφύλαξη" section. NEVER invent numbers — write "Δεν αναφέρεται / Not stated" when data is absent.
-
-CHAT RESPONSES ABOUT CLIENT MATTERS — also bilingual by default when the response is substantive advice Christos might forward or paraphrase to a client. Short conversational replies (yes/no, quick questions, internal coding talk) can stay in one language.
 
 MEMORY — IMPORTANT:
 You have persistent memory of business conversations from the last 7 days (rolling window). This memory is automatically injected into your context below as "=== ROLLING MEMORY ===". USE IT actively.
@@ -647,7 +729,17 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
         else:
             for msg in st.session_state.chat_history:
                 if msg["role"] == "user":
-                    st.chat_message("user").write(msg["content"])
+                    with st.chat_message("user"):
+                        atts = msg.get("attachments") or []
+                        if atts:
+                            chips = " &nbsp; ".join(
+                                f"📎 <code>{fn}</code>" for fn, _, _ in atts
+                            )
+                            st.markdown(
+                                f"<div style='font-size:12px;color:#7A6A5A;margin-bottom:4px;'>{chips}</div>",
+                                unsafe_allow_html=True,
+                            )
+                        st.write(msg["content"])
                 else:
                     st.chat_message("assistant").write(msg["content"])
 
@@ -777,7 +869,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                             _r = _cl.messages.create(
                                 model="claude-sonnet-4-6", max_tokens=600,
                                 system=voice_system,
-                                messages=[{"role":m["role"],"content":m["content"]} for m in st.session_state.chat_history[-10:]]
+                                messages=_hal_build_api_messages(st.session_state.chat_history[-10:])
                             )
                             reply = _r.content[0].text
                         except Exception as e:
@@ -802,19 +894,89 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                 else:
                     st.warning("No speech detected — try again.")
 
-    user_input = st.chat_input("Message HAL...")
+    # ── FILE ATTACHMENTS ─────────────────────────────────────────────────────
+    # Always-visible panel above the chat input. Files staged here are sent
+    # with the next message and stay in chat history for follow-ups.
+    st.markdown(
+        "<div style='font-size:11px;font-weight:600;letter-spacing:2px;"
+        "text-transform:uppercase;color:#7A6A5A;margin:8px 0 4px;'>"
+        "📎 Attach files for next message</div>",
+        unsafe_allow_html=True,
+    )
+    _up_col, _stage_col = st.columns([3, 2])
+    with _up_col:
+        _uploaded = st.file_uploader(
+            "Drop quotes, screenshots, or text files here — then ask HAL anything about them",
+            type=["pdf", "png", "jpg", "jpeg", "gif", "webp", "txt", "csv", "json", "md"],
+            accept_multiple_files=True,
+            key=f"hal_file_uploader_{st.session_state.hal_uploader_nonce}",
+            label_visibility="visible",
+        )
+    # Re-stage on every rerun from whatever the uploader currently holds.
+    # UploadedFile objects don't persist across reruns, so snapshot their
+    # bytes immediately. Same key + same files = same upload, no double-read.
+    if _uploaded:
+        st.session_state.hal_pending_files = [
+            (f.name, f.getvalue(), _hal_mime_for(f.name, getattr(f, "type", "") or ""))
+            for f in _uploaded
+        ]
+    elif _uploaded is not None:
+        # Uploader rendered but empty (user removed everything) — clear stage.
+        st.session_state.hal_pending_files = []
+
+    with _stage_col:
+        pend = st.session_state.hal_pending_files
+        if pend:
+            total_kb = sum(len(b) for _, b, _ in pend) / 1024
+            st.markdown(
+                f"<div style='font-size:12px;color:#A89880;'>"
+                f"<b>{len(pend)} file(s) staged</b> · {total_kb:,.0f} KB total<br>"
+                + "<br>".join(f"📄 <code>{fn}</code>" for fn, _, _ in pend)
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button("Clear staged files", key="hal_clear_pending", use_container_width=True):
+                st.session_state.hal_pending_files = []
+                st.session_state.hal_uploader_nonce += 1
+                st.rerun()
+        else:
+            st.caption("No files staged. Drop PDFs / images / CSV / TXT on the left.")
+
+    # Tailor placeholder to whether files are staged
+    if st.session_state.hal_pending_files:
+        _placeholder = f"Ask HAL about your {len(st.session_state.hal_pending_files)} staged file(s)…"
+    else:
+        _placeholder = "Message HAL..."
+
+    user_input = st.chat_input(_placeholder)
     if user_input:
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        # Snapshot whatever's staged right now, then clear the stage so the next
+        # turn starts fresh (and bump the uploader key so the widget remounts empty).
+        _atts_for_msg = list(st.session_state.hal_pending_files)
+        st.session_state.hal_pending_files = []
+        if _atts_for_msg:
+            st.session_state.hal_uploader_nonce += 1
+
+        _user_msg = {"role": "user", "content": user_input}
+        if _atts_for_msg:
+            _user_msg["attachments"] = _atts_for_msg
+        st.session_state.chat_history.append(_user_msg)
+
         if not is_private:
             conv_ws = st.session_state.get("_conv_ws")
-            save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "user", user_input)
+            # Sheet log: append a note about attachments so the memory window
+            # later shows "user asked X with these files" rather than orphaned text.
+            _log_text = user_input
+            if _atts_for_msg:
+                _log_text += "\n[attached: " + ", ".join(fn for fn, _, _ in _atts_for_msg) + "]"
+            save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "user", _log_text)
         if not api_key:
             st.session_state.chat_history.append({"role": "assistant", "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."})
         else:
             with st.spinner("HAL is thinking..."):
                 try:
                     client = anthropic.Anthropic(api_key=api_key)
-                    messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat_history]
+                    messages = _hal_build_api_messages(st.session_state.chat_history)
                     code_exec_system = system + """
 
 CODE EXECUTION — you have a sandboxed Python/Bash environment (no internet access inside it).
@@ -828,20 +990,6 @@ back the finished artifact. After creating a file in the sandbox, ALWAYS emit it
 so the surrounding application can detect, decode, and offer it as a download. Do this for every file
 you create that the user should receive. If you find yourself about to write a code block in your text
 reply for the user to copy, stop — run it in the sandbox instead.
-
-GREEK FONTS IN PDFs — CRITICAL. ReportLab's default fonts (Helvetica, Times-Roman, Courier) do NOT
-support Greek diacritics (ά έ ή ί ό ύ ώ) — they render as "■". For ANY PDF that might contain Greek
-text (client names, insurer names, Greek body text, bilingual reports), register DejaVuSans BEFORE
-building anything:
-
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    pdfmetrics.registerFont(TTFont("GF",     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
-    pdfmetrics.registerFont(TTFont("GFBold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
-
-Then use "GF" / "GFBold" in EVERY ParagraphStyle, TableStyle FONTNAME entry, and canvas.setFont call.
-Never leave a default fontName= in any style. After building, you can sanity-check with PyMuPDF that
-"άέή" appear in the extracted text — if "■" shows up, a style is still using Helvetica somewhere.
 
 IMPORTANT — if the ROLLING MEMORY section above contains earlier HAL replies that pasted Python/code as
 text instead of running it, those are recorded mistakes from before code execution was wired up. Do NOT
@@ -887,15 +1035,7 @@ times it appears in memory or chat history above."""
                                 except Exception:
                                     pass  # malformed emit — skip, text reply still shows below
 
-                    if reply_parts:
-                        reply = "\n".join(reply_parts).strip()
-                    elif generated_files:
-                        # HAL produced files but no chat text — surface what was made
-                        # rather than the bare placeholder, which reads like a bug.
-                        _file_chips = " · ".join(f"📎 **{fn}**" for fn, _ in generated_files)
-                        reply = f"Έτοιμο. / Done. {_file_chips} — διαθέσιμο για λήψη παρακάτω."
-                    else:
-                        reply = "⚠️ Δεν ελήφθη απάντηση. Δοκίμασε ξανά ή αναδιατύπωσε. / No response received — try again or rephrase."
+                    reply = "\n".join(reply_parts).strip() or "(no text response)"
                     st.session_state.chat_history.append({"role": "assistant", "content": reply})
                     st.session_state["hal_last_files"] = generated_files  # replace, even if empty — avoid showing stale files from a prior turn
                     if not is_private:
