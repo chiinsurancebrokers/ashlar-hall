@@ -613,7 +613,7 @@ def _hal_build_api_messages(chat_history):
                     },
                 })
             else:
-                # Treat as UTF-8 text; errors="replace" so a stray byte never
+                # Treat as UTF-8 text. errors="replace" so a stray byte never
                 # breaks the whole turn — better degraded than dropped.
                 try:
                     text = fbytes.decode("utf-8")
@@ -669,6 +669,14 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Pantelis Kourbelas is a CLIENT of Ashlar Insurance, NOT the operator.
 
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send.
+
+FILE ATTACHMENTS — users can attach multiple files (PDFs, images, CSV, TXT) to any message. When files are attached, treat the user's text as the question/task about those files. Common tasks include comparing two or more insurance quotes side-by-side, summarising a Terms & Conditions PDF, extracting numbers from screenshots, or building a recommendation from a stack of brochures. Do the task directly in the reply — produce the comparison table, the summary, the recommendation — don't send the user to a different module to do it.
+
+REPORT vs CHAT — judge from context whether the right answer is a quick chat reply or a generated PDF deliverable. Produce a PDF when: (a) the user uploads multiple policies/quotes for side-by-side analysis, (b) they explicitly ask for a "report", "PDF", "ανάλυση", "σύγκριση", "αναφορά", "document", (c) the output is structured data with more than ~6 rows that would be unreadable as chat, or (d) the deliverable is something they would forward to a client. Otherwise reply in chat. When unsure, ask in one short line: "PDF ή απάντηση εδώ;" / "PDF or quick answer?"
+
+INSURANCE COMPARISON REPORTS — structure: header (insurer + product per side) → per-section table appropriate to the type (travel: medical/cancellation/delay/baggage/personal accident/liability/optional; health: inpatient/outpatient/diagnostics/dental/pharmacy/geographic/excess; motor: third-party/own damage/theft/fire/legal/no-claims) → per-line winner tag (✓ CURRENT / ✓ ΤΡΕΧΟΝ in green, ✓ PROPOSED / ✓ ΠΡΟΤΕΙΝΟΜΕΝΟ in blue, = TIE / = ΙΣΟΠΑΛΙΑ in grey) → winner tally → RETAIN/SWITCH recommendation with numbered reasons ① ② ③. If a PDF is partial (e.g. only the Table of Benefits page provided), state it explicitly in a "Key Caveat / Σημαντική Επιφύλαξη" section. NEVER invent numbers — write "Δεν αναφέρεται / Not stated" when data is absent.
+
+LANGUAGE FOR CLIENT-FACING REPORTS — default to bilingual (Greek section first, English section below, each half self-contained with its own header/table/summary/recommendation, separated by a coloured horizontal rule). This serves both Greek nationals and international expats from one document. Switch to single-language only if the user asks, or if context makes the audience unambiguous (e.g. message is in English and client name is non-Greek).
 
 MEMORY — IMPORTANT:
 You have persistent memory of business conversations from the last 7 days (rolling window). This memory is automatically injected into your context below as "=== ROLLING MEMORY ===". USE IT actively.
@@ -913,8 +921,8 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
             label_visibility="visible",
         )
     # Re-stage on every rerun from whatever the uploader currently holds.
-    # UploadedFile objects don't persist across reruns, so snapshot their
-    # bytes immediately. Same key + same files = same upload, no double-read.
+    # (UploadedFile objects don't persist across reruns, so we snapshot their
+    #  bytes immediately. Same key + same files = same upload, no double-read.)
     if _uploaded:
         st.session_state.hal_pending_files = [
             (f.name, f.getvalue(), _hal_mime_for(f.name, getattr(f, "type", "") or ""))
@@ -942,11 +950,187 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
         else:
             st.caption("No files staged. Drop PDFs / images / CSV / TXT on the left.")
 
-    # Tailor placeholder to whether files are staged
+    # Quick-action prompt: tailor to whether files are staged
     if st.session_state.hal_pending_files:
         _placeholder = f"Ask HAL about your {len(st.session_state.hal_pending_files)} staged file(s)…"
     else:
         _placeholder = "Message HAL..."
+
+    # ── INFERENCE HELPER ─────────────────────────────────────────────────────
+    # Wrapped so both the chat-input submit path AND the retry button below
+    # can call it. Reads st.session_state.chat_history as-is, appends the
+    # assistant reply (or an error message) to it. Caller is responsible for
+    # st.rerun().
+    def _send_to_hal():
+        if not api_key:
+            st.session_state.chat_history.append({"role": "assistant", "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."})
+            return
+        with st.spinner("HAL is thinking..."):
+            try:
+                client = anthropic.Anthropic(api_key=api_key)
+                messages = _hal_build_api_messages(st.session_state.chat_history)
+                code_exec_system = system + """
+
+CODE EXECUTION — you have a sandboxed Python/Bash environment (no internet access inside it).
+You MUST use it — not just describe what code would do — whenever the user asks for:
+- An actual file: PDF, PPTX, Excel, image, etc. (ReportLab, python-pptx, openpyxl, Pillow are pre-installed)
+- A real computed result: precise calculations, data processing, anything error-prone by reasoning alone
+Do NOT paste a Python script in your text reply and tell the user to run it themselves — that is the
+WRONG behavior for this assistant. Instead, write the script INTO THE SANDBOX, RUN it there, and hand
+back the finished artifact. After creating a file in the sandbox, ALWAYS emit it back by running, e.g.:
+  echo "===FILE:report.pdf===" && base64 report.pdf && echo "===ENDFILE==="
+so the surrounding application can detect, decode, and offer it as a download. Do this for every file
+you create that the user should receive. If you find yourself about to write a code block in your text
+reply for the user to copy, stop — run it in the sandbox instead.
+
+GREEK FONTS IN PDFs — CRITICAL. ReportLab's default fonts (Helvetica, Times-Roman, Courier) DO NOT
+support Greek diacritics (ά έ ή ί ό ύ ώ) — they render as "■". For ANY PDF that might contain Greek
+text (client names, insurer names, Greek body text), register DejaVuSans BEFORE building anything:
+
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    pdfmetrics.registerFont(TTFont("GF",     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
+    pdfmetrics.registerFont(TTFont("GFBold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
+
+Then use "GF" / "GFBold" in EVERY ParagraphStyle, TableStyle FONTNAME entry, and canvas.setFont call.
+Never leave a default fontName= in any style. For a quick sanity check after building, open the PDF
+with fitz and confirm "άέή" appear in the extracted text — if "■" shows up, a style is still using
+Helvetica somewhere.
+
+SINGLE-SCRIPT EXECUTION — when producing a non-trivial PDF, put font setup, content build, AND the
+base64 emission in ONE Python script run via code_execution. Run the whole pipeline top-to-bottom in
+one sandbox call, ending with the ===FILE:===/===ENDFILE=== shell emission.
+
+NO ANNOUNCE-AND-STOP — CRITICAL. When the user wants a file/PDF/report, DO NOT write a sentence like
+"Εκτελώ τώρα το script...", "Now running the bootstrap...", "Let me build the PDF..." and then end
+your turn. The user CANNOT see your intentions — they only see what you produce. Saying "I will now
+do X" without then invoking code_execution in the SAME turn = task abandoned, blank screen for the user.
+
+Correct pattern:
+  ✅ 1-3 line preamble (what type, what files, what you'll produce) → immediately invoke code_execution
+     in the SAME response → that single tool call runs the entire pipeline → file emerges.
+  ✅ OR no preamble at all — just invoke code_execution directly.
+
+Wrong pattern (DO NOT DO THIS):
+  ❌ Preamble → "Εκτελώ πρώτα το X:" / "Now running:" / "Let me start..." → end of turn, no tool call.
+  ❌ Multiple code_execution calls with chat narration between them ("OK font done, now building...").
+
+If you ever feel the urge to write "now I will run / execute / build / create" — STOP writing prose
+and invoke code_execution instead. Your tool calls ARE your demonstration of work; prose announcements
+of tool calls are wasted tokens that end the turn before any work happens.
+
+IMPORTANT — if the ROLLING MEMORY section above contains earlier HAL replies that pasted Python/code as
+text instead of running it, those are recorded mistakes from before code execution was wired up. Do NOT
+treat them as a style to follow. This instruction always overrides that pattern, no matter how many
+times it appears in memory or chat history above."""
+                response = client.beta.messages.create(
+                    model="claude-sonnet-4-6", max_tokens=8192,
+                    system=code_exec_system, messages=messages,
+                    tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                    betas=["code-execution-2025-08-25"],
+                )
+                all_blocks = list(response.content)
+
+                # Code execution on a non-trivial task (e.g. building a multi-section PDF) can
+                # pause mid-turn; resubmitting lets Claude continue rather than the user seeing a
+                # cut-off result. Accumulate blocks from every turn — the file/text Claude produced
+                # before a pause must not be dropped when a later turn's response replaces `response`.
+                _continue_attempts = 0
+                while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
+                    messages = messages + [{"role": "assistant", "content": response.content}]
+                    response = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
+                        system=code_exec_system, messages=messages,
+                        tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                        betas=["code-execution-2025-08-25"],
+                    )
+                    all_blocks.extend(response.content)
+                    _continue_attempts += 1
+
+                # ── ANNOUNCE-AND-STOP RECOVERY ────────────────────────────────────
+                # HAL sometimes writes "Εκτελώ τώρα..." / "Now running..." and then ends
+                # the turn WITHOUT invoking code_execution at all. From the user's side
+                # this looks like HAL ghosted them. The pause_turn loop above doesn't
+                # help — stop_reason is "end_turn", not "pause_turn". Detect this by
+                # checking whether any tool-use blocks were emitted; if not but the
+                # text suggests work was about to happen, send an explicit nudge.
+                _intent_phrases = (
+                    "εκτελώ", "θα δημιουργήσ", "θα παράγ", "θα φτιάξ", "θα χτίσ",
+                    "ας εκτελέσ", "ας τρέξ", "ας δημιουργήσ", "let me", "i'll build",
+                    "i'll create", "i'll run", "i will build", "i will run", "i will create",
+                    "now building", "now running", "now creating", "now executing",
+                    "running ", "executing ", "starting ", "building the",
+                )
+                def _has_tool_activity(blocks):
+                    return any(getattr(b, "type", "") in (
+                        "server_tool_use",
+                        "bash_code_execution_tool_result",
+                        "code_execution_tool_result",
+                    ) for b in blocks)
+                _nudge_attempts = 0
+                while (not _has_tool_activity(all_blocks)
+                       and getattr(response, "stop_reason", None) == "end_turn"
+                       and _nudge_attempts < 2):
+                    _text_so_far = " ".join(
+                        getattr(b, "text", "") for b in all_blocks
+                        if getattr(b, "type", "") == "text"
+                    ).lower()
+                    if not any(p in _text_so_far for p in _intent_phrases):
+                        break  # no intent to build → don't nudge; HAL legitimately just chatted
+                    messages = messages + [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": (
+                            "Συνέχισε — εκτέλεσε ΤΩΡΑ το script στο sandbox και παρήγαγε το αρχείο. "
+                            "Continue — actually invoke code_execution now and produce the file. "
+                            "Μην γράψεις άλλη πρόζα. No more prose. "
+                            "Run the full pipeline (font bootstrap → build → ===FILE:===/===ENDFILE=== emission) "
+                            "in ONE code_execution call right now."
+                        )},
+                    ]
+                    response = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
+                        system=code_exec_system, messages=messages,
+                        tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                        betas=["code-execution-2025-08-25"],
+                    )
+                    all_blocks.extend(response.content)
+                    _nudge_attempts += 1
+                    # If this continuation itself paused, drain the pause_turn loop again.
+                    while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
+                        messages = messages + [{"role": "assistant", "content": response.content}]
+                        response = client.beta.messages.create(
+                            model="claude-sonnet-4-6", max_tokens=8192,
+                            system=code_exec_system, messages=messages,
+                            tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                            betas=["code-execution-2025-08-25"],
+                        )
+                        all_blocks.extend(response.content)
+                        _continue_attempts += 1
+
+                reply_parts = []
+                generated_files = []  # list of (filename, raw_bytes)
+                for block in all_blocks:
+                    if getattr(block, "type", None) == "text":
+                        reply_parts.append(block.text)
+                    elif getattr(block, "type", None) == "bash_code_execution_tool_result":
+                        content = getattr(block, "content", None)
+                        stdout = getattr(content, "stdout", "") if content else ""
+                        for fname, b64data in re.findall(
+                            r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
+                        ):
+                            try:
+                                generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
+                            except Exception:
+                                pass  # malformed emit — skip, text reply still shows below
+
+                reply = "\n".join(reply_parts).strip() or "(no text response)"
+                st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                st.session_state["hal_last_files"] = generated_files  # replace, even if empty — avoid showing stale files from a prior turn
+                if not is_private:
+                    conv_ws = st.session_state.get("_conv_ws")
+                    save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", reply)
+            except Exception as e:
+                st.session_state.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {str(e)}"})
 
     user_input = st.chat_input(_placeholder)
     if user_input:
@@ -970,79 +1154,8 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
             if _atts_for_msg:
                 _log_text += "\n[attached: " + ", ".join(fn for fn, _, _ in _atts_for_msg) + "]"
             save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "user", _log_text)
-        if not api_key:
-            st.session_state.chat_history.append({"role": "assistant", "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."})
-        else:
-            with st.spinner("HAL is thinking..."):
-                try:
-                    client = anthropic.Anthropic(api_key=api_key)
-                    messages = _hal_build_api_messages(st.session_state.chat_history)
-                    code_exec_system = system + """
 
-CODE EXECUTION — you have a sandboxed Python/Bash environment (no internet access inside it).
-You MUST use it — not just describe what code would do — whenever the user asks for:
-- An actual file: PDF, PPTX, Excel, image, etc. (ReportLab, python-pptx, openpyxl, Pillow are pre-installed)
-- A real computed result: precise calculations, data processing, anything error-prone by reasoning alone
-Do NOT paste a Python script in your text reply and tell the user to run it themselves — that is the
-WRONG behavior for this assistant. Instead, write the script INTO THE SANDBOX, RUN it there, and hand
-back the finished artifact. After creating a file in the sandbox, ALWAYS emit it back by running, e.g.:
-  echo "===FILE:report.pdf===" && base64 report.pdf && echo "===ENDFILE==="
-so the surrounding application can detect, decode, and offer it as a download. Do this for every file
-you create that the user should receive. If you find yourself about to write a code block in your text
-reply for the user to copy, stop — run it in the sandbox instead.
-
-IMPORTANT — if the ROLLING MEMORY section above contains earlier HAL replies that pasted Python/code as
-text instead of running it, those are recorded mistakes from before code execution was wired up. Do NOT
-treat them as a style to follow. This instruction always overrides that pattern, no matter how many
-times it appears in memory or chat history above."""
-                    response = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=8192,
-                        system=code_exec_system, messages=messages,
-                        tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                        betas=["code-execution-2025-08-25"],
-                    )
-                    all_blocks = list(response.content)
-
-                    # Code execution on a non-trivial task (e.g. building a multi-section PDF) can
-                    # pause mid-turn; resubmitting lets Claude continue rather than the user seeing a
-                    # cut-off result. Accumulate blocks from every turn — the file/text Claude produced
-                    # before a pause must not be dropped when a later turn's response replaces `response`.
-                    _continue_attempts = 0
-                    while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
-                        messages = messages + [{"role": "assistant", "content": response.content}]
-                        response = client.beta.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=8192,
-                            system=code_exec_system, messages=messages,
-                            tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                            betas=["code-execution-2025-08-25"],
-                        )
-                        all_blocks.extend(response.content)
-                        _continue_attempts += 1
-
-                    reply_parts = []
-                    generated_files = []  # list of (filename, raw_bytes)
-                    for block in all_blocks:
-                        if getattr(block, "type", None) == "text":
-                            reply_parts.append(block.text)
-                        elif getattr(block, "type", None) == "bash_code_execution_tool_result":
-                            content = getattr(block, "content", None)
-                            stdout = getattr(content, "stdout", "") if content else ""
-                            for fname, b64data in re.findall(
-                                r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
-                            ):
-                                try:
-                                    generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
-                                except Exception:
-                                    pass  # malformed emit — skip, text reply still shows below
-
-                    reply = "\n".join(reply_parts).strip() or "(no text response)"
-                    st.session_state.chat_history.append({"role": "assistant", "content": reply})
-                    st.session_state["hal_last_files"] = generated_files  # replace, even if empty — avoid showing stale files from a prior turn
-                    if not is_private:
-                        conv_ws = st.session_state.get("_conv_ws")
-                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", reply)
-                except Exception as e:
-                    st.session_state.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {str(e)}"})
+        _send_to_hal()
         st.rerun()
 
     if st.session_state.get("hal_last_files"):
@@ -1051,9 +1164,41 @@ times it appears in memory or chat history above."""
             st.download_button(f"⬇️ {fname}", data=fbytes, file_name=fname, key=f"dl_{_i}_{fname}")
 
     if st.session_state.chat_history:
-        if st.button("🗑 Clear conversation", key="clear_chat"):
-            st.session_state.chat_history = []
-            st.rerun()
+        # Retry/Regenerate button — covers two failure modes:
+        #   1. HAL didn't reply at all (last message is from the user)        → "Retry"
+        #   2. HAL replied but it was cut off, errored, or unhelpful          → "Regenerate"
+        # Pops any trailing assistant message(s) so _send_to_hal re-runs from
+        # the same user turn without duplicating it. The previous user input
+        # is NOT re-logged to Sheets (it was logged when first sent), so no
+        # duplicate user rows; only the new assistant reply gets logged.
+        _has_user_msg  = any(m["role"] == "user" for m in st.session_state.chat_history)
+        _last_role     = st.session_state.chat_history[-1]["role"]
+        _retry_label   = "🔄 Retry — get HAL's response" if _last_role == "user" else "🔄 Regenerate response"
+        _col_retry, _col_clear = st.columns(2)
+        with _col_retry:
+            if st.button(
+                _retry_label,
+                key="hal_retry",
+                use_container_width=True,
+                disabled=not _has_user_msg,
+                help="If HAL was cut off, didn't respond, or you want a different answer — click to re-run the last message.",
+            ):
+                # Strip trailing assistant turn(s) so chat_history ends on the
+                # user message we want HAL to answer.
+                while st.session_state.chat_history and st.session_state.chat_history[-1]["role"] == "assistant":
+                    st.session_state.chat_history.pop()
+                # Drop any files HAL produced last turn — they belong to the
+                # reply we're discarding, not the new one we're about to make.
+                st.session_state["hal_last_files"] = []
+                _send_to_hal()
+                st.rerun()
+        with _col_clear:
+            if st.button("🗑 Clear conversation", key="clear_chat", use_container_width=True):
+                st.session_state.chat_history = []
+                st.session_state.hal_pending_files = []
+                st.session_state.hal_uploader_nonce += 1
+                st.session_state["hal_last_files"] = []
+                st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
