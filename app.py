@@ -1009,6 +1009,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, PageBreak
                     from reportlab.pdfbase import pdfmetrics
                     from reportlab.pdfbase.ttfonts import TTFont
+                    from reportlab.pdfbase.pdfmetrics import registerFontFamily
 
                     font_regular = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
                     font_bold = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -1018,6 +1019,25 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                         pass
                     try:
                         pdfmetrics.registerFont(TTFont("GFBold", font_bold))
+                    except Exception:
+                        pass
+                    # ReportLab may lowercase font names while parsing <b>/<para> tags.
+                    # Register a proper font family and lowercase aliases so Paragraph
+                    # never crashes with: "Can't map determine family/bold/italic for gfbold".
+                    try:
+                        registerFontFamily("GF", normal="GF", bold="GFBold", italic="GF", boldItalic="GFBold")
+                    except Exception:
+                        pass
+                    try:
+                        pdfmetrics.registerFont(TTFont("gf", font_regular))
+                    except Exception:
+                        pass
+                    try:
+                        pdfmetrics.registerFont(TTFont("gfbold", font_bold))
+                    except Exception:
+                        pass
+                    try:
+                        registerFontFamily("gf", normal="gf", bold="gfbold", italic="gf", boldItalic="gfbold")
                     except Exception:
                         pass
 
@@ -1034,11 +1054,11 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                         leading=12.6, alignment=TA_LEFT, spaceAfter=5,
                     )
                     h1 = ParagraphStyle(
-                        "HALH1", parent=base, fontName="GFBold", fontSize=15, leading=19,
+                        "HALH1", parent=base, fontName="GF", fontSize=15, leading=19,
                         textColor=colors.HexColor("#1C1410"), spaceBefore=8, spaceAfter=8,
                     )
                     h2 = ParagraphStyle(
-                        "HALH2", parent=base, fontName="GFBold", fontSize=12.2, leading=15.5,
+                        "HALH2", parent=base, fontName="GF", fontSize=12.2, leading=15.5,
                         textColor=colors.HexColor("#4A3728"), spaceBefore=7, spaceAfter=5,
                     )
                     small = ParagraphStyle(
@@ -1150,6 +1170,7 @@ text (client names, insurer names, Greek body text), register DejaVuSans BEFORE 
 
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
+                    from reportlab.pdfbase.pdfmetrics import registerFontFamily
     pdfmetrics.registerFont(TTFont("GF",     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
     pdfmetrics.registerFont(TTFont("GFBold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
 
