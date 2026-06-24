@@ -96,6 +96,14 @@ if "session_id" not in st.session_state:
     st.session_state.session_id = datetime.now().strftime("%Y%m%d-%H%M") + "-" + uuid.uuid4().hex[:6]
 if "memory_injected" not in st.session_state:
     st.session_state.memory_injected = False
+if "hal_pending_files" not in st.session_state:
+    # Files staged in the uploader, not yet attached to a sent message.
+    # Each entry: (filename, bytes, mime_type)
+    st.session_state.hal_pending_files = []
+if "hal_uploader_nonce" not in st.session_state:
+    # Bumped after a send so the file_uploader widget remounts empty
+    # (Streamlit has no public API to clear an uploader without a key change).
+    st.session_state.hal_uploader_nonce = 0
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def check_pin(pin_input):
@@ -212,6 +220,17 @@ def search_conversations(conv_ws, query, limit=20):
 
 
 def summarise_memory_for_context(recent_msgs, max_msgs=MEMORY_MAX_INJECT):
+    if not recent_msgs:
+        return ""
+    # Drop stale HAL replies that paste a fenced ```python/```pptx code block instead of
+    # running it — these predate code execution being wired up and, if replayed into context,
+    # act as a strong few-shot example pulling new replies back toward the old "paste, don't
+    # run" behavior, overriding the explicit instruction not to do that.
+    def _is_stale_pasted_code(m):
+        return m["role"] == "assistant" and bool(
+            re.search(r"```(?:python|py)?\s*\n.{200,}", m["content"], re.DOTALL)
+        )
+    recent_msgs = [m for m in recent_msgs if not _is_stale_pasted_code(m)]
     if not recent_msgs:
         return ""
     msgs = recent_msgs[-max_msgs:]
@@ -547,6 +566,273 @@ def render_private_home():
                         st.rerun()
 
 
+# ── HAL COMPARISON QUICK-PROMPTS ─────────────────────────────────────────────
+# Two parallel prompts (EL + EN) for the one-click "compare these policies"
+# button in the HAL chat. Both share a single technical font-handling block —
+# the previous version's "use DejaVuSans" hint was too weak; HAL would skip
+# the font registration and ReportLab's default Helvetica would render Greek
+# diacritics (ά έ ή ί ό ύ ώ) as "■". The new block forces: discover-via-fc-list
+# → register → use everywhere → verify-with-PyMuPDF → retry-with-next-font on
+# failure.
+
+_HAL_FONT_BLOCK = """
+═══ FONT SETUP — CRITICAL FOR GREEK CHARACTERS ═══
+
+ReportLab's default fonts (Helvetica, Times-Roman, Courier) DO NOT support Greek accented characters (ά, έ, ή, ί, ό, ύ, ώ, Ά, Έ, Ή, Ί, Ό, Ύ, Ώ). They will render as "■" — the most common cause of broken Greek PDFs. You MUST follow these four steps:
+
+Step 1 — Discover a Greek-capable system font:
+
+    import subprocess
+    result = subprocess.run(
+        ['fc-list', ':lang=el', '-f', '%{file}\\n'],
+        capture_output=True, text=True
+    )
+    greek_fonts = sorted(set(
+        f.strip() for f in result.stdout.split('\\n')
+        if f.strip() and f.endswith('.ttf')
+    ))
+    print("Greek-capable fonts found:", greek_fonts[:5])
+    assert greek_fonts, "FATAL: no Greek-capable TTF on this system — cannot produce PDF"
+
+Step 2 — Register it (regular + bold) in ReportLab:
+
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    GREEK_FONT = "GreekUnicode"
+    pdfmetrics.registerFont(TTFont(GREEK_FONT, greek_fonts[0]))
+    # Try common bold-variant paths; fall back to using the regular if none found
+    GREEK_FONT_BOLD = GREEK_FONT
+    for bp in [
+        greek_fonts[0].replace('.ttf', '-Bold.ttf'),
+        greek_fonts[0].replace('Sans.ttf', 'Sans-Bold.ttf'),
+        greek_fonts[0].replace('Sans.ttf', 'SansBd.ttf'),
+    ]:
+        try:
+            pdfmetrics.registerFont(TTFont(GREEK_FONT + "Bold", bp))
+            GREEK_FONT_BOLD = GREEK_FONT + "Bold"
+            break
+        except Exception:
+            continue
+
+Step 3 — Use GREEK_FONT EVERYWHERE you draw text. DO NOT use Helvetica anywhere:
+
+    • ParagraphStyle(name="Body", fontName=GREEK_FONT, fontSize=10, ...)
+    • ParagraphStyle(name="Header", fontName=GREEK_FONT_BOLD, fontSize=14, ...)
+    • TableStyle([..., ('FONTNAME', (0,0), (-1,-1), GREEK_FONT), ...])
+    • canvas.setFont(GREEK_FONT, 10)
+
+Step 4 — VERIFY the rendered PDF before delivering it:
+
+    import fitz
+    doc = fitz.open("output.pdf")
+    rendered_text = "\\n".join(p.get_text() for p in doc)
+    doc.close()
+    test_chars = "άέήίόύώΆΈΉΊΌΎΏ"
+    chars_present = sum(1 for c in test_chars if c in rendered_text)
+    print(f"Greek-accent characters in rendered PDF: {chars_present}/{len(test_chars)}")
+    has_replacement_char = "■" in rendered_text or "\\ufffd" in rendered_text
+    if chars_present < 3 or has_replacement_char:
+        raise RuntimeError(
+            f"VERIFICATION FAILED: only {chars_present}/14 Greek diacritics rendered. "
+            f"Font {greek_fonts[0]} did not embed properly. "
+            f"Try the next font in greek_fonts and rebuild."
+        )
+
+If verification fails, retry Steps 2-4 with greek_fonts[1], then greek_fonts[2], etc.
+Only when verification passes do you emit the PDF with the ===FILE:===/===ENDFILE=== convention.
+"""
+
+
+_HAL_COMPARISON_PROMPT_EL = """Συγκρίνε σε βάθος τα συνημμένα ασφαλιστήρια και δημιούργησε επίσημο PDF σύγκρισης στα ΕΛΛΗΝΙΚΑ. Ακολούθησε αυστηρά τη μεθοδολογία και τη δομή που δίνω παρακάτω. Χρησιμοποίησε ΥΠΟΧΡΕΩΤΙΚΑ code execution με ReportLab — μην παρουσιάσεις απλώς πίνακα στο chat.
+
+═══ ΜΕΘΟΔΟΛΟΓΙΑ ΑΝΑΛΥΣΗΣ ═══
+(Εξήγησέ τη στην αρχή της απάντησής σου, σε 3-4 γραμμές, ώστε να ξέρει ο χρήστης τι κάνεις.)
+
+A) Εντόπισε τον τύπο ασφάλισης (ταξιδιωτική, υγείας, αυτοκινήτου, κατοικίας, ζωής) από τα PDFs.
+B) Χώρισε τη σύγκριση σε λογικές ενότητες ανάλογα με τον τύπο. Παραδείγματα:
+   • ΤΑΞΙΔΙΩΤΙΚΗ: Δομή Συμβολαίου & Ασφαλιστής · Απαλλαγές · Έκτακτη Ιατρική & Επαναπατρισμός · Ακύρωση & Διακοπή · Καθυστερήσεις & Αναστάτωση · Αποσκευές · Χρήματα & Έγγραφα · Προσωπικό Ατύχημα · Νομική Προστασία & Ευθύνη · Προαιρετικές Καλύψεις · Διαχείριση Αποζημιώσεων
+   • ΥΓΕΙΑΣ: Νοσοκομειακή Κάλυψη · Εξωνοσοκομειακή · Διαγνωστικά (MRI/CT/PET) · Οδοντιατρικά · Φαρμακευτική · Ψυχιατρική · Φυσιοθεραπεία · Μητρότητα · Γεωγραφική Κάλυψη · Απαλλαγές · Δίκτυο Παρόχων
+   • ΑΥΤΟΚΙΝΗΤΟΥ: Αστική Ευθύνη · Ίδιες Ζημιές · Κλοπή · Πυρκαγιά · Φυσικά Φαινόμενα · Οδική Βοήθεια · Νομική Προστασία · Προστασία Bonus
+C) Για ΚΑΘΕ γραμμή, σύγκρινε αριθμητικά και χαρακτήρισε νικητή:
+   • «✓ ΤΡΕΧΟΝ» — αν το τρέχον δίνει καλύτερο όριο/κάλυψη
+   • «✓ ΠΡΟΤΕΙΝΟΜΕΝΟ» — αν το προτεινόμενο είναι καλύτερο
+   • «= ΙΣΟΠΑΛΙΑ» — όταν είναι ισοδύναμα ή σχεδόν ίσα
+   • Αν λείπει η πληροφορία από κάποιο PDF: γράψε «Δεν αναφέρεται» — ΜΗΝ επινοείς νούμερα.
+D) Στο τέλος μέτρα τους νικητές και κάνε τελική σύσταση («ΔΙΑΤΗΡΗΣΗ ΤΡΕΧΟΝΤΟΣ» ή «ΑΛΛΑΓΗ ΣΕ ΠΡΟΤΕΙΝΟΜΕΝΟ»). Δικαιολόγησέ την με αριθμημένους λόγους ① ② ③ ...
+
+═══ ΔΟΜΗ PDF ═══
+
+1) ΚΕΦΑΛΙΔΑ:
+   • Τίτλος: «ΣΥΓΚΡΙΣΗ ΑΣΦΑΛΙΣΤΗΡΙΩΝ» (με σύμβολο ✈/⚕/🚗 ανάλογα με τύπο)
+   • Υπότιτλος: «Εκπονήθηκε από Ashlar Insurance»
+   • Στοιχεία πελάτη (όνομα, ηλικία) αν αναφέρονται στα PDFs
+   • Δύο στήλες πάνω-πάνω: ΤΡΕΧΟΝ (όνομα προϊόντος + ασφαλιστής) | ΠΡΟΤΕΙΝΟΜΕΝΟ (όνομα + ασφαλιστής)
+
+2) ΠΙΝΑΚΑΣ ΣΥΓΚΡΙΣΗΣ:
+   • Στήλες: ΠΑΡΟΧΗ | ΤΡΕΧΟΝ | ΠΡΟΤΕΙΝΟΜΕΝΟ | ΕΤΥΜΗΓΟΡΙΑ
+   • Χωρισμένος σε ενότητες με υπότιτλους «■ ΟΝΟΜΑ ΕΝΟΤΗΤΑΣ» (κεφαλαία, χρωματιστά)
+   • Στήλη «ΕΤΥΜΗΓΟΡΙΑ»: «✓ ΤΡΕΧΟΝ» (πράσινο φόντο), «✓ ΠΡΟΤΕΙΝΟΜΕΝΟ» (μπλε φόντο), «= ΙΣΟΠΑΛΙΑ» (γκρι)
+
+3) ΣΥΝΟΨΗ ΝΙΚΗΤΩΝ (μετά τον πίνακα, πριν τη σύσταση):
+   • «ΤΡΕΧΟΝ ΥΠΕΡΤΕΡΕΙ σε: X κριτήρια»
+   • «ΠΡΟΤΕΙΝΟΜΕΝΟ ΥΠΕΡΤΕΡΕΙ σε: Y κριτήρια»
+   • «ΙΣΟΠΑΛΙΑ σε: Z κριτήρια»
+
+4) ΣΥΣΤΑΣΗ HAL:
+   • «Τελική απόφαση: ΔΙΑΤΗΡΗΣΗ ΤΡΕΧΟΝΤΟΣ» (ή ΑΛΛΑΓΗ) — με έντονη γραμματοσειρά
+   • «Λόγοι:» — αριθμημένη λίστα ① ② ③ ④ ... με σύντομη αιτιολόγηση η καθεμία
+   • «Πού είναι καλύτερη η άλλη επιλογή:» — με ✔ bullets
+   • «Σημαντική επιφύλαξη:» — αν τα PDFs είναι ελλιπή ή λείπουν σελίδες, ΓΡΑΨΕ ΤΟ ΡΗΤΑ εδώ
+
+5) ΥΠΟΣΕΛΙΔΟ:
+   • «Εκπονήθηκε από HAL / Ashlar Insurance · ashlar-assurance.com»
+   • Ημερομηνία
+""" + _HAL_FONT_BLOCK + """
+═══ ΤΕΛΙΚΕΣ ΟΔΗΓΙΕΣ ═══
+
+• Σελίδα Α4 portrait (ή landscape αν χρειάζεται για πλάτος πίνακα).
+• ΌΛΑ ΤΑ ΟΝΟΜΑΤΑ ΕΝΟΤΗΤΩΝ ΚΑΙ ΕΤΥΜΗΓΟΡΙΕΣ ΣΤΑ ΕΛΛΗΝΙΚΑ. Οι αριθμοί (€, ηλικίες) μένουν όπως είναι.
+• Στείλε το PDF πίσω με: echo "===FILE:sygkrisi_asfaliseon.pdf===" && base64 sygkrisi_asfaliseon.pdf && echo "===ENDFILE==="
+• ΠΡΩΤΑ γράψε στο chat 3-4 γραμμές: ποιους τύπους ασφάλισης βρήκες, πόσα PDFs ανέλυσες, τι θα παράγεις. ΜΕΤΑ τρέξε το script.
+• Αν λείπει ουσιαστική πληροφορία από κάποιο PDF (π.χ. έχεις μόνο 6 σελίδες από 59), αυτό πρέπει να αναφερθεί στην επιφύλαξη — ποτέ μην επινοείς δεδομένα για να γεμίσεις τον πίνακα."""
+
+
+_HAL_COMPARISON_PROMPT_EN = """Compare the attached insurance policies in depth and produce an official comparison PDF in ENGLISH. Follow the methodology and structure below strictly. You MUST use code execution with ReportLab — do not simply present a table in chat.
+
+═══ ANALYSIS METHODOLOGY ═══
+(Explain it in the first 3-4 lines of your reply so the user understands what you're doing.)
+
+A) Detect the insurance type (travel, health, motor, home, life) from the PDFs.
+B) Split the comparison into logical sections appropriate for the type. Examples:
+   • TRAVEL: Policy Structure & Insurer · Excesses · Emergency Medical & Repatriation · Cancellation & Curtailment · Travel Delay & Disruption · Baggage & Personal Effects · Money, Documents & Cards · Personal Accident · Liability & Legal · Optional Covers · Claims & Administration
+   • HEALTH: Inpatient (Hospital) Cover · Outpatient · Diagnostics (MRI/CT/PET) · Dental · Pharmacy · Psychiatric · Physiotherapy · Maternity · Geographic Coverage · Excesses & Deductibles · Provider Network
+   • MOTOR: Third Party Liability · Own Damage · Theft · Fire · Natural Perils · Roadside Assistance · Legal Protection · No-Claims Discount Protection
+C) For EACH line, compare numerically and tag the winner:
+   • "✓ CURRENT" — if the current policy has the better limit/coverage
+   • "✓ PROPOSED" — if the proposed policy is better
+   • "= TIE" — when they are equivalent or near-equal
+   • If information is missing from a PDF: write "Not stated in extracted wording" — DO NOT invent numbers.
+D) At the end, count winners and make a final recommendation ("RETAIN CURRENT" or "SWITCH TO PROPOSED"). Justify it with numbered reasons ① ② ③ ...
+
+═══ PDF STRUCTURE ═══
+
+1) HEADER:
+   • Title: "INSURANCE POLICY COMPARISON" (with ✈/⚕/🚗 symbol per type)
+   • Subtitle: "Prepared by Ashlar Insurance"
+   • Client details (name, age) if stated in the PDFs
+   • Two columns at top: CURRENT (product name + insurer) | PROPOSED (name + insurer)
+
+2) COMPARISON TABLE:
+   • Columns: BENEFIT | CURRENT | PROPOSED | VERDICT
+   • Split into sections with subheaders "■ SECTION NAME" (uppercase, coloured)
+   • VERDICT column: "✓ CURRENT" (green bg), "✓ PROPOSED" (blue bg), "= TIE" (grey)
+
+3) WINNER SUMMARY (after table, before recommendation):
+   • "CURRENT wins on: X criteria"
+   • "PROPOSED wins on: Y criteria"
+   • "TIE / EQUIVALENT: Z criteria"
+
+4) HAL RECOMMENDATION:
+   • "Overall verdict: RETAIN CURRENT" (or SWITCH) — bold
+   • "Reasons:" — numbered list ① ② ③ ④ ... with short justification each
+   • "Where the other option is genuinely better:" — with ✔ bullets
+   • "Key caveat:" — if PDFs are partial or pages are missing, STATE IT EXPLICITLY here
+
+5) FOOTER:
+   • "Prepared by HAL / Ashlar Insurance · ashlar-assurance.com"
+   • Date
+""" + _HAL_FONT_BLOCK + """
+═══ FINAL INSTRUCTIONS ═══
+
+• A4 portrait (or landscape if the table needs the width).
+• ALL section names and verdict markers in ENGLISH. Numeric values (€, ages) stay as-is. Note: the font block above is still required because client names, insurer names, or policy product names may contain Greek characters even in an English-language PDF.
+• Emit the PDF with: echo "===FILE:insurance_comparison.pdf===" && base64 insurance_comparison.pdf && echo "===ENDFILE==="
+• FIRST write 3-4 lines in chat: what insurance type you detected, how many PDFs you analysed, what you will produce. THEN run the script.
+• If substantive information is missing from a PDF (e.g. you only have 6 pages of a 59-page wording), this must be stated in the Key Caveat section — never fabricate numbers to fill the table."""
+
+
+def _hal_build_api_messages(chat_history):
+    """
+    Translate st.session_state.chat_history into the messages list for the
+    Anthropic API. Plain text messages stay strings. Messages with an
+    "attachments" field get expanded into a list of content blocks:
+      - PDFs: smart-extracted to text if large (saves tokens), otherwise sent
+        as a base64 `document` block so Claude reads them natively.
+      - Images: base64 `image` blocks.
+      - Text-ish (txt/csv/json/md): inlined as a labelled text block.
+    """
+    api_messages = []
+    for m in chat_history:
+        atts = m.get("attachments") or []
+        if not atts:
+            api_messages.append({"role": m["role"], "content": m["content"]})
+            continue
+
+        blocks = []
+        for fname, fbytes, mime in atts:
+            if mime == "application/pdf":
+                extracted = None
+                try:
+                    from extraction import smart_pdf_to_text
+                    extracted = smart_pdf_to_text(fbytes, fname)
+                except Exception:
+                    extracted = None
+                if extracted:
+                    blocks.append({"type": "text", "text": extracted})
+                else:
+                    blocks.append({
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": base64.standard_b64encode(fbytes).decode("utf-8"),
+                        },
+                    })
+            elif mime.startswith("image/"):
+                blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime,
+                        "data": base64.standard_b64encode(fbytes).decode("utf-8"),
+                    },
+                })
+            else:
+                # Treat as UTF-8 text. errors="replace" so a stray byte never
+                # breaks the whole turn — better degraded than dropped.
+                try:
+                    text = fbytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = fbytes.decode("utf-8", errors="replace")
+                blocks.append({
+                    "type": "text",
+                    "text": f"=== ATTACHED FILE: {fname} ===\n{text}\n=== END {fname} ===",
+                })
+
+        # User's actual prompt goes last so Claude sees the files first, then
+        # the question about them.
+        blocks.append({"type": "text", "text": m["content"] or "(no message text — see attached files)"})
+        api_messages.append({"role": m["role"], "content": blocks})
+    return api_messages
+
+
+def _hal_mime_for(filename: str, fallback: str) -> str:
+    """Streamlit's UploadedFile.type is sometimes empty or generic; pin it from
+    the extension so PDF/image branches in _hal_build_api_messages fire correctly."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        "pdf":  "application/pdf",
+        "png":  "image/png",
+        "jpg":  "image/jpeg", "jpeg": "image/jpeg",
+        "gif":  "image/gif",
+        "webp": "image/webp",
+        "txt":  "text/plain",
+        "csv":  "text/csv",
+        "json": "application/json",
+        "md":   "text/markdown",
+    }.get(ext, fallback or "application/octet-stream")
+
+
 def render_hal_chat():
     import anthropic
 
@@ -568,6 +854,8 @@ You specialise in international health insurance brokerage. Key knowledge:
 - Pantelis Kourbelas is a CLIENT of Ashlar Insurance, NOT the operator.
 
 Respond in the language of the message. Be direct — produce outputs, not advice about producing them. For emails and letters, write them fully ready to send.
+
+FILE ATTACHMENTS — users can attach multiple files (PDFs, images, CSV, TXT) to any message. When files are attached, treat the user's text as the question/task about those files. Common tasks include comparing two or more insurance quotes side-by-side, summarising a Terms & Conditions PDF, extracting numbers from screenshots, or building a recommendation from a stack of brochures. Do the task directly in the reply — produce the comparison table, the summary, the recommendation — don't send the user to a different module to do it.
 
 MEMORY — IMPORTANT:
 You have persistent memory of business conversations from the last 7 days (rolling window). This memory is automatically injected into your context below as "=== ROLLING MEMORY ===". USE IT actively.
@@ -628,7 +916,17 @@ Never mix lodge content with business sessions. Respond in Greek unless asked ot
         else:
             for msg in st.session_state.chat_history:
                 if msg["role"] == "user":
-                    st.chat_message("user").write(msg["content"])
+                    with st.chat_message("user"):
+                        atts = msg.get("attachments") or []
+                        if atts:
+                            chips = " &nbsp; ".join(
+                                f"📎 <code>{fn}</code>" for fn, _, _ in atts
+                            )
+                            st.markdown(
+                                f"<div style='font-size:12px;color:#7A6A5A;margin-bottom:4px;'>{chips}</div>",
+                                unsafe_allow_html=True,
+                            )
+                        st.write(msg["content"])
                 else:
                     st.chat_message("assistant").write(msg["content"])
 
@@ -758,7 +1056,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                             _r = _cl.messages.create(
                                 model="claude-sonnet-4-6", max_tokens=600,
                                 system=voice_system,
-                                messages=[{"role":m["role"],"content":m["content"]} for m in st.session_state.chat_history[-10:]]
+                                messages=_hal_build_api_messages(st.session_state.chat_history[-10:])
                             )
                             reply = _r.content[0].text
                         except Exception as e:
@@ -783,20 +1081,74 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                 else:
                     st.warning("No speech detected — try again.")
 
-    user_input = st.chat_input("Message HAL...")
-    if user_input:
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
-        if not is_private:
-            conv_ws = st.session_state.get("_conv_ws")
-            save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "user", user_input)
+    # ── FILE ATTACHMENTS ─────────────────────────────────────────────────────
+    # Always-visible panel above the chat input. Files staged here are sent
+    # with the next message and stay in chat history for follow-ups.
+    st.markdown(
+        "<div style='font-size:11px;font-weight:600;letter-spacing:2px;"
+        "text-transform:uppercase;color:#7A6A5A;margin:8px 0 4px;'>"
+        "📎 Attach files for next message</div>",
+        unsafe_allow_html=True,
+    )
+    _up_col, _stage_col = st.columns([3, 2])
+    with _up_col:
+        _uploaded = st.file_uploader(
+            "Drop quotes, screenshots, or text files here — then ask HAL anything about them",
+            type=["pdf", "png", "jpg", "jpeg", "gif", "webp", "txt", "csv", "json", "md"],
+            accept_multiple_files=True,
+            key=f"hal_file_uploader_{st.session_state.hal_uploader_nonce}",
+            label_visibility="visible",
+        )
+    # Re-stage on every rerun from whatever the uploader currently holds.
+    # (UploadedFile objects don't persist across reruns, so we snapshot their
+    #  bytes immediately. Same key + same files = same upload, no double-read.)
+    if _uploaded:
+        st.session_state.hal_pending_files = [
+            (f.name, f.getvalue(), _hal_mime_for(f.name, getattr(f, "type", "") or ""))
+            for f in _uploaded
+        ]
+    elif _uploaded is not None:
+        # Uploader rendered but empty (user removed everything) — clear stage.
+        st.session_state.hal_pending_files = []
+
+    with _stage_col:
+        pend = st.session_state.hal_pending_files
+        if pend:
+            total_kb = sum(len(b) for _, b, _ in pend) / 1024
+            st.markdown(
+                f"<div style='font-size:12px;color:#A89880;'>"
+                f"<b>{len(pend)} file(s) staged</b> · {total_kb:,.0f} KB total<br>"
+                + "<br>".join(f"📄 <code>{fn}</code>" for fn, _, _ in pend)
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button("Clear staged files", key="hal_clear_pending", use_container_width=True):
+                st.session_state.hal_pending_files = []
+                st.session_state.hal_uploader_nonce += 1
+                st.rerun()
+        else:
+            st.caption("No files staged. Drop PDFs / images / CSV / TXT on the left.")
+
+    # Quick-action prompt: tailor to whether files are staged
+    if st.session_state.hal_pending_files:
+        _placeholder = f"Ask HAL about your {len(st.session_state.hal_pending_files)} staged file(s)…"
+    else:
+        _placeholder = "Message HAL..."
+
+    # ── INFERENCE HELPER ─────────────────────────────────────────────────────
+    # Wrapped so both the chat-input submit path AND the retry button below
+    # can call it. Reads st.session_state.chat_history as-is, appends the
+    # assistant reply (or an error message) to it. Caller is responsible for
+    # st.rerun().
+    def _send_to_hal():
         if not api_key:
             st.session_state.chat_history.append({"role": "assistant", "content": "⚠️ No API key found. Add Claude_API_Key to your Streamlit secrets."})
-        else:
-            with st.spinner("HAL is thinking..."):
-                try:
-                    client = anthropic.Anthropic(api_key=api_key)
-                    messages = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat_history]
-                    code_exec_system = system + """
+            return
+        with st.spinner("HAL is thinking..."):
+            try:
+                client = anthropic.Anthropic(api_key=api_key)
+                messages = _hal_build_api_messages(st.session_state.chat_history)
+                code_exec_system = system + """
 
 CODE EXECUTION — you have a sandboxed Python/Bash environment (no internet access inside it).
 You MUST use it — not just describe what code would do — whenever the user asks for:
@@ -808,55 +1160,175 @@ back the finished artifact. After creating a file in the sandbox, ALWAYS emit it
   echo "===FILE:report.pdf===" && base64 report.pdf && echo "===ENDFILE==="
 so the surrounding application can detect, decode, and offer it as a download. Do this for every file
 you create that the user should receive. If you find yourself about to write a code block in your text
-reply for the user to copy, stop — run it in the sandbox instead."""
+reply for the user to copy, stop — run it in the sandbox instead.
+
+IMPORTANT — if the ROLLING MEMORY section above contains earlier HAL replies that pasted Python/code as
+text instead of running it, those are recorded mistakes from before code execution was wired up. Do NOT
+treat them as a style to follow. This instruction always overrides that pattern, no matter how many
+times it appears in memory or chat history above."""
+                response = client.beta.messages.create(
+                    model="claude-sonnet-4-6", max_tokens=8192,
+                    system=code_exec_system, messages=messages,
+                    tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                    betas=["code-execution-2025-08-25"],
+                )
+                all_blocks = list(response.content)
+
+                # Code execution on a non-trivial task (e.g. building a multi-section PDF) can
+                # pause mid-turn; resubmitting lets Claude continue rather than the user seeing a
+                # cut-off result. Accumulate blocks from every turn — the file/text Claude produced
+                # before a pause must not be dropped when a later turn's response replaces `response`.
+                _continue_attempts = 0
+                while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
+                    messages = messages + [{"role": "assistant", "content": response.content}]
                     response = client.beta.messages.create(
                         model="claude-sonnet-4-6", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
                         betas=["code-execution-2025-08-25"],
                     )
-                    all_blocks = list(response.content)
+                    all_blocks.extend(response.content)
+                    _continue_attempts += 1
 
-                    # Code execution on a non-trivial task (e.g. building a multi-section PDF) can
-                    # pause mid-turn; resubmitting lets Claude continue rather than the user seeing a
-                    # cut-off result. Accumulate blocks from every turn — the file/text Claude produced
-                    # before a pause must not be dropped when a later turn's response replaces `response`.
-                    _continue_attempts = 0
-                    while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
-                        messages = messages + [{"role": "assistant", "content": response.content}]
-                        response = client.beta.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=8192,
-                            system=code_exec_system, messages=messages,
-                            tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
-                            betas=["code-execution-2025-08-25"],
-                        )
-                        all_blocks.extend(response.content)
-                        _continue_attempts += 1
+                reply_parts = []
+                generated_files = []  # list of (filename, raw_bytes)
+                for block in all_blocks:
+                    if getattr(block, "type", None) == "text":
+                        reply_parts.append(block.text)
+                    elif getattr(block, "type", None) == "bash_code_execution_tool_result":
+                        content = getattr(block, "content", None)
+                        stdout = getattr(content, "stdout", "") if content else ""
+                        for fname, b64data in re.findall(
+                            r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
+                        ):
+                            try:
+                                generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
+                            except Exception:
+                                pass  # malformed emit — skip, text reply still shows below
 
-                    reply_parts = []
-                    generated_files = []  # list of (filename, raw_bytes)
-                    for block in all_blocks:
-                        if getattr(block, "type", None) == "text":
-                            reply_parts.append(block.text)
-                        elif getattr(block, "type", None) == "bash_code_execution_tool_result":
-                            content = getattr(block, "content", None)
-                            stdout = getattr(content, "stdout", "") if content else ""
-                            for fname, b64data in re.findall(
-                                r'===FILE:(.+?)===\n(.*?)\n===ENDFILE===', stdout or "", re.DOTALL
-                            ):
-                                try:
-                                    generated_files.append((fname.strip(), base64.b64decode(b64data.strip())))
-                                except Exception:
-                                    pass  # malformed emit — skip, text reply still shows below
+                reply = "\n".join(reply_parts).strip() or "(no text response)"
+                st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                st.session_state["hal_last_files"] = generated_files  # replace, even if empty — avoid showing stale files from a prior turn
+                if not is_private:
+                    conv_ws = st.session_state.get("_conv_ws")
+                    save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", reply)
+            except Exception as e:
+                st.session_state.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {str(e)}"})
 
-                    reply = "\n".join(reply_parts).strip() or "(no text response)"
-                    st.session_state.chat_history.append({"role": "assistant", "content": reply})
-                    st.session_state["hal_last_files"] = generated_files  # replace, even if empty — avoid showing stale files from a prior turn
-                    if not is_private:
-                        conv_ws = st.session_state.get("_conv_ws")
-                        save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "assistant", reply)
-                except Exception as e:
-                    st.session_state.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {str(e)}"})
+    # ── BILINGUAL COMPARISON QUICK-PROMPT ────────────────────────────────────
+    # One-click PDF comparison button, available in two languages. Each tab
+    # shows the methodology explainer in that language and a button that sends
+    # the matching structured prompt via _send_to_hal(). Same submission flow
+    # for both — factored into _submit_comparison() so we don't duplicate the
+    # snapshot / session-state / sheet-log / inference dance.
+    def _submit_comparison(prompt_body: str, lang_tag: str):
+        _atts_for_msg = list(st.session_state.hal_pending_files)
+        st.session_state.hal_pending_files = []
+        st.session_state.hal_uploader_nonce += 1
+
+        st.session_state.chat_history.append({
+            "role": "user",
+            "content": prompt_body,
+            "attachments": _atts_for_msg,
+        })
+        if not is_private:
+            conv_ws = st.session_state.get("_conv_ws")
+            # Sheet log records a short tag, not the 4 KB prompt — keeps the
+            # rolling-memory window clean for future sessions.
+            _log_text = (
+                f"[Quick-action: Insurance comparison → {lang_tag} PDF]\n"
+                "[attached: " + ", ".join(fn for fn, _, _ in _atts_for_msg) + "]"
+            )
+            save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "user", _log_text)
+        _send_to_hal()
+        st.rerun()
+
+    with st.expander("🇬🇷 / 🇬🇧  Insurance Comparison → PDF  ·  Σύγκριση Ασφαλιστηρίων → PDF", expanded=False):
+        _files_ready = bool(st.session_state.hal_pending_files)
+        _tab_el, _tab_en = st.tabs(["🇬🇷 Ελληνικά", "🇬🇧 English"])
+
+        with _tab_el:
+            st.markdown("""
+**Πώς λειτουργεί η ανάλυση**
+
+1. **Ανέβασε** τα PDFs στο πάνελ συνημμένων από πάνω — συνήθως το *τρέχον* συμβόλαιο του πελάτη και την *προτεινόμενη* προσφορά (μπορείς να βάλεις και περισσότερα από δύο).
+2. **Πάτησε το κουμπί παρακάτω**. Ο HAL:
+   - Εντοπίζει αυτόματα τον τύπο ασφάλισης (ταξιδιωτική / υγείας / αυτοκινήτου / κατοικίας) και διαλέγει τις σωστές ενότητες σύγκρισης.
+   - Σαρώνει κάθε παροχή και των δύο συμβολαίων, αντιπαραβάλλει αριθμητικά τα όρια.
+   - Χαρακτηρίζει νικητή ανά γραμμή: **✓ ΤΡΕΧΟΝ** / **✓ ΠΡΟΤΕΙΝΟΜΕΝΟ** / **= ΙΣΟΠΑΛΙΑ**.
+   - Μετράει τους νικητές και γράφει τελική **ΣΥΣΤΑΣΗ** (ΔΙΑΤΗΡΗΣΗ ή ΑΛΛΑΓΗ) με αριθμημένους λόγους.
+   - Παράγει επίσημο PDF μέσω code execution (ReportLab) — όχι απλό κείμενο στο chat.
+3. **Το PDF εμφανίζεται** ως κουμπί ⬇️ download κάτω από την απάντηση του HAL.
+
+> 🔤 **Γραμματοσειρές**: Ο HAL εντοπίζει αυτόματα Ελληνική γραμματοσειρά Unicode στο sandbox (DejaVuSans / Noto / Liberation), την εγγράφει στο ReportLab, και **επαληθεύει** το παραγόμενο PDF με PyMuPDF — αν εμφανιστούν «■» αντί για ά/έ/ή/ί/ό/ύ/ώ, ξαναπροσπαθεί με άλλη γραμματοσειρά μέχρι να βγει σωστά.
+
+> ⚠️ Αν τα PDFs είναι ελλιπή, ο HAL το δηλώνει ρητά στην επιφύλαξη — δεν επινοεί νούμερα που δεν υπάρχουν.
+""")
+            if not _files_ready:
+                st.info("⬆️ Ανέβασε πρώτα τα PDFs στο πάνελ συνημμένων από πάνω — μετά πάτα το κουμπί.")
+            if st.button(
+                "🚀 Δημιουργία PDF Σύγκρισης (Ελληνικά)",
+                key="hal_pdf_btn_el",
+                type="primary",
+                use_container_width=True,
+                disabled=not _files_ready,
+                help="Στέλνει το δομημένο prompt στον HAL με τα ανεβασμένα PDFs και παράγει το PDF στα Ελληνικά.",
+            ):
+                _submit_comparison(_HAL_COMPARISON_PROMPT_EL, "Greek")
+
+        with _tab_en:
+            st.markdown("""
+**How the analysis works**
+
+1. **Upload** PDFs into the attachments panel above — usually the client's *current* policy plus the *proposed* offer (you can include more than two).
+2. **Click the button below**. HAL will:
+   - Auto-detect the insurance type (travel / health / motor / home) and pick the right comparison sections.
+   - Scan every benefit on both policies and numerically compare the limits.
+   - Tag a per-line winner: **✓ CURRENT** / **✓ PROPOSED** / **= TIE**.
+   - Tally winners and write a final **RECOMMENDATION** (RETAIN or SWITCH) with numbered reasons.
+   - Produce an official PDF via code execution (ReportLab) — not just a table in chat.
+3. The **PDF appears** as a ⬇️ download button below HAL's reply.
+
+> 🔤 **Fonts**: Even in English output, HAL still discovers a Greek-capable Unicode font (DejaVuSans / Noto / Liberation) and registers it in ReportLab, because client names, insurer names, or product names often contain Greek characters. The rendered PDF is **verified with PyMuPDF** — if "■" appears instead of Greek diacritics (ά/έ/ή/ί/ό/ύ/ώ), HAL retries with a different font until the verification passes.
+
+> ⚠️ If the PDFs are partial, HAL states this explicitly in the Key Caveat — it does not fabricate numbers that aren't there.
+""")
+            if not _files_ready:
+                st.info("⬆️ Upload PDFs in the attachments panel above first — then click the button.")
+            if st.button(
+                "🚀 Generate Comparison PDF (English)",
+                key="hal_pdf_btn_en",
+                type="primary",
+                use_container_width=True,
+                disabled=not _files_ready,
+                help="Sends the structured prompt to HAL with the staged PDFs and produces the PDF in English.",
+            ):
+                _submit_comparison(_HAL_COMPARISON_PROMPT_EN, "English")
+
+    user_input = st.chat_input(_placeholder)
+    if user_input:
+        # Snapshot whatever's staged right now, then clear the stage so the next
+        # turn starts fresh (and bump the uploader key so the widget remounts empty).
+        _atts_for_msg = list(st.session_state.hal_pending_files)
+        st.session_state.hal_pending_files = []
+        if _atts_for_msg:
+            st.session_state.hal_uploader_nonce += 1
+
+        _user_msg = {"role": "user", "content": user_input}
+        if _atts_for_msg:
+            _user_msg["attachments"] = _atts_for_msg
+        st.session_state.chat_history.append(_user_msg)
+
+        if not is_private:
+            conv_ws = st.session_state.get("_conv_ws")
+            # Sheet log: append a note about attachments so the memory window
+            # later shows "user asked X with these files" rather than orphaned text.
+            _log_text = user_input
+            if _atts_for_msg:
+                _log_text += "\n[attached: " + ", ".join(fn for fn, _, _ in _atts_for_msg) + "]"
+            save_message_to_sheet(conv_ws, "business", st.session_state.session_id, "user", _log_text)
+
+        _send_to_hal()
         st.rerun()
 
     if st.session_state.get("hal_last_files"):
@@ -865,9 +1337,41 @@ reply for the user to copy, stop — run it in the sandbox instead."""
             st.download_button(f"⬇️ {fname}", data=fbytes, file_name=fname, key=f"dl_{_i}_{fname}")
 
     if st.session_state.chat_history:
-        if st.button("🗑 Clear conversation", key="clear_chat"):
-            st.session_state.chat_history = []
-            st.rerun()
+        # Retry/Regenerate button — covers two failure modes:
+        #   1. HAL didn't reply at all (last message is from the user)        → "Retry"
+        #   2. HAL replied but it was cut off, errored, or unhelpful          → "Regenerate"
+        # Pops any trailing assistant message(s) so _send_to_hal re-runs from
+        # the same user turn without duplicating it. The previous user input
+        # is NOT re-logged to Sheets (it was logged when first sent), so no
+        # duplicate user rows; only the new assistant reply gets logged.
+        _has_user_msg  = any(m["role"] == "user" for m in st.session_state.chat_history)
+        _last_role     = st.session_state.chat_history[-1]["role"]
+        _retry_label   = "🔄 Retry — get HAL's response" if _last_role == "user" else "🔄 Regenerate response"
+        _col_retry, _col_clear = st.columns(2)
+        with _col_retry:
+            if st.button(
+                _retry_label,
+                key="hal_retry",
+                use_container_width=True,
+                disabled=not _has_user_msg,
+                help="If HAL was cut off, didn't respond, or you want a different answer — click to re-run the last message.",
+            ):
+                # Strip trailing assistant turn(s) so chat_history ends on the
+                # user message we want HAL to answer.
+                while st.session_state.chat_history and st.session_state.chat_history[-1]["role"] == "assistant":
+                    st.session_state.chat_history.pop()
+                # Drop any files HAL produced last turn — they belong to the
+                # reply we're discarding, not the new one we're about to make.
+                st.session_state["hal_last_files"] = []
+                _send_to_hal()
+                st.rerun()
+        with _col_clear:
+            if st.button("🗑 Clear conversation", key="clear_chat", use_container_width=True):
+                st.session_state.chat_history = []
+                st.session_state.hal_pending_files = []
+                st.session_state.hal_uploader_nonce += 1
+                st.session_state["hal_last_files"] = []
+                st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
