@@ -998,9 +998,26 @@ with fitz and confirm "άέή" appear in the extracted text — if "■" shows u
 Helvetica somewhere.
 
 SINGLE-SCRIPT EXECUTION — when producing a non-trivial PDF, put font setup, content build, AND the
-base64 emission in ONE Python script. Do NOT write a chat sentence like "now building the PDF" between
-code cells — that wastes a turn and you may not get a second one. Run the whole pipeline top-to-bottom
-in a single sandbox call, ending with the ===FILE:===/===ENDFILE=== shell emission.
+base64 emission in ONE Python script run via code_execution. Run the whole pipeline top-to-bottom in
+one sandbox call, ending with the ===FILE:===/===ENDFILE=== shell emission.
+
+NO ANNOUNCE-AND-STOP — CRITICAL. When the user wants a file/PDF/report, DO NOT write a sentence like
+"Εκτελώ τώρα το script...", "Now running the bootstrap...", "Let me build the PDF..." and then end
+your turn. The user CANNOT see your intentions — they only see what you produce. Saying "I will now
+do X" without then invoking code_execution in the SAME turn = task abandoned, blank screen for the user.
+
+Correct pattern:
+  ✅ 1-3 line preamble (what type, what files, what you'll produce) → immediately invoke code_execution
+     in the SAME response → that single tool call runs the entire pipeline → file emerges.
+  ✅ OR no preamble at all — just invoke code_execution directly.
+
+Wrong pattern (DO NOT DO THIS):
+  ❌ Preamble → "Εκτελώ πρώτα το X:" / "Now running:" / "Let me start..." → end of turn, no tool call.
+  ❌ Multiple code_execution calls with chat narration between them ("OK font done, now building...").
+
+If you ever feel the urge to write "now I will run / execute / build / create" — STOP writing prose
+and invoke code_execution instead. Your tool calls ARE your demonstration of work; prose announcements
+of tool calls are wasted tokens that end the turn before any work happens.
 
 IMPORTANT — if the ROLLING MEMORY section above contains earlier HAL replies that pasted Python/code as
 text instead of running it, those are recorded mistakes from before code execution was wired up. Do NOT
@@ -1029,6 +1046,66 @@ times it appears in memory or chat history above."""
                     )
                     all_blocks.extend(response.content)
                     _continue_attempts += 1
+
+                # ── ANNOUNCE-AND-STOP RECOVERY ────────────────────────────────────
+                # HAL sometimes writes "Εκτελώ τώρα..." / "Now running..." and then ends
+                # the turn WITHOUT invoking code_execution at all. From the user's side
+                # this looks like HAL ghosted them. The pause_turn loop above doesn't
+                # help — stop_reason is "end_turn", not "pause_turn". Detect this by
+                # checking whether any tool-use blocks were emitted; if not but the
+                # text suggests work was about to happen, send an explicit nudge.
+                _intent_phrases = (
+                    "εκτελώ", "θα δημιουργήσ", "θα παράγ", "θα φτιάξ", "θα χτίσ",
+                    "ας εκτελέσ", "ας τρέξ", "ας δημιουργήσ", "let me", "i'll build",
+                    "i'll create", "i'll run", "i will build", "i will run", "i will create",
+                    "now building", "now running", "now creating", "now executing",
+                    "running ", "executing ", "starting ", "building the",
+                )
+                def _has_tool_activity(blocks):
+                    return any(getattr(b, "type", "") in (
+                        "server_tool_use",
+                        "bash_code_execution_tool_result",
+                        "code_execution_tool_result",
+                    ) for b in blocks)
+                _nudge_attempts = 0
+                while (not _has_tool_activity(all_blocks)
+                       and getattr(response, "stop_reason", None) == "end_turn"
+                       and _nudge_attempts < 2):
+                    _text_so_far = " ".join(
+                        getattr(b, "text", "") for b in all_blocks
+                        if getattr(b, "type", "") == "text"
+                    ).lower()
+                    if not any(p in _text_so_far for p in _intent_phrases):
+                        break  # no intent to build → don't nudge; HAL legitimately just chatted
+                    messages = messages + [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": (
+                            "Συνέχισε — εκτέλεσε ΤΩΡΑ το script στο sandbox και παρήγαγε το αρχείο. "
+                            "Continue — actually invoke code_execution now and produce the file. "
+                            "Μην γράψεις άλλη πρόζα. No more prose. "
+                            "Run the full pipeline (font bootstrap → build → ===FILE:===/===ENDFILE=== emission) "
+                            "in ONE code_execution call right now."
+                        )},
+                    ]
+                    response = client.beta.messages.create(
+                        model="claude-sonnet-4-6", max_tokens=8192,
+                        system=code_exec_system, messages=messages,
+                        tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                        betas=["code-execution-2025-08-25"],
+                    )
+                    all_blocks.extend(response.content)
+                    _nudge_attempts += 1
+                    # If this continuation itself paused, drain the pause_turn loop again.
+                    while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
+                        messages = messages + [{"role": "assistant", "content": response.content}]
+                        response = client.beta.messages.create(
+                            model="claude-sonnet-4-6", max_tokens=8192,
+                            system=code_exec_system, messages=messages,
+                            tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
+                            betas=["code-execution-2025-08-25"],
+                        )
+                        all_blocks.extend(response.content)
+                        _continue_attempts += 1
 
                 reply_parts = []
                 generated_files = []  # list of (filename, raw_bytes)
