@@ -1542,14 +1542,19 @@ Never invent missing limits. Do not say you are creating a PDF; just write the r
                     _sum_sys = base_system + f"""
 
 PDF REPORT MODE — CLIENT EXECUTIVE SUMMARY. Do NOT use code execution.
+This is a DIFFERENT, SHORTER document type than the detailed report. The following rules
+OVERRIDE and REPLACE the "INSURANCE COMPARISON REPORTS" / per-section-table instructions
+above for this document ONLY — do not apply the lettered Section A/B/C/... table structure,
+the per-line VERDICT table format, or the full "Key Caveat / Σημαντική Επιφύλαξη" block here.
 Language: {_summary_lang}
-Structure (strictly in this order — no section tables):
+Structure (strictly in this order — no section tables, no lettered sections, no broker notes):
 1. Header: client name | current policy name + annual premium | alternative policy name + annual premium | annual saving
 2. RECOMMENDATION LINE: a single prominent line — e.g. "⚖ RECOMMENDATION: RETAIN Voyager Plus Supreme" or "⚖ ΣΎΣΤΑΣΗ: ΔΙΑΤΗΡΗΣΗ Voyager Plus Supreme"
-3. Reasons FOR the recommendation — numbered list, 4–5 reasons, each 2–3 lines of plain explanation (no jargon). Cover: medical screening certainty, disruption/abandonment cover, liability & legal, financial protection, winter sports if relevant.
-4. "Where [Alternative] is genuinely better" — numbered list, 3 items max, 1–2 lines each. Cover: personal accident limits, baggage total, car hire waiver if purchased.
-5. Action step — one short paragraph telling the client exactly what to do next.
-Target length: 450–550 words. No section-by-section tables. No broker notes. Write as if explaining to a well-educated non-insurance client — clear, direct, no hedging.
+3. If the alternative premium is pre-medical-screening (or otherwise provisional), ONE short sentence flagging this immediately under the recommendation line — e.g. "Note: the alternative price is pre-screening and may change once medical conditions are formally assessed." Do NOT expand this into a multi-paragraph caveat or repeat condition-by-condition detail here — that belongs only in the detailed report's Broker Notes.
+4. Reasons FOR the recommendation — numbered list, 4–5 reasons, each 1–2 lines of plain explanation (no jargon, no restating the caveat). Cover: medical screening certainty, disruption/abandonment cover, liability & legal, financial protection, winter sports if relevant.
+5. "Where [Alternative] is genuinely better" — numbered list, 3 items max, 1 line each. Cover: personal accident limits, baggage total, car hire waiver if purchased.
+6. Action step — one short paragraph (2-3 lines max) telling the client exactly what to do next.
+Target length: 350–450 words PER LANGUAGE SECTION (so ~700–900 words total if bilingual). This is a hard ceiling — this document must fit on one page. No section-by-section tables. No Markdown tables at all. No broker notes. Write as if explaining to a well-educated non-insurance client — clear, direct, no hedging, no repetition between the caveat sentence and the reasons list.
 Do not say you are creating a PDF; just write the summary content.
 """
                     st.caption("PDF: building detailed report...")
@@ -1565,7 +1570,7 @@ Do not say you are creating a PDF; just write the summary content.
 
                     st.caption("PDF: building client summary...")
                     _r2 = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=2048,
+                        model="claude-sonnet-4-6", max_tokens=4096,
                         system=_sum_sys, messages=pdf_messages,
                         betas=["files-api-2025-04-14"],
                     )
@@ -1573,6 +1578,11 @@ Do not say you are creating a PDF; just write the summary content.
                         getattr(b, "text", "") for b in _r2.content
                         if getattr(b, "type", "") == "text"
                     ).strip() or "Summary could not be generated."
+                    if getattr(_r2, "stop_reason", None) == "max_tokens":
+                        _summary_text += (
+                            "\n\n[HAL NOTICE: this summary hit the output length limit and may be "
+                            "truncated. Regenerate, or check the detailed report for the complete analysis.]"
+                        )
 
                     _ts = datetime.now().strftime("%Y%m%d_%H%M")
                     _fd = "HAL_Report_Detailed_"  + _ts + ".pdf"
