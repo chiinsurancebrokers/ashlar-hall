@@ -10,7 +10,8 @@
 1. Push this folder to a GitHub repo (e.g. `ashlar-hal`)
 2. Go to [share.streamlit.io](https://share.streamlit.io) → New app → select repo
 3. Main file: `app.py`
-4. Add secrets (Settings → Secrets):
+4. **Advanced settings → Python version: 3.12** (3.14 may lack wheels for pymupdf/Pillow/python-pptx)
+5. Add secrets (Settings → Secrets) — full list in `.streamlit/secrets.toml.template`:
 
 ```toml
 Claude_API_Key = "sk-ant-api03-..."
@@ -65,7 +66,7 @@ streamlit run app.py
 
 ## Tech Stack
 - **Frontend**: Streamlit
-- **AI**: Anthropic Claude (claude-sonnet-4-6)
+- **AI**: Anthropic Claude (claude-sonnet-5-5)
 - **PDF**: ReportLab, pypdf2
 - **PPT**: python-pptx
 - **Data**: pandas, Google Sheets via gspread
@@ -108,7 +109,7 @@ This package is a cleaned-up version of the original upload. Changes made:
 
 **Fixed**
 - `render_quotes()`: three `return` statements inside `with tab_live:` / `with tab_pdf:` were exiting the whole function early, which silently broke the "PDF → AI Extraction" and "Saved Results" tabs under several conditions. Restructured as `if/else` so each tab only skips its own content.
-- Standardized every hardcoded model string on `claude-sonnet-4-6` (previously split between that and the older dated snapshot `claude-sonnet-4-20250514` across 9 call sites in `app.py`). `config.py`'s shared `MODEL` constant updated too.
+- Standardized every hardcoded model string on `claude-sonnet-5-5` (previously split between that and the older dated snapshot `claude-sonnet-4-20250514` across 9 call sites in `app.py`). `config.py`'s shared `MODEL` constant updated too.
 - Added `try/except` around Anthropic API calls in `render_finance`, `render_health`, `render_apps`, and `render_pets` — these had none, so an invalid API key, rate limit, or network error would crash the entire page with a raw traceback instead of showing an error in that module.
 - Added missing/empty-input feedback (`st.error` / `st.warning`) to the "Generate" buttons in `render_finance`, `render_health`, `render_apps`, `render_pets`, `render_kira_nurse`, and `render_kira_pet_hal` — previously clicking these with no API key or empty required field did nothing visible.
 - Removed two dead `sym = _sym(...)` variables in `pptx_builder.py` (computed but never used).

@@ -60,7 +60,7 @@ def insurer_color(name: str) -> RGBColor:
 
 API_TIER = 1   # Άλλαξε σε 2 ή 3 αν έχεις υψηλότερο tier
 
-MODEL           = "claude-sonnet-4-6"
+MODEL           = "claude-sonnet-5-5"
 
 # Tier 1: 5 απόπειρες × (30s, 60s, 120s, 240s, 480s)
 # Tier 2: 4 απόπειρες × (15s, 30s, 60s, 120s)

@@ -899,7 +899,7 @@ function copyText(){if(!transcript)return;navigator.clipboard.writeText(transcri
                             _cl = _ant.Anthropic(api_key=api_key)
                             voice_system = system + "\n\nIMPORTANT FOR VOICE MODE: No markdown, no bullets. Complete sentences. Under 3 sentences unless essential."
                             _r = _cl.messages.create(
-                                model="claude-sonnet-4-6", max_tokens=600,
+                                model="claude-sonnet-5-5", max_tokens=600,
                                 system=voice_system,
                                 messages=_hal_build_api_messages(st.session_state.chat_history[-10:])
                             )
@@ -1559,7 +1559,7 @@ Do not say you are creating a PDF; just write the summary content.
 """
                     st.caption("PDF: building detailed report...")
                     _r1 = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=8192,
+                        model="claude-sonnet-5-5", max_tokens=8192,
                         system=_pdf_sys, messages=pdf_messages,
                         betas=["files-api-2025-04-14"],
                     )
@@ -1570,7 +1570,7 @@ Do not say you are creating a PDF; just write the summary content.
 
                     st.caption("PDF: building client summary...")
                     _r2 = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=4096,
+                        model="claude-sonnet-5-5", max_tokens=4096,
                         system=_sum_sys, messages=pdf_messages,
                         betas=["files-api-2025-04-14"],
                     )
@@ -1735,7 +1735,7 @@ text instead of running it, those are recorded mistakes from before code executi
 treat them as a style to follow. This instruction always overrides that pattern, no matter how many
 times it appears in memory or chat history above."""
                 response = client.beta.messages.create(
-                    model="claude-sonnet-4-6", max_tokens=8192,
+                    model="claude-sonnet-5-5", max_tokens=8192,
                     system=code_exec_system, messages=messages,
                     tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
                     betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
@@ -1764,7 +1764,7 @@ times it appears in memory or chat history above."""
                 while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
                     messages = messages + [{"role": "assistant", "content": _safe_assistant_text_content(response.content)}]
                     response = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=8192,
+                        model="claude-sonnet-5-5", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
                         betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
@@ -1813,7 +1813,7 @@ times it appears in memory or chat history above."""
                         )},
                     ]
                     response = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=8192,
+                        model="claude-sonnet-5-5", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
                         betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
@@ -1824,7 +1824,7 @@ times it appears in memory or chat history above."""
                     while getattr(response, "stop_reason", None) == "pause_turn" and _continue_attempts < 3:
                         messages = messages + [{"role": "assistant", "content": _safe_assistant_text_content(response.content)}]
                         response = client.beta.messages.create(
-                            model="claude-sonnet-4-6", max_tokens=8192,
+                            model="claude-sonnet-5-5", max_tokens=8192,
                             system=code_exec_system, messages=messages,
                             tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
                             betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
@@ -1980,7 +1980,7 @@ times it appears in memory or chat history above."""
                         )},
                     ]
                     response = client.beta.messages.create(
-                        model="claude-sonnet-4-6", max_tokens=8192,
+                        model="claude-sonnet-5-5", max_tokens=8192,
                         system=code_exec_system, messages=messages,
                         tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
                         betas=["code-execution-2025-08-25", "files-api-2025-04-14"],
@@ -3106,7 +3106,7 @@ Key details: {context}
 Produce the full document, ready to send. Include subject line if it's an email."""
                 try:
                     client = anthropic.Anthropic(api_key=get_api_key())
-                    r = client.messages.create(model="claude-sonnet-4-6", max_tokens=1500,
+                    r = client.messages.create(model="claude-sonnet-5-5", max_tokens=1500,
                         messages=[{"role":"user","content":prompt}])
                     st.markdown("---")
                     st.markdown("### Generated Document")
@@ -3205,7 +3205,7 @@ def render_market():
                 prompt=f"""You are a specialist insurance market analyst for Ashlar Insurance, Athens.\nResearch brief: {query}\nMarkets: {', '.join(market)}\nProducts: {', '.join(product)}\nProvide: 1. Key niche opportunities 2. Underserved segments 3. Competitive landscape 4. Next steps 5. Specific products/carriers. Be concrete and actionable."""
                 try:
                     client=anthropic.Anthropic(api_key=get_api_key())
-                    r=client.messages.create(model="claude-sonnet-4-6",max_tokens=2000,messages=[{"role":"user","content":prompt}])
+                    r=client.messages.create(model="claude-sonnet-5-5",max_tokens=2000,messages=[{"role":"user","content":prompt}])
                     st.markdown("### Analysis"); st.markdown(r.content[0].text)
                 except Exception as e: st.error(f"Error: {e}")
 
@@ -3225,7 +3225,7 @@ def render_lodge():
                 prompt=f"""You are the secretary of Στ∴ ΑΚΡΟΠΟΛΙΣ υπ' αρ. 84 (Grand Lodge of Greece, ΜΣΤΕ).\nDraft a {doc_type}:\nAddressed to: {addressee}\nSubject: {subject}\nKey content: {body}\nRules: Contemporary Greek Tektonic, ∴ notation, closing: Μ.τ.Τ.Α.Α. / Κατ' εντολήν του Σεβ∴ / Ο Γραμμ∴ / Χρήστος Ιατρόπουλος / 6975900189\nFrom: st.akropolis.84@gmail.com"""
                 try:
                     client=anthropic.Anthropic(api_key=get_api_key())
-                    r=client.messages.create(model="claude-sonnet-4-6",max_tokens=1200,messages=[{"role":"user","content":prompt}])
+                    r=client.messages.create(model="claude-sonnet-5-5",max_tokens=1200,messages=[{"role":"user","content":prompt}])
                     st.markdown("---"); st.markdown("### Draft"); st.markdown(r.content[0].text)
                     st.download_button("📥 Download",r.content[0].text,file_name="lodge_document.txt")
                 except Exception as e: st.error(f"Error: {e}")
@@ -3279,7 +3279,7 @@ def render_finance():
                 with st.spinner("Thinking..."):
                     try:
                         client=anthropic.Anthropic(api_key=get_api_key())
-                        r=client.messages.create(model="claude-sonnet-4-6",max_tokens=1000,
+                        r=client.messages.create(model="claude-sonnet-5-5",max_tokens=1000,
                             system="You are a personal financial adviser for Christos Iatropoulos, a self-employed insurance broker in Greece. Provide practical, Greece-specific financial guidance.",
                             messages=[{"role":"user","content":fin_query}])
                         st.markdown(r.content[0].text)
@@ -3310,7 +3310,7 @@ def render_health():
                     prompt=f"""Design a {sessions}-day per week workout programme.\nGoal: {goal} | Level: {level} | Session: {duration} mins\nEquipment: {', '.join(equipment) if equipment else 'bodyweight'}\nLimitations: {notes or 'none'}\nProvide a full weekly plan with exercises, sets, reps, and rest periods. Include warm-up and cool-down. Make it progressive over 4 weeks."""
                     try:
                         client=anthropic.Anthropic(api_key=get_api_key())
-                        r=client.messages.create(model="claude-sonnet-4-6",max_tokens=1500,messages=[{"role":"user","content":prompt}])
+                        r=client.messages.create(model="claude-sonnet-5-5",max_tokens=1500,messages=[{"role":"user","content":prompt}])
                         st.markdown(r.content[0].text)
                     except Exception as e:
                         st.error(f"Error: {e}")
@@ -3326,7 +3326,7 @@ def render_health():
                 with st.spinner("..."):
                     try:
                         client=anthropic.Anthropic(api_key=get_api_key())
-                        r=client.messages.create(model="claude-sonnet-4-6",max_tokens=800,
+                        r=client.messages.create(model="claude-sonnet-5-5",max_tokens=800,
                             system="You are a personal health coach and wellness adviser. Always recommend professional medical consultation for medical conditions.",
                             messages=[{"role":"user","content":health_q}])
                         st.markdown(r.content[0].text)
@@ -3350,7 +3350,7 @@ def render_apps():
                 prompt=f"""Build a complete, working {app_type}:\n{description}\nRequirements: Production-ready, all imports, Greek font support for PDFs, read API key from st.secrets. Output only the code."""
                 try:
                     client=anthropic.Anthropic(api_key=get_api_key())
-                    r=client.messages.create(model="claude-sonnet-4-6",max_tokens=3000,messages=[{"role":"user","content":prompt}])
+                    r=client.messages.create(model="claude-sonnet-5-5",max_tokens=3000,messages=[{"role":"user","content":prompt}])
                     st.code(r.content[0].text,language="python")
                     st.download_button("📥 Download code",r.content[0].text,file_name="hal_generated_app.py")
                 except Exception as e:
@@ -3374,7 +3374,7 @@ def render_pets():
                 with st.spinner("..."):
                     try:
                         client=anthropic.Anthropic(api_key=get_api_key())
-                        r=client.messages.create(model="claude-sonnet-4-6",max_tokens=600,
+                        r=client.messages.create(model="claude-sonnet-5-5",max_tokens=600,
                             system="You write marketing content for petshealth.gr, a pet insurance broker in Greece. Tone: confident, warm, independent. Mention Kira Pet (kiraaipet.streamlit.app) when relevant.",
                             messages=[{"role":"user","content":f"Write a {platform} about: {topic}"}])
                         st.markdown(r.content[0].text)
@@ -3392,7 +3392,7 @@ def render_pets():
                 with st.spinner("..."):
                     try:
                         client=anthropic.Anthropic(api_key=get_api_key())
-                        r=client.messages.create(model="claude-sonnet-4-6",max_tokens=800,
+                        r=client.messages.create(model="claude-sonnet-5-5",max_tokens=800,
                             system="You are a pet insurance specialist for petshealth.gr, Greece. Recommend Safe Pet System as the most reliable option. Also know about Kira Pet (kiraaipet.streamlit.app).",
                             messages=[{"role":"user","content":q}])
                         st.markdown(r.content[0].text)
@@ -3588,7 +3588,7 @@ def render_kira_nurse():
             else:
                 import urllib.request,json as _json
                 prompt=(f"Write a short WhatsApp message in {'Greek' if c_lang=='Greek' else 'English'} to {c_name}, a client of Ashlar Insurance. Introduce Kira (https://kiraainurse.streamlit.app), a free AI health assistant. Warm and professional. Under 4 sentences. Include the link.")
-                body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":300,"messages":[{"role":"user","content":prompt}]}).encode()
+                body=_json.dumps({"model":"claude-sonnet-5-5","max_tokens":300,"messages":[{"role":"user","content":prompt}]}).encode()
                 req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 try:
                     with urllib.request.urlopen(req,timeout=20) as r: msg=_json.loads(r.read())["content"][0]["text"]
@@ -3661,7 +3661,7 @@ def render_chi_analyzer():
                                 st.warning(f"Could not read {pdf_file.name}: {e}"); continue
                             if not pdf_text.strip(): st.warning(f"{pdf_file.name}: no text found"); continue
                             extract_prompt=f'Extract insurance policy details. Return ONLY JSON:\n{{"policy_type":"motor/health/life/home/travel/pet/liability/other","insurer":"","policy_number":"","product":"","premium":"","currency":"EUR","expiry_date":"YYYY-MM-DD","coverage_summary":"","key_exclusions":"","deductible":""}}\nPOLICY:\n{pdf_text}'
-                            body=_j.dumps({"model":"claude-sonnet-4-6","max_tokens":800,"messages":[{"role":"user","content":extract_prompt}]}).encode()
+                            body=_j.dumps({"model":"claude-sonnet-5-5","max_tokens":800,"messages":[{"role":"user","content":extract_prompt}]}).encode()
                             req=_ur.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                             try:
                                 with _ur.urlopen(req,timeout=30) as r: result=_j.loads(r.read())["content"][0]["text"].strip()
@@ -3699,7 +3699,7 @@ def render_chi_analyzer():
             client_data={"name":a_name,"age":a_age,"profession":a_prof,"family":a_family,"income":a_income,"notes":a_notes,"has_property":a_prop,"has_vehicle":a_vehicle,"has_pets":a_pets,"has_children":a_kids,"is_expat":a_expat}
             prompt=_build_analyzer_prompt(client_data,st.session_state.an_policies,a_lang)
             with st.spinner("Analysing..."):
-                body=_j.dumps({"model":"claude-sonnet-4-6","max_tokens":3000,"system":"Είσαι έμπειρος ασφαλιστικός σύμβουλος στην Ελλάδα.","messages":[{"role":"user","content":prompt}]}).encode()
+                body=_j.dumps({"model":"claude-sonnet-5-5","max_tokens":3000,"system":"Είσαι έμπειρος ασφαλιστικός σύμβουλος στην Ελλάδα.","messages":[{"role":"user","content":prompt}]}).encode()
                 req=_ur.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 try:
                     with _ur.urlopen(req,timeout=60) as r:
@@ -3758,7 +3758,7 @@ def render_kira_pet_hal():
             else:
                 import urllib.request,json as _json
                 prompt=f"Write pet insurance content for petshealth.gr (Greek brand, Ashlar Insurance, carrier: Safe Pet System). Content: {content_type if not custom else custom}. Language: {lang}. Mention Kira Pet (kiraaipet.streamlit.app) when relevant. Professional, warm, genuine."
-                body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":1500,"messages":[{"role":"user","content":prompt}]}).encode()
+                body=_json.dumps({"model":"claude-sonnet-5-5","max_tokens":1500,"messages":[{"role":"user","content":prompt}]}).encode()
                 req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 with st.spinner("Writing..."):
                     try:
@@ -3775,7 +3775,7 @@ def render_kira_pet_hal():
                 st.warning("Enter a topic first.")
             else:
                 import urllib.request,json as _json
-                body=_json.dumps({"model":"claude-sonnet-4-6","max_tokens":600,"messages":[{"role":"user","content":f"Write a {platform} post for petshealth.gr about: {angle}. Greek language, English hashtags. Mention Kira Pet (kiraaipet.streamlit.app) if relevant."}]}).encode()
+                body=_json.dumps({"model":"claude-sonnet-5-5","max_tokens":600,"messages":[{"role":"user","content":f"Write a {platform} post for petshealth.gr about: {angle}. Greek language, English hashtags. Mention Kira Pet (kiraaipet.streamlit.app) if relevant."}]}).encode()
                 req=urllib.request.Request("https://api.anthropic.com/v1/messages",data=body,headers={"x-api-key":api_key,"anthropic-version":"2023-06-01","content-type":"application/json"})
                 with st.spinner("..."):
                     try:
